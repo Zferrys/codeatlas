@@ -1,0 +1,41 @@
+# Maven
+target/
+*.jar
+*.war
+*.class
+
+# Node
+node_modules/
+dist/
+.env.local
+*.log
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+*.log
+
+# Sensitive
+*.pem
+*.key
+.env
+application-local.yml
+
+# AI cache
+.ai-cache/
+
+# Plugin external jars
+plugins/*.jar
+!plugins/.gitkeep
+
+# Temp
+temp/
+tmp/

@@ -1,0 +1,111 @@
+server:
+  port: 8080
+  shutdown: graceful
+
+spring:
+  profiles:
+    active: dev
+  application:
+    name: codeatlas
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
+
+  # ---- DataSource / MySQL ----
+  datasource:
+    url: jdbc:mysql://127.0.0.1:3306/codeatlas?useUnicode=true&characterEncoding=utf8mb4&useSSL=false&serverTimezone=Asia/Shanghai
+    username: root
+    password: zph
+    driver-class-name: com.mysql.jdbc.Driver
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 5
+      idle-timeout: 300000
+      connection-timeout: 5000
+      max-lifetime: 1800000
+
+  # ---- Flyway ----
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    baseline-version: 1
+    locations: classpath:db/migration
+    table: flyway_schema_history
+    validate-on-migrate: true
+
+  # ---- Redis ----
+  redis:
+    host: 127.0.0.1
+    port: 6379
+    timeout: 3000ms
+    lettuce:
+      pool:
+        max-active: 8
+        max-idle: 8
+        min-idle: 0
+
+  # ---- File Upload ----
+  servlet:
+    multipart:
+      max-file-size: 50MB
+      max-request-size: 100MB
+
+# ---- MyBatis ----
+mybatis:
+  mapper-locations: classpath:mapper/*.xml
+  type-aliases-package: com.codeatlas.server.entity
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
+
+# ---- Actuator ----
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+      base-path: /actuator
+  endpoint:
+    health:
+      show-details: when-authorized
+      probes:
+        enabled: true
+  metrics:
+    export:
+      prometheus:
+        enabled: true
+    tags:
+      application: codeatlas
+
+# ---- Knife4j (Swagger) ----
+knife4j:
+  enable: true
+  setting:
+    language: zh-CN
+
+# ---- CodeAtlas 业务配置 ----
+codeatlas:
+  ai:
+    primary: claude
+    clients:
+      claude:
+        base-url: https://api.anthropic.com
+        model: claude-sonnet-4-6
+        max-tokens: 4096
+        temperature: 0.3
+      deepseek:
+        base-url: https://api.deepseek.com
+        model: deepseek-chat
+        max-tokens: 4096
+        temperature: 0.3
+  analysis:
+    max-file-size: 10485760
+    max-project-size: 524288000
+    timeout-minutes: 30
+    max-dependency-depth: 10
+    max-concurrent-scans: 3
+  security:
+    jwt:
+      expiration-hours: 24
+    rate-limit:
+      enabled: true
+      default-rps: 10
