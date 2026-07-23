@@ -28,7 +28,7 @@ public class ProjectController {
 
     @PostMapping
     @Operation(summary = "创建项目")
-    @PreAuthorize("hasAnyRole('ADMIN','ARCHITECT')")
+    @PreAuthorize("hasAnyRole('ADMIN','ARCHITECT','DEVELOPER')")
     @AuditLog(action = "CREATE_PROJECT", targetType = "PROJECT", targetIdExpression = "#result.data.id", detail = "创建项目")
     public ApiResponse<ProjectVO> createProject(@Valid @RequestBody CreateProjectRequest request,
                                                  @AuthenticationPrincipal CodeAtlasUserDetails principal) {
@@ -64,7 +64,7 @@ public class ProjectController {
 
     @PutMapping("/{id}")
     @Operation(summary = "更新项目")
-    @PreAuthorize("hasAnyRole('ADMIN','ARCHITECT')")
+    @PreAuthorize("hasAnyRole('ADMIN','ARCHITECT','DEVELOPER')")
     public ApiResponse<ProjectVO> updateProject(@PathVariable Long id,
                                                  @Valid @RequestBody UpdateProjectRequest request,
                                                  @AuthenticationPrincipal CodeAtlasUserDetails principal) {

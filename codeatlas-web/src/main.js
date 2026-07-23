@@ -6,6 +6,7 @@ import App from './App.vue'
 // Ant Design Vue
 import Antd from 'ant-design-vue'
 import 'ant-design-vue/dist/reset.css'
+import './styles/theme.css'
 
 const app = createApp(App)
 

@@ -1,0 +1,193 @@
+/* ---- 亮色主题（默认）---- */
+:root,
+[data-theme="light"] {
+  --color-bg-body: #f0f2f5;
+  --color-bg-component: #ffffff;
+  --color-bg-component-hover: #fafafa;
+  --color-bg-elevated: #ffffff;
+  --color-bg-input: #f5f5f5;
+  --color-border: #e8e8e8;
+  --color-border-light: #f0f0f0;
+
+  --color-text-primary: #1a1a2e;
+  --color-text-secondary: #555555;
+  --color-text-tertiary: #999999;
+  --color-text-placeholder: #bbbbbb;
+
+  --color-primary: #667eea;
+  --color-primary-hover: #5a6fd6;
+  --color-shadow: rgba(0, 0, 0, 0.04);
+  --color-shadow-hover: rgba(0, 0, 0, 0.08);
+
+  --ant-card-bg: #ffffff;
+  --ant-modal-bg: #ffffff;
+  --ant-table-bg: #ffffff;
+  --ant-input-bg: #ffffff;
+  --ant-dropdown-bg: #ffffff;
+  --ant-empty-color: #999;
+}
+
+/* ---- 暗色主题 ---- */
+[data-theme="dark"] {
+  --color-bg-body: #141414;
+  --color-bg-component: #1f1f1f;
+  --color-bg-component-hover: #2a2a2a;
+  --color-bg-elevated: #262626;
+  --color-bg-input: #2a2a2a;
+  --color-border: #333333;
+  --color-border-light: #2a2a2a;
+
+  --color-text-primary: #e8e8e8;
+  --color-text-secondary: #aaaaaa;
+  --color-text-tertiary: #777777;
+  --color-text-placeholder: #555555;
+
+  --color-primary: #8899f0;
+  --color-primary-hover: #a0aef5;
+  --color-shadow: rgba(0, 0, 0, 0.3);
+  --color-shadow-hover: rgba(0, 0, 0, 0.5);
+
+  --ant-card-bg: #1f1f1f;
+  --ant-modal-bg: #1f1f1f;
+  --ant-table-bg: #1f1f1f;
+  --ant-input-bg: #2a2a2a;
+  --ant-dropdown-bg: #262626;
+  --ant-empty-color: #666;
+}
+
+/* 页面底色跟随主题 */
+body {
+  background: var(--color-bg-body);
+  color: var(--color-text-primary);
+  transition: background 0.3s, color 0.3s;
+}
+
+/* ---- Ant Design 组件暗色适配 ---- */
+
+/* Card 背景 */
+[data-theme="dark"] .ant-card {
+  background: var(--ant-card-bg);
+}
+
+/* Modal 内容区 */
+[data-theme="dark"] .ant-modal-content {
+  background: var(--ant-modal-bg);
+}
+
+[data-theme="dark"] .ant-modal-header {
+  background: var(--ant-modal-bg);
+}
+
+/* Table */
+[data-theme="dark"] .ant-table {
+  background: var(--ant-table-bg);
+}
+
+[data-theme="dark"] .ant-table-thead > tr > th {
+  background: #262626;
+  color: var(--color-text-secondary);
+  border-bottom-color: var(--color-border);
+}
+
+[data-theme="dark"] .ant-table-tbody > tr > td {
+  border-bottom-color: var(--color-border);
+}
+
+[data-theme="dark"] .ant-table-tbody > tr:hover > td {
+  background: var(--color-bg-component-hover) !important;
+}
+
+/* Input / Select */
+[data-theme="dark"] .ant-input,
+[data-theme="dark"] .ant-input-search .ant-input,
+[data-theme="dark"] .ant-select-selector {
+  background: var(--ant-input-bg) !important;
+  border-color: var(--color-border) !important;
+  color: var(--color-text-primary) !important;
+}
+
+[data-theme="dark"] .ant-select-dropdown {
+  background: var(--ant-dropdown-bg);
+}
+
+[data-theme="dark"] .ant-select-item {
+  color: var(--color-text-primary);
+}
+
+[data-theme="dark"] .ant-select-item-option-selected {
+  background: var(--color-bg-component-hover);
+}
+
+/* Tag */
+[data-theme="dark"] .ant-tag {
+  border-color: var(--color-border);
+}
+
+/* Breadcrumb */
+[data-theme="dark"] .ant-breadcrumb a,
+[data-theme="dark"] .ant-breadcrumb span {
+  color: var(--color-text-secondary);
+}
+
+/* Skeleton */
+[data-theme="dark"] .ant-skeleton-title,
+[data-theme="dark"] .ant-skeleton-paragraph > li {
+  background: #333 !important;
+}
+
+/* Empty */
+[data-theme="dark"] .ant-empty-description {
+  color: var(--ant-empty-color);
+}
+
+/* Dropdown menu */
+[data-theme="dark"] .ant-dropdown-menu {
+  background: var(--ant-dropdown-bg);
+}
+
+[data-theme="dark"] .ant-dropdown-menu-item {
+  color: var(--color-text-primary);
+}
+
+[data-theme="dark"] .ant-dropdown-menu-item:hover {
+  background: var(--color-bg-component-hover);
+}
+
+/* Progress */
+[data-theme="dark"] .ant-progress-text {
+  color: var(--color-text-primary) !important;
+}
+
+/* Page header */
+[data-theme="dark"] .ant-page-header-heading-title {
+  color: var(--color-text-primary);
+}
+
+/* Form label */
+[data-theme="dark"] .ant-form-item-label > label {
+  color: var(--color-text-secondary);
+}
+
+/* Tabs */
+[data-theme="dark"] .ant-tabs-tab {
+  color: var(--color-text-secondary);
+}
+
+[data-theme="dark"] .ant-tabs-nav .ant-tabs-tab-active {
+  color: var(--color-primary);
+}
+
+/* Notification / Message */
+[data-theme="dark"] .ant-message .ant-message-notice-content {
+  background: var(--ant-dropdown-bg);
+  color: var(--color-text-primary);
+}
+
+/* Statistic */
+[data-theme="dark"] .ant-statistic-title {
+  color: var(--color-text-tertiary);
+}
+
+[data-theme="dark"] .ant-statistic-content {
+  color: var(--color-text-primary);
+}

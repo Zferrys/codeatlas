@@ -133,8 +133,8 @@
             </a-tooltip>
             <template #overlay>
               <a-menu style="width:280px">
-                <div style="padding:12px 16px;border-bottom:1px solid #f0f0f0">
-                  <span style="font-weight:600;font-size:14px">通知</span>
+                <div style="padding:12px 16px;border-bottom:1px solid var(--color-border-light)">
+                  <span style="font-weight:600;font-size:14px;color:var(--color-text-primary)">通知</span>
                 </div>
                 <div style="padding:24px 16px;text-align:center">
                   <a-empty description="暂无通知" :image-style="{ height: '40px' }" />
@@ -479,26 +479,26 @@ onBeforeUnmount(() => {
 .version-tag { color: rgba(255,255,255,0.3); font-size: 12px; }
 
 /* ---- 顶部栏 ---- */
-.app-main { background: #f0f2f5; }
+.app-main { background: var(--color-bg-body); }
 .app-header {
-  background: #fff;
+  background: var(--color-bg-component);
   padding: 0 20px;
   display: flex;
   justify-content: space-between;
   align-items: center;
   height: 56px;
   line-height: 56px;
-  box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+  box-shadow: 0 1px 4px var(--color-shadow);
   z-index: 9;
 }
 .header-left { display: flex; align-items: center; gap: 12px; }
 .header-right { display: flex; align-items: center; gap: 4px; }
-.trigger-icon { font-size: 18px; cursor: pointer; color: #555; padding: 4px; }
-.trigger-icon:hover { color: #667eea; }
+.trigger-icon { font-size: 18px; cursor: pointer; color: var(--color-text-secondary); padding: 4px; }
+.trigger-icon:hover { color: var(--color-primary); }
 .header-breadcrumb { font-size: 14px; }
-.header-btn { font-size: 18px; color: #555; }
-.header-btn:hover { color: #667eea; }
-.user-name { color: #333; font-size: 13px; margin-left: 8px; }
+.header-btn { font-size: 18px; color: var(--color-text-secondary); }
+.header-btn:hover { color: var(--color-primary); }
+.user-name { color: var(--color-text-primary); font-size: 13px; margin-left: 8px; }
 
 /* ---- 内容区 ---- */
 .app-content {
@@ -512,10 +512,10 @@ onBeforeUnmount(() => {
   height: 48px;
   padding: 0 24px;
   line-height: 48px;
-  color: #999;
+  color: var(--color-text-tertiary);
   font-size: 12px;
-  background: #fff;
-  border-top: 1px solid #f0f0f0;
+  background: var(--color-bg-component);
+  border-top: 1px solid var(--color-border-light);
 }
 
 /* ---- 全局搜索 ---- */
@@ -526,23 +526,23 @@ onBeforeUnmount(() => {
   padding: 0 10px;
   height: 32px;
   border-radius: 6px;
-  background: #f5f5f5;
-  border: 1px solid #e8e8e8;
-  color: #999;
+  background: var(--color-bg-input);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-tertiary);
   font-size: 13px;
   transition: all 0.2s;
 }
 
 .search-trigger:hover {
-  background: #ebebeb;
-  border-color: #d9d9d9;
-  color: #667eea;
+  background: var(--color-bg-component-hover);
+  border-color: var(--color-text-placeholder);
+  color: var(--color-primary);
 }
 
 .search-shortcut {
   font-size: 11px;
-  color: #bbb;
-  background: #eee;
+  color: var(--color-text-placeholder);
+  background: var(--color-bg-component);
   padding: 1px 6px;
   border-radius: 3px;
   margin-left: 4px;
@@ -565,7 +565,7 @@ onBeforeUnmount(() => {
 .search-group-title {
   font-size: 11px;
   font-weight: 600;
-  color: #999;
+  color: var(--color-text-tertiary);
   text-transform: uppercase;
   letter-spacing: 0.5px;
   padding: 0 4px;
@@ -583,7 +583,7 @@ onBeforeUnmount(() => {
 }
 
 .search-item:hover {
-  background: #f0f2ff;
+  background: var(--color-bg-input);
 }
 
 .search-item-icon {
@@ -601,12 +601,12 @@ onBeforeUnmount(() => {
 .search-item-name {
   font-size: 14px;
   font-weight: 500;
-  color: #1a1a2e;
+  color: var(--color-text-primary);
 }
 
 .search-item-desc {
   font-size: 12px;
-  color: #999;
+  color: var(--color-text-tertiary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
