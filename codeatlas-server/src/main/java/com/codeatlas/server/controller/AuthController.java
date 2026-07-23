@@ -2,10 +2,14 @@ package com.codeatlas.server.controller;
 
 import com.codeatlas.common.constant.ErrorCode;
 import com.codeatlas.common.dto.ApiResponse;
+import com.codeatlas.server.annotation.AuditLog;
+import com.codeatlas.server.dto.request.LoginRequest;
+import com.codeatlas.server.dto.request.RegisterRequest;
 import com.codeatlas.server.security.CodeAtlasUserDetails;
 import com.codeatlas.server.service.UserService;
-import io.swagger.annotations.Api;
-import io.swagger.annotations.ApiOperation;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
@@ -13,7 +17,7 @@ import java.util.Map;
 
 @RestController
 @RequestMapping("/api/v1/auth")
-@Api(tags = "用户认证")
+@Tag(name = "用户认证")
 public class AuthController {
 
     private final UserService userService;
@@ -23,31 +27,28 @@ public class AuthController {
     }
 
     @PostMapping("/register")
-    @ApiOperation("用户注册")
-    public ApiResponse<Map<String, Object>> register(@RequestBody Map<String, String> body) {
-        String username = body.get("username");
-        String password = body.get("password");
-        String email = body.get("email");
-        return ApiResponse.success(userService.register(username, password, email));
+    @Operation(summary = "用户注册")
+    public ApiResponse<Map<String, Object>> register(@Valid @RequestBody RegisterRequest request) {
+        return ApiResponse.success(userService.register(
+                request.getUsername(), request.getPassword(), request.getEmail()));
     }
 
     @PostMapping("/login")
-    @ApiOperation("用户登录")
-    public ApiResponse<Map<String, Object>> login(@RequestBody Map<String, String> body) {
-        String username = body.get("username");
-        String password = body.get("password");
-        return ApiResponse.success(userService.login(username, password));
+    @Operation(summary = "用户登录")
+    @AuditLog(action = "LOGIN", detail = "用户登录", usernameExpression = "#request.username")
+    public ApiResponse<Map<String, Object>> login(@Valid @RequestBody LoginRequest request) {
+        return ApiResponse.success(userService.login(request.getUsername(), request.getPassword()));
     }
 
     @PostMapping("/logout")
-    @ApiOperation("用户登出")
+    @Operation(summary = "用户登出")
     public ApiResponse<Void> logout() {
         // 无状态 JWT，客户端删除 token 即可
         return ApiResponse.success();
     }
 
     @GetMapping("/me")
-    @ApiOperation("获取当前用户信息")
+    @Operation(summary = "获取当前用户信息")
     public ApiResponse<Map<String, Object>> me(@AuthenticationPrincipal CodeAtlasUserDetails principal) {
         if (principal == null) {
             return ApiResponse.error(ErrorCode.UNAUTHORIZED);

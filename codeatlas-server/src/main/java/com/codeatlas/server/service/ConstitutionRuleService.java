@@ -1,0 +1,17 @@
+package com.codeatlas.server.service;
+
+import com.codeatlas.server.entity.ConstitutionRuleEntity;
+
+import java.util.List;
+
+public interface ConstitutionRuleService {
+
+    List<ConstitutionRuleEntity> getRules(Long projectId);
+
+    List<ConstitutionRuleEntity> getAllRules(Long projectId);
+
+    ConstitutionRuleEntity toggleRule(Long ruleId, boolean enabled);
+
+    /** 更新规则定义并自动清理旧违规 */
+    void updateRuleDefinition(Long ruleId, String newDefinition);
+}

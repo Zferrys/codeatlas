@@ -1,48 +1,75 @@
 <template>
-  <div class="register-container">
-    <div class="register-card">
-      <h1 class="register-title">创建账号</h1>
-      <p class="register-subtitle">加入 CodeAtlas，探索代码架构之美</p>
+  <div class="register-form-wrap">
+    <h2 class="form-title">创建账号</h2>
+    <p class="form-subtitle">加入 CodeAtlas，探索代码架构之美</p>
 
-      <a-form
-        :model="form"
-        :rules="rules"
-        @finish="handleRegister"
-        layout="vertical"
-      >
-        <a-form-item label="用户名" name="username">
-          <a-input v-model:value="form.username" size="large" placeholder="3-50 位字符" />
-        </a-form-item>
+    <a-form
+      :model="form"
+      :rules="rules"
+      @finish="handleRegister"
+      layout="vertical"
+    >
+      <a-form-item name="username">
+        <a-input
+          v-model:value="form.username"
+          size="large"
+          placeholder="用户名（3-50 位字符）"
+          autocomplete="username"
+        >
+          <template #prefix><UserOutlined style="color:#bfbfbf" /></template>
+        </a-input>
+      </a-form-item>
 
-        <a-form-item label="邮箱（选填）" name="email">
-          <a-input v-model:value="form.email" size="large" placeholder="example@mail.com" />
-        </a-form-item>
+      <a-form-item name="email">
+        <a-input
+          v-model:value="form.email"
+          size="large"
+          placeholder="邮箱（选填）"
+          autocomplete="email"
+        >
+          <template #prefix><MailOutlined style="color:#bfbfbf" /></template>
+        </a-input>
+      </a-form-item>
 
-        <a-form-item label="密码" name="password">
-          <a-input-password v-model:value="form.password" size="large" placeholder="至少 6 位" />
-        </a-form-item>
+      <a-form-item name="password">
+        <a-input-password
+          v-model:value="form.password"
+          size="large"
+          placeholder="密码（至少 6 位）"
+          autocomplete="new-password"
+        >
+          <template #prefix><LockOutlined style="color:#bfbfbf" /></template>
+        </a-input-password>
+      </a-form-item>
 
-        <a-form-item label="确认密码" name="confirmPassword">
-          <a-input-password v-model:value="form.confirmPassword" size="large" placeholder="再次输入密码" />
-        </a-form-item>
+      <a-form-item name="confirmPassword">
+        <a-input-password
+          v-model:value="form.confirmPassword"
+          size="large"
+          placeholder="确认密码"
+          autocomplete="new-password"
+        >
+          <template #prefix><LockOutlined style="color:#bfbfbf" /></template>
+        </a-input-password>
+      </a-form-item>
 
-        <a-form-item>
-          <a-button
-            type="primary"
-            html-type="submit"
-            size="large"
-            block
-            :loading="loading"
-          >
-            注册
-          </a-button>
-        </a-form-item>
-      </a-form>
+      <a-form-item>
+        <a-button
+          type="primary"
+          html-type="submit"
+          size="large"
+          block
+          :loading="loading"
+          class="submit-btn"
+        >
+          注 册
+        </a-button>
+      </a-form-item>
+    </a-form>
 
-      <div class="register-footer">
-        已有账号？
-        <router-link to="/login">返回登录</router-link>
-      </div>
+    <div class="switch-auth">
+      已有账号？
+      <router-link to="/login">返回登录</router-link>
     </div>
   </div>
 </template>
@@ -52,6 +79,7 @@ import { reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { message } from 'ant-design-vue'
+import { UserOutlined, MailOutlined, LockOutlined } from '@ant-design/icons-vue'
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -94,7 +122,7 @@ async function handleRegister() {
     message.success('注册成功')
     router.push('/dashboard')
   } catch (e) {
-    // error handled by axios interceptor
+    // handled by axios interceptor
   } finally {
     loading.value = false
   }
@@ -102,45 +130,45 @@ async function handleRegister() {
 </script>
 
 <style scoped>
-.register-container {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  min-height: 100vh;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+.register-form-wrap {
+  width: 100%;
 }
 
-.register-card {
-  width: 440px;
-  padding: 40px;
-  background: #fff;
-  border-radius: 12px;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15);
-}
-
-.register-title {
-  text-align: center;
-  font-size: 24px;
+.form-title {
+  font-size: 28px;
   font-weight: 700;
   color: #1a1a2e;
-  margin-bottom: 8px;
+  margin: 0 0 8px;
 }
 
-.register-subtitle {
-  text-align: center;
-  color: #666;
-  margin-bottom: 32px;
+.form-subtitle {
+  color: #999;
   font-size: 14px;
+  margin: 0 0 36px;
 }
 
-.register-footer {
+.submit-btn {
+  height: 44px;
+  font-size: 16px;
+  letter-spacing: 4px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #667eea, #764ba2);
+  border: none;
+}
+
+.submit-btn:hover {
+  background: linear-gradient(135deg, #5a6fd6, #6a3f96);
+}
+
+.switch-auth {
   text-align: center;
-  margin-top: 16px;
+  margin-top: 24px;
   font-size: 14px;
   color: #999;
 }
 
-.register-footer a {
+.switch-auth a {
   color: #667eea;
+  font-weight: 500;
 }
 </style>

@@ -29,6 +29,7 @@ const routes = [
     name: 'ProjectDetail',
     component: () => import('../views/ProjectDetail.vue'),
     meta: { requiresAuth: true },
+    redirect: { name: 'ProjectOverview' },
     children: [
       {
         path: 'overview',
