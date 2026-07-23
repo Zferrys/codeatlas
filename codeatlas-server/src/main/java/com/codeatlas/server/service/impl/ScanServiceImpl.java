@@ -30,6 +30,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.annotation.Timed;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 
@@ -39,6 +40,8 @@ import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 import java.util.stream.Collectors;
 
 @Service
@@ -58,6 +61,7 @@ public class ScanServiceImpl implements ScanService {
     private final GitService gitService;
     private final JavaParserService javaParserService;
     private final ApplicationEventPublisher eventPublisher;
+    private final Executor scanExecutor;
 
     public ScanServiceImpl(ScanMapper scanMapper, ProjectMapper projectMapper,
                            ClassSummaryMapper classSummaryMapper,
@@ -65,7 +69,8 @@ public class ScanServiceImpl implements ScanService {
                            AiAnalysisService aiAnalysisService,
                            ConstitutionRuleService constitutionRuleService,
                            Neo4jGraphService neo4jGraphService,
-                           ApplicationEventPublisher eventPublisher) {
+                           ApplicationEventPublisher eventPublisher,
+                           @Qualifier("scanExecutor") Executor scanExecutor) {
         this.scanMapper = scanMapper;
         this.projectMapper = projectMapper;
         this.classSummaryMapper = classSummaryMapper;
@@ -76,6 +81,7 @@ public class ScanServiceImpl implements ScanService {
         this.gitService = new GitService();
         this.javaParserService = new JavaParserService();
         this.eventPublisher = eventPublisher;
+        this.scanExecutor = scanExecutor;
     }
 
     @Override
@@ -92,14 +98,30 @@ public class ScanServiceImpl implements ScanService {
             throw new BusinessException(ErrorCode.SCAN_ALREADY_RUNNING, "已有扫描正在运行");
         }
 
-        // 创建扫描记录
+        // 创建扫描记录并立即返回，实际扫描在后台线程执行
         ScanRecord scan = new ScanRecord();
         scan.setProjectId(projectId);
         scan.setStatus("RUNNING");
         scan.setStartedAt(LocalDateTime.now());
         scanMapper.insert(scan);
 
+        // 异步执行扫描，让 POST 立即返回，前端通过 SSE 获取实时进度
+        CompletableFuture.runAsync(() -> executeScan(project, scan, userId), scanExecutor)
+                .exceptionally(ex -> {
+                    log.error("Unhandled scan error for projectId={}: {}", projectId, ex.getMessage(), ex);
+                    return null;
+                });
+
+        return toVO(scan);
+    }
+
+    /**
+     * 后台执行完整扫描流程：克隆 → 解析 → 规则检查 → AI 分析。
+     * 通过 ApplicationEventPublisher 推送进度事件给 SSE 订阅者。
+     */
+    private void executeScan(Project project, ScanRecord scan, Long userId) {
         long startTime = System.currentTimeMillis();
+        Long projectId = project.getId();
         int totalClasses = 0;
         int totalLines = 0;
         int totalViolations = 0;
@@ -122,7 +144,6 @@ public class ScanServiceImpl implements ScanService {
                 scan.setCommitHash(gitResult.getCommitHash());
                 scan.setBranch(gitResult.getBranch());
             } else {
-                // 使用本地路径（如果指定）或使用临时测试目录
                 if (project.getSourceUrl() != null) {
                     workDir = Path.of(project.getSourceUrl());
                 }
@@ -134,7 +155,6 @@ public class ScanServiceImpl implements ScanService {
                 totalClasses = classes.size();
                 totalLines = classes.stream().mapToInt(ClassSummaryResult::getLineCount).sum();
 
-                // 批量持久化类摘要到 class_summary 表
                 List<ClassSummaryEntity> batch = new ArrayList<>();
                 for (ClassSummaryResult cls : classes) {
                     ClassSummaryEntity entity = new ClassSummaryEntity();
@@ -160,7 +180,6 @@ public class ScanServiceImpl implements ScanService {
                     classSummaryMapper.insertBatch(batch);
                 }
 
-                // 写入 Neo4j 依赖图
                 try {
                     neo4jGraphService.importGraph(projectId, classes);
                 } catch (Exception e) {
@@ -170,7 +189,6 @@ public class ScanServiceImpl implements ScanService {
                 log.info("Scan completed: projectId={}, classes={}, lines={}", projectId, totalClasses, totalLines);
 
                 emitProgress(projectId, scan.getId(), "RULES", 60, "运行架构规则检查...");
-                // 规则违规检测
                 List<ConstitutionRuleEntity> rules = constitutionRuleService.getRules(projectId);
                 List<RuleDefinition> ruleDefs = rules.stream().map(r -> {
                     RuleDefinition def = new RuleDefinition();
@@ -233,7 +251,6 @@ public class ScanServiceImpl implements ScanService {
         scan.setCompletedAt(LocalDateTime.now());
         scanMapper.updateStats(scan);
 
-        // 更新项目统计
         project.setTotalClasses(totalClasses);
         project.setTotalModules(1);
         project.setHealthScore(calculateHealthScore(totalViolations, totalClasses,
@@ -241,7 +258,6 @@ public class ScanServiceImpl implements ScanService {
         project.setLastScanId(scan.getId());
         projectMapper.updateStats(project);
 
-        // 异步触发 AI 分析
         if ("COMPLETED".equals(scan.getStatus()) && totalClasses > 0) {
             emitProgress(projectId, scan.getId(), "AI", 80, "开始 AI 架构分析...");
             aiAnalysisService.triggerAsync(projectId, scan.getId());
@@ -251,8 +267,6 @@ public class ScanServiceImpl implements ScanService {
                 "COMPLETED".equals(scan.getStatus()) ? "COMPLETED" : "FAILED",
                 100,
                 "COMPLETED".equals(scan.getStatus()) ? "扫描完成" : "扫描失败: " + (errorMessage != null ? errorMessage : ""));
-
-        return toVO(scan);
     }
 
     private void emitProgress(Long projectId, Long scanId, String stage, int progress, String message) {

@@ -112,7 +112,7 @@ public class AiAnalysisService {
         // 调用 AI（带重试 + 降级）
         AiRequest request = new AiRequest();
         request.setPrompt(prompt);
-        request.setSystemPrompt("You are a senior software architect. Analyze codebases and produce insightful, accurate architectural narratives. Always reference specific classes and packages.");
+        request.setSystemPrompt("你是一位资深软件架构师。请分析代码库并用中文生成深入、准确的架构叙事报告。所有结论必须引用具体的类和包。专业术语保留英文，类名/包名保留原文。");
         request.setTemperature(0.3);
         request.setMaxTokens(4096);
 

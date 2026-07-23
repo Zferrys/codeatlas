@@ -1,12 +1,14 @@
 package com.codeatlas.server.controller;
 
-import com.codeatlas.common.dto.ApiResponse;
 import com.codeatlas.server.event.ScanProgressEvent;
+import com.codeatlas.server.security.CodeAtlasUserDetails;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.event.EventListener;
 import org.springframework.http.MediaType;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -26,7 +28,9 @@ public class ScanProgressController {
     private final Map<Long, CopyOnWriteArrayList<SseEmitter>> emitters = new ConcurrentHashMap<>();
 
     @GetMapping(value = "/progress", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public SseEmitter streamProgress(@PathVariable Long projectId) {
+    @PreAuthorize("isAuthenticated()")
+    public SseEmitter streamProgress(@PathVariable Long projectId,
+                                     @AuthenticationPrincipal CodeAtlasUserDetails principal) {
         SseEmitter emitter = new SseEmitter(30 * 60 * 1000L); // 30 min timeout
         emitters.computeIfAbsent(projectId, k -> new CopyOnWriteArrayList<>()).add(emitter);
 

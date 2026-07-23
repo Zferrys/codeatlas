@@ -7,6 +7,7 @@ import com.codeatlas.server.dto.request.CreateProjectRequest;
 import com.codeatlas.server.dto.response.ProjectVO;
 import com.codeatlas.server.entity.Project;
 import com.codeatlas.server.entity.ProjectMember;
+import com.codeatlas.server.entity.User;
 import com.codeatlas.server.mapper.ClassSummaryMapper;
 import com.codeatlas.server.mapper.InsightMapper;
 import com.codeatlas.server.mapper.ProjectMapper;
@@ -58,11 +59,29 @@ public class ProjectServiceImpl implements ProjectService {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "项目名称不能为空");
         }
 
+        String sourceType = StringUtils.hasText(request.getSourceType())
+                ? request.getSourceType() : "GIT_URL";
+
+        // GIT_URL 格式校验
+        if ("GIT_URL".equals(sourceType)) {
+            String url = request.getSourceUrl();
+            if (!StringUtils.hasText(url)) {
+                throw new BusinessException(ErrorCode.BAD_REQUEST, "Git 仓库 URL 不能为空");
+            }
+            if (!url.matches("^https?://[^\\s]+$")) {
+                throw new BusinessException(ErrorCode.BAD_REQUEST, "Git URL 格式不正确，示例：https://github.com/user/repo.git");
+            }
+        }
+
+        // LOCAL_PATH 校验
+        if ("LOCAL_PATH".equals(sourceType) && !StringUtils.hasText(request.getSourceUrl())) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "本地路径不能为空");
+        }
+
         Project project = new Project();
         project.setName(request.getName());
         project.setDescription(request.getDescription());
-        project.setSourceType(StringUtils.hasText(request.getSourceType())
-                ? request.getSourceType() : "GIT_URL");
+        project.setSourceType(sourceType);
         project.setSourceUrl(request.getSourceUrl());
         project.setDefaultBranch("main");
         project.setLanguage("Java");
@@ -126,6 +145,15 @@ public class ProjectServiceImpl implements ProjectService {
         Project project = projectMapper.findById(projectId);
         if (project == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND, "项目不存在");
+        }
+        // 仅项目创建者或系统管理员可删除
+        boolean isOwner = userId.equals(project.getCreatedBy());
+        if (!isOwner) {
+            User user = userMapper.findById(userId);
+            boolean isAdmin = user != null && "ADMIN".equals(user.getRole());
+            if (!isAdmin) {
+                throw new BusinessException(ErrorCode.FORBIDDEN, "只有项目创建者或管理员才能删除项目");
+            }
         }
         projectMapper.deleteById(projectId);
         log.info("Project deleted: id={}, userId={}", projectId, userId);

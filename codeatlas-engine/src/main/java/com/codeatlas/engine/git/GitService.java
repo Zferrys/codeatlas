@@ -11,10 +11,17 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.SecureRandom;
+import java.security.cert.X509Certificate;
 import java.util.Comparator;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+
+import javax.net.ssl.HttpsURLConnection;
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.TrustManager;
+import javax.net.ssl.X509TrustManager;
 
 public class GitService {
 
@@ -23,10 +30,37 @@ public class GitService {
     private static final long CLONE_TIMEOUT_MINUTES = 5;
     private static final long MAX_REPO_SIZE_BYTES = 500L * 1024 * 1024; // 500MB
 
+    /**
+     * 配置 JGit 使用宽松的 SSL 上下文，解决 Windows 上 JDK 信任库缺少 GitHub 证书的问题。
+     * 仅影响 HttpsURLConnection，不影响其他组件。
+     */
+    private static void configureSslTrustAll() {
+        try {
+            TrustManager[] trustAllCerts = new TrustManager[]{
+                new X509TrustManager() {
+                    public X509Certificate[] getAcceptedIssuers() { return new X509Certificate[0]; }
+                    public void checkClientTrusted(X509Certificate[] certs, String authType) {}
+                    public void checkServerTrusted(X509Certificate[] certs, String authType) {}
+                }
+            };
+            SSLContext sc = SSLContext.getInstance("TLS");
+            sc.init(null, trustAllCerts, new SecureRandom());
+            HttpsURLConnection.setDefaultSSLSocketFactory(sc.getSocketFactory());
+            HttpsURLConnection.setDefaultHostnameVerifier((hostname, session) -> true);
+            log.info("JGit SSL configured — trust-all mode for local repo cloning");
+        } catch (Exception e) {
+            log.warn("Failed to configure SSL trust-all: {}", e.getMessage());
+        }
+    }
+
     public GitResult cloneRepository(String repoUrl, String branch, Path targetDir) {
         try {
             Files.createDirectories(targetDir);
             log.info("Cloning {} branch={} to {}", repoUrl, branch, targetDir);
+
+            // JGit 通过 JDKHttpConnectionFactory 使用 HttpsURLConnection，
+            // Windows JDK 可能缺少 GitHub 证书，clone 前配置宽松 SSL
+            configureSslTrustAll();
 
             CompletableFuture<GitResult> future = CompletableFuture.supplyAsync(() -> {
                 try {

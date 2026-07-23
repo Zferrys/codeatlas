@@ -29,6 +29,7 @@ public class ConstitutionRuleController {
 
     @GetMapping
     @Operation(summary = "获取项目的宪法规则列表")
+    @PreAuthorize("isAuthenticated()")
     public ApiResponse<PageResult<ConstitutionRuleVO>> getRules(
             @PathVariable Long projectId,
             @RequestParam(defaultValue = "true") boolean enabledOnly,

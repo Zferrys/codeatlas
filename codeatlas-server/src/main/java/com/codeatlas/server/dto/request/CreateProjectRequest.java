@@ -12,7 +12,7 @@ public class CreateProjectRequest {
     @NotBlank(message = "源码来源不能为空")
     private String sourceType;
 
-    @Size(max = 500, message = "Git URL 长度不能超过 500")
+    @Size(max = 500, message = "源码地址长度不能超过 500")
     private String sourceUrl;
 
     @Size(max = 500, message = "描述长度不能超过 500")

@@ -85,6 +85,7 @@ public class UserServiceImpl implements UserService {
         }
 
         String token = jwtTokenProvider.generateToken(user.getId(), user.getUsername(), user.getRole());
+        userMapper.updateLoginTime(user.getId());
         log.info("User logged in: id={}, username={}", user.getId(), username);
 
         Map<String, Object> result = new HashMap<>();

@@ -3,16 +3,19 @@ import { message } from 'ant-design-vue'
 
 const api = axios.create({
   baseURL: '/api/v1',
-  timeout: 30000,
-  headers: { 'Content-Type': 'application/json' }
+  timeout: 30000
 })
 
-// Request interceptor — attach JWT token
+// Request interceptor — attach JWT token + set Content-Type for JSON
 api.interceptors.request.use(
   config => {
     const token = localStorage.getItem('codeatlas_token')
     if (token) {
       config.headers.Authorization = `Bearer ${token}`
+    }
+    // 仅对非 FormData 请求自动设置 JSON Content-Type（FormData 由浏览器自动设置 boundary）
+    if (config.data && !(config.data instanceof FormData)) {
+      config.headers['Content-Type'] = 'application/json'
     }
     return config
   },

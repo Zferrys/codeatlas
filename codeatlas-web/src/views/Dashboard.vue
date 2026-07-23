@@ -75,6 +75,9 @@
     <a-row v-else :gutter="[20, 20]">
       <a-col v-for="project in filteredProjects" :key="project.id" :xs="24" :sm="12" :lg="8">
         <a-card hoverable class="project-card" @click="goProject(project.id)">
+          <div class="card-delete" @click.stop="handleDeleteProject(project)">
+            <DeleteOutlined />
+          </div>
           <div class="card-top">
             <div class="card-avatar" :style="{ background: langColor(project.language) }">
               {{ (project.name || 'P')[0].toUpperCase() }}
@@ -128,7 +131,7 @@
       title="新建项目"
       :confirm-loading="createLoading"
       @ok="handleCreateProject"
-      @cancel="showCreateModal = false"
+      @cancel="showCreateModal = false; uploadFile = null"
     >
       <a-form :model="createForm" layout="vertical">
         <a-form-item label="项目名称" required>
@@ -141,12 +144,14 @@
             <a-select-option value="LOCAL_PATH">本地路径</a-select-option>
           </a-select>
         </a-form-item>
-        <a-form-item v-if="createForm.sourceType === 'GIT_URL'" label="Git URL">
+        <a-form-item v-if="createForm.sourceType === 'GIT_URL'" label="Git URL" required>
           <a-input v-model:value="createForm.sourceUrl" placeholder="https://github.com/user/repo.git" />
+        </a-form-item>
+        <a-form-item v-if="createForm.sourceType === 'LOCAL_PATH'" label="本地路径" required>
+          <a-input v-model:value="createForm.sourceUrl" placeholder="例如：D:\projects\my-app 或 /home/user/projects/my-app" />
         </a-form-item>
         <a-form-item v-if="createForm.sourceType === 'ZIP_UPLOAD'" label="上传源码包">
           <a-upload-dragger
-            :custom-request="handleZipUpload"
             :before-upload="beforeZipUpload"
             :show-upload-list="false"
             accept=".zip,.tar.gz,.tgz"
@@ -154,7 +159,8 @@
             <p class="upload-icon">
               <InboxOutlined style="font-size:36px;color:#667eea" />
             </p>
-            <p class="upload-text">点击或拖拽 ZIP / TAR.GZ 文件到此处</p>
+            <p class="upload-text" v-if="!uploadFile">点击或拖拽 ZIP / TAR.GZ 文件到此处</p>
+            <p class="upload-text" v-else style="color:#52c41a">已选择: {{ uploadFile.name }}</p>
             <p class="upload-hint">文件大小不超过 100MB</p>
           </a-upload-dragger>
           <div v-if="uploading" style="margin-top:12px">
@@ -166,6 +172,21 @@
         </a-form-item>
       </a-form>
     </a-modal>
+
+    <!-- 删除确认弹窗 -->
+    <a-modal
+      v-model:open="showDeleteModal"
+      title="确认删除"
+      :confirm-loading="deleteLoading"
+      @ok="confirmDelete"
+      @cancel="deleteTarget = null; showDeleteModal = false"
+      ok-text="确认删除"
+      cancel-text="取消"
+      okType="danger"
+    >
+      <p>确定要删除项目 <strong>{{ deleteTarget?.name }}</strong> 吗？</p>
+      <p style="color:#999;font-size:13px">此操作不可撤销，将同时删除该项目的所有扫描记录、违规、洞察和规则数据。</p>
+    </a-modal>
   </div>
 </template>
 
@@ -176,7 +197,7 @@ import { useAuthStore } from '../stores/auth'
 import { message } from 'ant-design-vue'
 import {
   ProjectOutlined, FileTextOutlined, ScanOutlined, BulbOutlined,
-  PlusOutlined, ClockCircleOutlined, InboxOutlined
+  PlusOutlined, ClockCircleOutlined, InboxOutlined, DeleteOutlined
 } from '@ant-design/icons-vue'
 import api from '../api'
 
@@ -242,41 +263,8 @@ function beforeZipUpload(file) {
     message.error('文件大小不能超过 100MB')
     return false
   }
-  return true
-}
-
-async function handleZipUpload({ file, onProgress, onSuccess, onError }) {
-  uploading.value = true
-  uploadPercent.value = 0
-  try {
-    const formData = new FormData()
-    formData.append('file', file)
-    const res = await api.post('/files/upload', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-      onUploadProgress: (e) => {
-        if (e.total > 0) {
-          uploadPercent.value = Math.round((e.loaded / e.total) * 100)
-        }
-      }
-    })
-    const newProject = res.data.data
-    message.success('项目创建成功，即将开始扫描')
-    showCreateModal.value = false
-    createForm.name = ''
-    createForm.sourceType = 'GIT_URL'
-    createForm.sourceUrl = ''
-    createForm.description = ''
-    uploadFile.value = null
-    if (newProject?.id) {
-      router.push(`/project/${newProject.id}/overview`)
-    }
-    onSuccess(res.data, file)
-  } catch (e) {
-    message.error('上传失败: ' + (e.response?.data?.message || e.message))
-    onError(e, file)
-  } finally {
-    uploading.value = false
-  }
+  uploadFile.value = file
+  return false // 阻止自动上传，等用户点"确定"后再上传
 }
 
 function goProject(id) {
@@ -288,16 +276,61 @@ async function handleCreateProject() {
     message.warning('请输入项目名称')
     return
   }
+  if (createForm.sourceType === 'GIT_URL') {
+    if (!createForm.sourceUrl) {
+      message.warning('请输入 Git 仓库 URL')
+      return
+    }
+    const gitUrlPattern = /^https?:\/\/[^\s]+$/i
+    if (!gitUrlPattern.test(createForm.sourceUrl)) {
+      message.warning('Git URL 格式不正确，示例：https://github.com/user/repo.git')
+      return
+    }
+  }
+  if (createForm.sourceType === 'LOCAL_PATH' && !createForm.sourceUrl) {
+    message.warning('请输入本地项目路径')
+    return
+  }
+  if (createForm.sourceType === 'ZIP_UPLOAD' && !uploadFile.value) {
+    message.warning('请先选择要上传的 ZIP 文件')
+    return
+  }
+
   createLoading.value = true
   try {
-    const res = await api.post('/projects', createForm)
+    let newProject
+
+    if (createForm.sourceType === 'ZIP_UPLOAD') {
+      // 用户点击确定后才真正上传文件
+      uploading.value = true
+      uploadPercent.value = 0
+      const formData = new FormData()
+      formData.append('file', uploadFile.value)
+      const uploadRes = await api.post('/files/upload', formData, {
+        onUploadProgress: (e) => {
+          if (e.total > 0) {
+            uploadPercent.value = Math.round((e.loaded / e.total) * 100)
+          }
+        }
+      })
+      newProject = uploadRes.data.data
+      uploading.value = false
+    } else {
+      const res = await api.post('/projects', createForm)
+      newProject = res.data.data
+    }
+
     message.success('项目创建成功')
     showCreateModal.value = false
-    const newProject = res.data.data
+    createForm.name = ''
+    createForm.sourceType = 'GIT_URL'
+    createForm.sourceUrl = ''
+    createForm.description = ''
+    uploadFile.value = null
+
     if (newProject?.id) {
       router.push(`/project/${newProject.id}/overview`)
     } else {
-      // refresh list by reloading
       const listRes = await api.get('/projects')
       projects.value = listRes.data.data?.records || []
     }
@@ -305,6 +338,32 @@ async function handleCreateProject() {
     // handled by interceptor
   } finally {
     createLoading.value = false
+    uploading.value = false
+  }
+}
+
+const deleteTarget = ref(null)
+const deleteLoading = ref(false)
+const showDeleteModal = ref(false)
+
+function handleDeleteProject(project) {
+  deleteTarget.value = project
+  showDeleteModal.value = true
+}
+
+async function confirmDelete() {
+  if (!deleteTarget.value) return
+  deleteLoading.value = true
+  try {
+    await api.delete(`/projects/${deleteTarget.value.id}`)
+    message.success(`项目 "${deleteTarget.value.name}" 已删除`)
+    projects.value = projects.value.filter(p => p.id !== deleteTarget.value.id)
+    showDeleteModal.value = false
+    deleteTarget.value = null
+  } catch (e) {
+    // handled by interceptor
+  } finally {
+    deleteLoading.value = false
   }
 }
 
@@ -424,6 +483,32 @@ function healthColor(score) {
 .project-card:hover {
   transform: translateY(-3px);
   box-shadow: 0 8px 24px rgba(0,0,0,0.1);
+}
+
+.card-delete {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 10;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #bbb;
+  cursor: pointer;
+  transition: all 0.2s;
+  opacity: 0;
+}
+
+.project-card:hover .card-delete {
+  opacity: 1;
+}
+
+.card-delete:hover {
+  color: #ff4d4f;
+  background: #fff1f0;
 }
 
 .card-top {

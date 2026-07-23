@@ -96,6 +96,7 @@ class ProjectServiceImplTest {
         CreateProjectRequest request = new CreateProjectRequest();
         request.setName("Test");
         request.setSourceType(null);
+        request.setSourceUrl("https://github.com/test/default.git");
 
         ProjectVO result = projectService.createProject(request, 1L);
 

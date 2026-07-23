@@ -6,5 +6,5 @@ public interface MapService {
 
     GraphVO getProjectMap(Long projectId, Long userId);
 
-    GraphVO getSubgraph(Long projectId, String fqn, int depth);
+    GraphVO getSubgraph(Long projectId, String fqn, int depth, Long userId);
 }

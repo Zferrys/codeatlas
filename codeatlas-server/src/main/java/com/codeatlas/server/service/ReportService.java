@@ -1,5 +1,7 @@
 package com.codeatlas.server.service;
 
+import com.codeatlas.common.constant.ErrorCode;
+import com.codeatlas.common.exception.BusinessException;
 import com.codeatlas.server.entity.Project;
 import com.codeatlas.server.entity.ScanRecord;
 import com.codeatlas.server.entity.ViolationEntity;
@@ -30,19 +32,23 @@ public class ReportService {
     private final ViolationMapper violationMapper;
     private final InsightService insightService;
     private final ClassSummaryMapper classSummaryMapper;
+    private final ProjectMemberMapper projectMemberMapper;
 
     public ReportService(ProjectMapper projectMapper, ScanMapper scanMapper,
                          ViolationMapper violationMapper, InsightService insightService,
-                         ClassSummaryMapper classSummaryMapper) {
+                         ClassSummaryMapper classSummaryMapper,
+                         ProjectMemberMapper projectMemberMapper) {
         this.projectMapper = projectMapper;
         this.scanMapper = scanMapper;
         this.violationMapper = violationMapper;
         this.insightService = insightService;
         this.classSummaryMapper = classSummaryMapper;
+        this.projectMemberMapper = projectMemberMapper;
     }
 
-    public byte[] generatePdf(Long projectId) {
+    public byte[] generatePdf(Long projectId, Long userId) {
         Project project = projectMapper.findById(projectId);
+        checkProjectAccess(project, projectId, userId);
         ScanRecord scan = scanMapper.findLatestByProjectId(projectId);
         List<ViolationEntity> violations = violationMapper.findByProjectId(projectId);
         InsightEntity archStory = insightService.getLatestArchStory(projectId);
@@ -110,8 +116,9 @@ public class ReportService {
         }
     }
 
-    public String generateHtml(Long projectId) {
+    public String generateHtml(Long projectId, Long userId) {
         Project project = projectMapper.findById(projectId);
+        checkProjectAccess(project, projectId, userId);
         ScanRecord scan = scanMapper.findLatestByProjectId(projectId);
         List<ViolationEntity> violations = violationMapper.findByProjectId(projectId);
         InsightEntity archStory = insightService.getLatestArchStory(projectId);
@@ -159,6 +166,21 @@ public class ReportService {
 
         sb.append("</body></html>");
         return sb.toString();
+    }
+
+    private void checkProjectAccess(Project project, Long projectId, Long userId) {
+        if (project == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND, "项目不存在");
+        }
+        // 项目创建者可直接访问
+        if (userId.equals(project.getCreatedBy())) {
+            return;
+        }
+        // 检查是否为项目成员
+        if (projectMemberMapper.findByProjectAndUser(projectId, userId) != null) {
+            return;
+        }
+        throw new BusinessException(ErrorCode.NOT_FOUND, "项目不存在");
     }
 
     private String shorten(String fqn) {
