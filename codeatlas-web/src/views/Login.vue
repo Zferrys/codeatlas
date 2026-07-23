@@ -1,41 +1,59 @@
 <template>
-  <div class="login-container">
-    <div class="login-card">
-      <h1 class="login-title">CodeAtlas</h1>
-      <p class="login-subtitle">AI 驱动的代码地图与架构叙事平台</p>
+  <div class="login-form-wrap">
+    <h2 class="form-title">欢迎回来</h2>
+    <p class="form-subtitle">登录您的 CodeAtlas 账号</p>
 
-      <a-form
-        :model="form"
-        :rules="rules"
-        @finish="handleLogin"
-        layout="vertical"
-        class="login-form"
-      >
-        <a-form-item label="用户名" name="username">
-          <a-input v-model:value="form.username" size="large" placeholder="请输入用户名" />
-        </a-form-item>
+    <a-form
+      :model="form"
+      :rules="rules"
+      @finish="handleLogin"
+      layout="vertical"
+      class="login-form"
+    >
+      <a-form-item name="username">
+        <a-input
+          v-model:value="form.username"
+          size="large"
+          placeholder="用户名"
+          autocomplete="username"
+        >
+          <template #prefix><UserOutlined style="color:#bfbfbf" /></template>
+        </a-input>
+      </a-form-item>
 
-        <a-form-item label="密码" name="password">
-          <a-input-password v-model:value="form.password" size="large" placeholder="请输入密码" />
-        </a-form-item>
+      <a-form-item name="password">
+        <a-input-password
+          v-model:value="form.password"
+          size="large"
+          placeholder="密码"
+          autocomplete="current-password"
+        >
+          <template #prefix><LockOutlined style="color:#bfbfbf" /></template>
+        </a-input-password>
+      </a-form-item>
 
-        <a-form-item>
-          <a-button
-            type="primary"
-            html-type="submit"
-            size="large"
-            block
-            :loading="loading"
-          >
-            登录
-          </a-button>
-        </a-form-item>
-      </a-form>
-
-      <div class="login-footer">
-        还没有账号？
-        <router-link to="/register">立即注册</router-link>
+      <div class="form-extra">
+        <a-checkbox v-model:checked="rememberMe">记住登录</a-checkbox>
+        <a class="forgot-link">忘记密码？</a>
       </div>
+
+      <a-form-item>
+        <a-button
+          type="primary"
+          html-type="submit"
+          size="large"
+          block
+          :loading="loading"
+          class="submit-btn"
+        >
+          登 录
+        </a-button>
+      </a-form-item>
+    </a-form>
+
+    <div class="switch-auth">
+      还没有账号？
+      <router-link to="/register">立即注册</router-link>
     </div>
   </div>
 </template>
@@ -45,11 +63,13 @@ import { reactive, ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { message } from 'ant-design-vue'
+import { UserOutlined, LockOutlined } from '@ant-design/icons-vue'
 
 const router = useRouter()
 const route = useRoute()
 const authStore = useAuthStore()
 const loading = ref(false)
+const rememberMe = ref(false)
 
 const form = reactive({
   username: '',
@@ -69,7 +89,7 @@ async function handleLogin() {
     const redirect = route.query.redirect || '/dashboard'
     router.push(redirect)
   } catch (e) {
-    // error already handled by axios interceptor
+    // handled by axios interceptor
   } finally {
     loading.value = false
   }
@@ -77,45 +97,58 @@ async function handleLogin() {
 </script>
 
 <style scoped>
-.login-container {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  min-height: 100vh;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+.login-form-wrap {
+  width: 100%;
 }
 
-.login-card {
-  width: 420px;
-  padding: 40px;
-  background: #fff;
-  border-radius: 12px;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15);
-}
-
-.login-title {
-  text-align: center;
+.form-title {
   font-size: 28px;
   font-weight: 700;
   color: #1a1a2e;
-  margin-bottom: 8px;
+  margin: 0 0 8px;
 }
 
-.login-subtitle {
-  text-align: center;
-  color: #666;
-  margin-bottom: 32px;
+.form-subtitle {
+  color: #999;
   font-size: 14px;
+  margin: 0 0 36px;
 }
 
-.login-footer {
+.form-extra {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
+}
+
+.forgot-link {
+  color: #667eea;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.submit-btn {
+  height: 44px;
+  font-size: 16px;
+  letter-spacing: 4px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #667eea, #764ba2);
+  border: none;
+}
+
+.submit-btn:hover {
+  background: linear-gradient(135deg, #5a6fd6, #6a3f96);
+}
+
+.switch-auth {
   text-align: center;
-  margin-top: 16px;
+  margin-top: 24px;
   font-size: 14px;
   color: #999;
 }
 
-.login-footer a {
+.switch-auth a {
   color: #667eea;
+  font-weight: 500;
 }
 </style>

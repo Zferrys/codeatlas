@@ -1,9 +1,26 @@
 <template>
-  <router-view />
+  <ErrorBoundary>
+    <AuthLayout v-if="isGuestRoute">
+      <router-view />
+    </AuthLayout>
+    <DefaultLayout v-else-if="isAuthRoute">
+      <router-view />
+    </DefaultLayout>
+    <router-view v-else />
+  </ErrorBoundary>
 </template>
 
 <script setup>
-// Root component — routes handle everything
+import { computed } from 'vue'
+import { useRoute } from 'vue-router'
+import DefaultLayout from './layouts/DefaultLayout.vue'
+import AuthLayout from './layouts/AuthLayout.vue'
+import ErrorBoundary from './components/common/ErrorBoundary.vue'
+
+const route = useRoute()
+
+const isGuestRoute = computed(() => route.meta.guest)
+const isAuthRoute = computed(() => route.meta.requiresAuth)
 </script>
 
 <style>

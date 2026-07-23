@@ -1,6 +1,8 @@
 package com.codeatlas.server.security;
 
-import io.jsonwebtoken.*;
+import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.JwtException;
+import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -20,9 +22,12 @@ public class JwtTokenProvider {
     private final long expirationMs;
 
     public JwtTokenProvider(
-            @Value("${codeatlas.security.jwt.secret:CodeAtlasJwtSecretKey2026PleaseChangeInProduction!!}") String secret,
+            @Value("${codeatlas.security.jwt.secret:}") String secret,
             @Value("${codeatlas.security.jwt.expiration-hours:24}") long expirationHours) {
-        // JDK 8 要求 key 至少 256 bits
+        if (secret == null || secret.isBlank()) {
+            throw new IllegalStateException("JWT secret not configured. Set CODEATLAS_JWT_SECRET environment variable "
+                    + "or codeatlas.security.jwt.secret in application.yml");
+        }
         byte[] keyBytes = secret.getBytes(StandardCharsets.UTF_8);
         if (keyBytes.length < 32) {
             byte[] padded = new byte[32];
@@ -38,12 +43,12 @@ public class JwtTokenProvider {
         Date expiry = new Date(now.getTime() + expirationMs);
 
         return Jwts.builder()
-                .setSubject(String.valueOf(userId))
+                .subject(String.valueOf(userId))
                 .claim("username", username)
                 .claim("role", role)
-                .setIssuedAt(now)
-                .setExpiration(expiry)
-                .signWith(secretKey, SignatureAlgorithm.HS256)
+                .issuedAt(now)
+                .expiration(expiry)
+                .signWith(secretKey)
                 .compact();
     }
 
@@ -70,10 +75,10 @@ public class JwtTokenProvider {
     }
 
     private Claims parseClaims(String token) {
-        return Jwts.parserBuilder()
-                .setSigningKey(secretKey)
+        return Jwts.parser()
+                .verifyWith(secretKey)
                 .build()
-                .parseClaimsJws(token)
-                .getBody();
+                .parseSignedClaims(token)
+                .getPayload();
     }
 }
