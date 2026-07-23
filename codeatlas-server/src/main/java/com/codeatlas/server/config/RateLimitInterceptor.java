@@ -13,14 +13,13 @@ import java.util.concurrent.ConcurrentLinkedDeque;
 
 /**
  * 滑动窗口限流拦截器。
- * 记录每个请求的时间戳，在窗口内计数，过期时间戳自动清理。
- * 生产环境建议升级为 Redis + Lua 脚本方案以获得分布式一致性。
+ * 优先使用 Redis 分布式限流，Redis 不可用时降级到内存限流。
  */
 public class RateLimitInterceptor implements HandlerInterceptor {
 
     private static final Logger log = LoggerFactory.getLogger(RateLimitInterceptor.class);
 
-    /** key → 请求时间戳队列 */
+    /** key → 请求时间戳队列（Redis 不可用时的降级方案） */
     private static final Map<String, ConcurrentLinkedDeque<Long>> WINDOWS = new ConcurrentHashMap<>();
 
     /** 每个窗口允许的最大请求数 */
@@ -29,15 +28,17 @@ public class RateLimitInterceptor implements HandlerInterceptor {
     private final long windowMs;
     /** 最大容量，防止恶意填满内存 */
     private static final int MAX_QUEUE_SIZE = 200;
+    /** Redis 限流器（可为 null，此时纯内存限流） */
+    private final RedisRateLimiter redisRateLimiter;
 
     public RateLimitInterceptor(int maxRequestsPerMinute) {
-        this.maxRequests = maxRequestsPerMinute;
-        this.windowMs = 60_000L;
+        this(maxRequestsPerMinute, null);
     }
 
-    public RateLimitInterceptor(int maxRequests, long windowMs) {
-        this.maxRequests = maxRequests;
-        this.windowMs = windowMs;
+    public RateLimitInterceptor(int maxRequestsPerMinute, RedisRateLimiter redisRateLimiter) {
+        this.maxRequests = maxRequestsPerMinute;
+        this.windowMs = 60_000L;
+        this.redisRateLimiter = redisRateLimiter;
     }
 
     @Override
@@ -47,6 +48,18 @@ public class RateLimitInterceptor implements HandlerInterceptor {
         String clientIp = getClientIp(request);
         String key = clientIp + ":" + normalizePath(path);
 
+        // 优先使用 Redis 分布式限流
+        if (redisRateLimiter != null) {
+            if (!redisRateLimiter.tryAcquire(key, maxRequests, windowMs)) {
+                log.warn("Redis rate limit exceeded: ip={}, path={}, limit={}",
+                        clientIp, path, maxRequests);
+                sendRateLimitResponse(response);
+                return false;
+            }
+            return true;
+        }
+
+        // 降级：内存滑动窗口限流
         long now = System.currentTimeMillis();
         long cutoff = now - windowMs;
 

@@ -2,6 +2,7 @@ package com.codeatlas.server.config;
 
 import com.codeatlas.server.security.CodeAtlasUserDetails;
 import org.slf4j.MDC;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.MethodParameter;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -22,14 +23,17 @@ import java.util.UUID;
 @Configuration
 public class WebMvcConfig implements WebMvcConfigurer {
 
-    private final StringRedisTemplate redisTemplate;
-
-    public WebMvcConfig(StringRedisTemplate redisTemplate) {
-        this.redisTemplate = redisTemplate;
-    }
+    @Autowired(required = false)
+    private StringRedisTemplate redisTemplate;
 
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
+        // Redis 分布式限流器（Redis 可用时优先使用）
+        RedisRateLimiter redisRateLimiter = null;
+        if (redisTemplate != null) {
+            redisRateLimiter = new RedisRateLimiter(redisTemplate);
+        }
+
         registry.addInterceptor(new HandlerInterceptor() {
             @Override
             public boolean preHandle(HttpServletRequest request,
@@ -53,17 +57,17 @@ public class WebMvcConfig implements WebMvcConfigurer {
         }).order(1);
 
         // 登录端点限流：10 次/分钟
-        registry.addInterceptor(new RateLimitInterceptor(10))
+        registry.addInterceptor(new RateLimitInterceptor(10, redisRateLimiter))
                 .addPathPatterns("/api/v1/auth/login")
                 .order(2);
 
         // AI 端点限流：5 次/分钟
-        registry.addInterceptor(new RateLimitInterceptor(5))
+        registry.addInterceptor(new RateLimitInterceptor(5, redisRateLimiter))
                 .addPathPatterns("/api/v1/projects/*/scans")
                 .order(3);
 
         // 通用 API 限流：60 次/分钟
-        registry.addInterceptor(new RateLimitInterceptor(60))
+        registry.addInterceptor(new RateLimitInterceptor(60, redisRateLimiter))
                 .addPathPatterns("/api/**")
                 .excludePathPatterns("/api/v1/auth/login", "/api/v1/projects/*/scans")
                 .order(4);

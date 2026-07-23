@@ -116,11 +116,30 @@
           <div class="section-card">
             <div class="section-card-header">
               <h4 class="card-label">扫描历史</h4>
-              <a-button size="small" type="primary" @click="triggerScan" :loading="scanning">
+              <a-button size="small" type="primary" @click="triggerScan" :loading="scanning" :disabled="scanning">
                 <template #icon><ScanOutlined /></template>
-                触发扫描
+                {{ scanning ? '扫描中...' : '触发扫描' }}
               </a-button>
             </div>
+
+            <!-- 扫描进度卡片 -->
+            <div class="scan-progress-card" v-if="scanning">
+              <div class="progress-header">
+                <span class="progress-stage">
+                  <a-badge :status="stageStatus(scanProgress.stage)" />
+                  {{ stageLabel(scanProgress.stage) }}
+                </span>
+                <span class="progress-pct">{{ scanProgress.progress }}%</span>
+              </div>
+              <a-progress
+                :percent="scanProgress.progress"
+                :stroke-color="progressColor"
+                :status="scanProgress.stage === 'FAILED' ? 'exception' : 'active'"
+                size="small"
+              />
+              <p class="progress-msg" v-if="scanProgress.message">{{ scanProgress.message }}</p>
+            </div>
+
             <a-table
               v-if="scans.length > 0"
               :dataSource="scans"
@@ -147,7 +166,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute } from 'vue-router'
 import { message } from 'ant-design-vue'
 import {
@@ -162,6 +181,8 @@ const healthScore = ref(null)
 const totalClasses = ref(0)
 const scans = ref([])
 const scanning = ref(false)
+const scanProgress = reactive({ stage: '', progress: 0, message: '' })
+let sseAbortController = null
 const layerDistribution = ref([])
 const violationTrend = ref([])
 
@@ -227,6 +248,25 @@ const trendLinePoints = computed(() => {
   return trendPoints.value.map(p => `${p.x},${p.y}`).join(' ')
 })
 
+const stageLabels = {
+  CLONING: '克隆仓库', PARSING: '解析代码结构', RULES: '执行规则检查',
+  AI: 'AI 分析', COMPLETED: '扫描完成', FAILED: '扫描失败'
+}
+
+function stageLabel(stage) { return stageLabels[stage] || stage || '准备中' }
+
+function stageStatus(stage) {
+  if (stage === 'COMPLETED') return 'success'
+  if (stage === 'FAILED') return 'error'
+  return 'processing'
+}
+
+const progressColor = computed(() => {
+  if (scanProgress.stage === 'FAILED') return '#ff4d4f'
+  if (scanProgress.stage === 'COMPLETED') return '#52c41a'
+  return '#667eea'
+})
+
 function statusBadge(status) {
   const map = { COMPLETED: 'success', RUNNING: 'processing', FAILED: 'error', PENDING: 'default' }
   return map[status] || 'default'
@@ -274,18 +314,91 @@ async function loadData() {
 
 async function triggerScan() {
   scanning.value = true
+  scanProgress.stage = ''
+  scanProgress.progress = 0
+  scanProgress.message = ''
+
   try {
+    // 1. 触发扫描
     await api.post(`/projects/${route.params.id}/scans`)
-    message.success('扫描已触发')
+
+    // 2. 订阅 SSE 进度
+    const projectId = route.params.id
+    const token = localStorage.getItem('codeatlas_token')
+    sseAbortController = new AbortController()
+
+    const response = await fetch(`/api/v1/projects/${projectId}/scans/progress`, {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: sseAbortController.signal
+    })
+
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() || ''
+
+      for (const line of lines) {
+        if (line.startsWith('event:')) continue
+        if (line.startsWith('data:')) {
+          try {
+            const data = JSON.parse(line.substring(5).trim())
+            if (data.stage) {
+              scanProgress.stage = data.stage
+              scanProgress.progress = data.progress || 0
+              scanProgress.message = data.message || ''
+            }
+            if (data.stage === 'COMPLETED' || data.stage === 'FAILED') {
+              reader.cancel()
+              if (data.stage === 'COMPLETED') {
+                message.success('扫描完成')
+              } else {
+                message.error('扫描失败: ' + (data.message || '未知错误'))
+              }
+              // 留一点时间让用户看到完成状态，再刷新数据
+              setTimeout(async () => {
+                scanning.value = false
+                sseAbortController = null
+                await loadData()
+              }, 800)
+              return
+            }
+          } catch (e) {
+            // skip unparseable SSE data
+          }
+        }
+      }
+    }
+
+    // SSE 流意外结束（无 COMPLETED/FAILED 事件）
+    scanning.value = false
+    sseAbortController = null
     await loadData()
   } catch (e) {
-    // handled by interceptor
-  } finally {
+    if (e.name !== 'AbortError') {
+      message.error('扫描失败: ' + (e.message || '网络错误'))
+    }
     scanning.value = false
+    sseAbortController = null
+    await loadData()
+  }
+}
+
+function cleanupSSE() {
+  if (sseAbortController) {
+    sseAbortController.abort()
+    sseAbortController = null
   }
 }
 
 onMounted(loadData)
+onBeforeUnmount(cleanupSSE)
 </script>
 
 <style scoped>
@@ -468,5 +581,39 @@ onMounted(loadData)
   color: #999;
   width: 28px;
   flex-shrink: 0;
+}
+
+/* 扫描进度卡片 */
+.scan-progress-card {
+  background: #f9faff;
+  border: 1px solid #e0e4ff;
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin-bottom: 16px;
+}
+
+.progress-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.progress-stage {
+  font-size: 13px;
+  font-weight: 500;
+  color: #333;
+}
+
+.progress-pct {
+  font-size: 18px;
+  font-weight: 700;
+  color: #667eea;
+}
+
+.progress-msg {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: #999;
 }
 </style>

@@ -35,6 +35,7 @@ public class GitService {
                             .setBranch(branch)
                             .setDirectory(targetDir.toFile())
                             .setCloneSubmodules(false)
+                            .setCloneAllBranches(false)
                             .call();
 
                     try (Repository repo = git.getRepository()) {

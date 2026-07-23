@@ -18,6 +18,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.resilience4j.bulkhead.annotation.Bulkhead;
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
 import io.github.resilience4j.retry.annotation.Retry;
+import io.micrometer.core.annotation.Timed;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -82,6 +83,7 @@ public class AiAnalysisService {
     /**
      * 同步执行架构叙事分析。
      */
+    @Timed(value = "ai.analysis.duration", description = "AI architecture analysis duration")
     public InsightEntity analyzeArchitecture(Long projectId, Long scanId) {
         if (aiClient == null) {
             log.info("AI analysis skipped: no AI client available for projectId={}", projectId);

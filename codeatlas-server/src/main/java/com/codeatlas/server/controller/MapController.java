@@ -26,4 +26,13 @@ public class MapController {
                                               @AuthenticationPrincipal CodeAtlasUserDetails principal) {
         return ApiResponse.success(mapService.getProjectMap(projectId, principal.getUserId()));
     }
+
+    @GetMapping("/graph")
+    @Operation(summary = "查询类依赖子图（Neo4j 遍历）")
+    public ApiResponse<GraphVO> getSubgraph(@PathVariable Long projectId,
+                                            @RequestParam String fqn,
+                                            @RequestParam(defaultValue = "2") int depth,
+                                            @AuthenticationPrincipal CodeAtlasUserDetails principal) {
+        return ApiResponse.success(mapService.getSubgraph(projectId, fqn, depth));
+    }
 }

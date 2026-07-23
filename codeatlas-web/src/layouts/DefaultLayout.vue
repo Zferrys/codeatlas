@@ -96,6 +96,14 @@
         </div>
 
         <div class="header-right">
+          <!-- 全局搜索 -->
+          <a-tooltip title="全局搜索 (Ctrl+K)">
+            <a-button type="text" class="header-btn search-trigger" @click="showSearch = true">
+              <SearchOutlined />
+              <span class="search-shortcut">Ctrl+K</span>
+            </a-button>
+          </a-tooltip>
+
           <!-- 主题切换 -->
           <a-tooltip :title="isDark ? '切换亮色主题' : '切换暗色主题'">
             <a-button type="text" class="header-btn" @click="toggleTheme">
@@ -138,6 +146,77 @@
         <slot />
       </a-layout-content>
 
+      <!-- 全局搜索弹窗 -->
+      <a-modal
+        v-model:open="showSearch"
+        :footer="null"
+        :closable="false"
+        width="560px"
+        wrap-class-name="search-modal-wrap"
+        @cancel="closeSearch"
+      >
+        <div class="search-modal">
+          <a-input
+            ref="searchInputRef"
+            v-model:value="searchQuery"
+            size="large"
+            placeholder="搜索项目或类名..."
+            :prefix="SearchOutlined"
+            allow-clear
+            @input="onSearchInput"
+            @keydown.esc="closeSearch"
+          >
+            <template #suffix>
+              <a-tag color="processing" v-if="searching">搜索中...</a-tag>
+            </template>
+          </a-input>
+
+          <div class="search-results" v-if="searchQuery.trim().length > 0">
+            <!-- 无结果 -->
+            <a-empty
+              v-if="!searching && searchResults.projects.length === 0 && searchResults.classes.length === 0"
+              description="未找到匹配结果"
+              :image-style="{ height: '40px' }"
+            />
+
+            <!-- 项目结果 -->
+            <div class="search-group" v-if="searchResults.projects.length > 0">
+              <div class="search-group-title">项目</div>
+              <div
+                class="search-item"
+                v-for="item in searchResults.projects"
+                :key="'p-' + item.id"
+                @click="goSearchResult(item)"
+              >
+                <ProjectOutlined class="search-item-icon" style="color:#1890ff" />
+                <div class="search-item-body">
+                  <span class="search-item-name">{{ item.name }}</span>
+                  <span class="search-item-desc" v-if="item.description">{{ item.description }}</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- 类结果 -->
+            <div class="search-group" v-if="searchResults.classes.length > 0">
+              <div class="search-group-title">类</div>
+              <div
+                class="search-item"
+                v-for="item in searchResults.classes"
+                :key="'c-' + item.id"
+                @click="goSearchResult(item)"
+              >
+                <FileTextOutlined class="search-item-icon" style="color:#52c41a" />
+                <div class="search-item-body">
+                  <span class="search-item-name">{{ item.simpleName }}</span>
+                  <span class="search-item-desc">{{ item.fqn }}</span>
+                </div>
+                <a-tag size="small" v-if="item.layer">{{ item.layer }}</a-tag>
+              </div>
+            </div>
+          </div>
+        </div>
+      </a-modal>
+
       <!-- 全局页脚 -->
       <a-layout-footer class="app-footer">
         <span>CodeAtlas © 2026 — AI 驱动的代码地图与架构叙事平台</span>
@@ -150,15 +229,16 @@
 </template>
 
 <script setup>
-import { ref, computed, watch } from 'vue'
+import { ref, reactive, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import {
   DashboardOutlined, AppstoreOutlined, AimOutlined, ReadOutlined,
   SafetyOutlined, WarningOutlined, BulbOutlined, SettingOutlined,
-  MenuFoldOutlined, MenuUnfoldOutlined, BellOutlined,
-  UserOutlined, LogoutOutlined, GithubOutlined
+  MenuFoldOutlined, MenuUnfoldOutlined, BellOutlined, SearchOutlined,
+  UserOutlined, LogoutOutlined, GithubOutlined, ProjectOutlined, FileTextOutlined
 } from '@ant-design/icons-vue'
+import api from '../api'
 
 const route = useRoute()
 const router = useRouter()
@@ -235,6 +315,77 @@ function onBreakpoint(broken) {
   isMobile.value = broken
   if (broken) collapsed.value = true
 }
+
+// ---- 全局搜索 ----
+const showSearch = ref(false)
+const searchQuery = ref('')
+const searching = ref(false)
+const searchInputRef = ref(null)
+const searchResults = reactive({ projects: [], classes: [] })
+let searchTimer = null
+
+function onSearchInput() {
+  if (searchTimer) clearTimeout(searchTimer)
+  const q = searchQuery.value.trim()
+  if (!q) {
+    searchResults.projects = []
+    searchResults.classes = []
+    return
+  }
+  searchTimer = setTimeout(() => doSearch(q), 300)
+}
+
+async function doSearch(q) {
+  searching.value = true
+  try {
+    const res = await api.get('/search', { params: { q, type: 'all' } })
+    const data = res.data.data
+    searchResults.projects = data?.projects || []
+    searchResults.classes = data?.classes || []
+  } catch (e) {
+    searchResults.projects = []
+    searchResults.classes = []
+  } finally {
+    searching.value = false
+  }
+}
+
+function goSearchResult(item) {
+  showSearch.value = false
+  searchQuery.value = ''
+  searchResults.projects = []
+  searchResults.classes = []
+  if (item.type === 'project') {
+    router.push(`/project/${item.id}/overview`)
+  } else if (item.type === 'class' && item.projectId) {
+    router.push(`/project/${item.projectId}/map`)
+  }
+}
+
+function closeSearch() {
+  showSearch.value = false
+  searchQuery.value = ''
+  searchResults.projects = []
+  searchResults.classes = []
+}
+
+function onGlobalKeydown(e) {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+    e.preventDefault()
+    showSearch.value = true
+    nextTick(() => {
+      searchInputRef.value?.focus()
+    })
+  }
+}
+
+onMounted(() => {
+  document.addEventListener('keydown', onGlobalKeydown)
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('keydown', onGlobalKeydown)
+})
 </script>
 
 <style scoped>
@@ -311,9 +462,104 @@ function onBreakpoint(broken) {
   border-top: 1px solid #f0f0f0;
 }
 
+/* ---- 全局搜索 ---- */
+.search-trigger {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  height: 32px;
+  border-radius: 6px;
+  background: #f5f5f5;
+  border: 1px solid #e8e8e8;
+  color: #999;
+  font-size: 13px;
+  transition: all 0.2s;
+}
+
+.search-trigger:hover {
+  background: #ebebeb;
+  border-color: #d9d9d9;
+  color: #667eea;
+}
+
+.search-shortcut {
+  font-size: 11px;
+  color: #bbb;
+  background: #eee;
+  padding: 1px 6px;
+  border-radius: 3px;
+  margin-left: 4px;
+}
+
+.search-modal {
+  padding-top: 4px;
+}
+
+.search-results {
+  margin-top: 16px;
+  max-height: 360px;
+  overflow-y: auto;
+}
+
+.search-group {
+  margin-bottom: 12px;
+}
+
+.search-group-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: #999;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 0 4px;
+  margin-bottom: 6px;
+}
+
+.search-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.search-item:hover {
+  background: #f0f2ff;
+}
+
+.search-item-icon {
+  font-size: 18px;
+  flex-shrink: 0;
+}
+
+.search-item-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.search-item-name {
+  font-size: 14px;
+  font-weight: 500;
+  color: #1a1a2e;
+}
+
+.search-item-desc {
+  font-size: 12px;
+  color: #999;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* ---- 响应式 ---- */
 @media (max-width: 768px) {
   .app-content { padding: 12px; }
   .user-name { display: none; }
+  .search-shortcut { display: none; }
 }
 </style>

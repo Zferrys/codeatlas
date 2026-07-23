@@ -1,0 +1,87 @@
+# ---- 测试环境配置 ----
+spring:
+  # 测试用 H2 内存数据库
+  datasource:
+    url: jdbc:h2:mem:codeatlas_test;MODE=MySQL;DB_CLOSE_DELAY=-1;DATABASE_TO_UPPER=false
+    username: sa
+    password:
+    driver-class-name: org.h2.Driver
+    hikari:
+      maximum-pool-size: 5
+      connection-init-sql: SET NON_KEYWORDS USER
+
+  # 测试环境禁用 Flyway — 用 MyBatis 脚本手动建表
+  flyway:
+    enabled: false
+
+  # 测试不需要 Neo4j
+  neo4j:
+    uri: bolt://localhost:7687
+    authentication:
+      username: neo4j
+      password: neo4j
+
+  # 测试不需要 Redis
+  redis:
+    host: 127.0.0.1
+    port: 6379
+    timeout: 3000ms
+    lettuce:
+      pool:
+        max-active: 2
+
+  sql:
+    init:
+      mode: always
+      schema-locations: classpath:test-schema.sql
+      continue-on-error: true
+
+# MyBatis
+mybatis:
+  mapper-locations: classpath:mapper/*.xml
+  type-aliases-package: com.codeatlas.server.entity
+  configuration:
+    map-underscore-to-camel-case: true
+
+# JWT 测试密钥
+codeatlas:
+  ai:
+    primary: claude
+    clients:
+      claude:
+        base-url: https://api.anthropic.com
+        model: claude-sonnet-4-6
+        max-tokens: 4096
+        temperature: 0.3
+      deepseek:
+        base-url: https://api.deepseek.com
+        model: deepseek-chat
+        max-tokens: 4096
+        temperature: 0.3
+  analysis:
+    max-file-size: 10485760
+    max-project-size: 524288000
+    timeout-minutes: 30
+    max-dependency-depth: 10
+    max-concurrent-scans: 3
+  security:
+    jwt:
+      secret: test-jwt-secret-key-at-least-32-characters-long
+      expiration-hours: 1
+    rate-limit:
+      enabled: false
+      default-rps: 100
+
+# Knife4j
+knife4j:
+  enable: false
+
+# Actuator
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: always

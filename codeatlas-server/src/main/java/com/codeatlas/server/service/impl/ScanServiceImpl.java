@@ -23,9 +23,11 @@ import com.codeatlas.engine.rule.RuleEngine;
 import com.codeatlas.engine.rule.ViolationResult;
 import com.codeatlas.server.service.AiAnalysisService;
 import com.codeatlas.server.service.ConstitutionRuleService;
+import com.codeatlas.server.service.Neo4jGraphService;
 import com.codeatlas.server.service.ScanService;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.micrometer.core.annotation.Timed;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
@@ -52,6 +54,7 @@ public class ScanServiceImpl implements ScanService {
     private final ViolationMapper violationMapper;
     private final AiAnalysisService aiAnalysisService;
     private final ConstitutionRuleService constitutionRuleService;
+    private final Neo4jGraphService neo4jGraphService;
     private final GitService gitService;
     private final JavaParserService javaParserService;
     private final ApplicationEventPublisher eventPublisher;
@@ -61,6 +64,7 @@ public class ScanServiceImpl implements ScanService {
                            ViolationMapper violationMapper,
                            AiAnalysisService aiAnalysisService,
                            ConstitutionRuleService constitutionRuleService,
+                           Neo4jGraphService neo4jGraphService,
                            ApplicationEventPublisher eventPublisher) {
         this.scanMapper = scanMapper;
         this.projectMapper = projectMapper;
@@ -68,12 +72,14 @@ public class ScanServiceImpl implements ScanService {
         this.violationMapper = violationMapper;
         this.aiAnalysisService = aiAnalysisService;
         this.constitutionRuleService = constitutionRuleService;
+        this.neo4jGraphService = neo4jGraphService;
         this.gitService = new GitService();
         this.javaParserService = new JavaParserService();
         this.eventPublisher = eventPublisher;
     }
 
     @Override
+    @Timed(value = "scan.duration", description = "Code scan duration")
     public ScanVO triggerScan(Long projectId, Long userId) {
         Project project = projectMapper.findById(projectId);
         if (project == null) {
@@ -152,6 +158,13 @@ public class ScanServiceImpl implements ScanService {
                 }
                 if (!batch.isEmpty()) {
                     classSummaryMapper.insertBatch(batch);
+                }
+
+                // 写入 Neo4j 依赖图
+                try {
+                    neo4jGraphService.importGraph(projectId, classes);
+                } catch (Exception e) {
+                    log.warn("Neo4j graph import failed for projectId={}: {}", projectId, e.getMessage());
                 }
 
                 log.info("Scan completed: projectId={}, classes={}, lines={}", projectId, totalClasses, totalLines);
