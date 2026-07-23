@@ -78,7 +78,7 @@ management:
         enabled: true
   health:
     neo4j:
-      enabled: true
+      enabled: false
   metrics:
     export:
       prometheus:
