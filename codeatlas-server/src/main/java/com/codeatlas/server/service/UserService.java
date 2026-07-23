@@ -11,4 +11,6 @@ public interface UserService {
     Map<String, Object> login(String username, String password);
 
     User getCurrentUser(Long userId);
+
+    void changePassword(Long userId, String oldPassword, String newPassword);
 }

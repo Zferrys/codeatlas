@@ -33,6 +33,7 @@ public class ScanController {
     }
 
     @GetMapping
+    @PreAuthorize("isAuthenticated()")
     @Operation(summary = "扫描历史")
     public ApiResponse<PageResult<ScanVO>> getScanHistory(
             @PathVariable Long projectId,
@@ -43,6 +44,7 @@ public class ScanController {
     }
 
     @GetMapping("/latest")
+    @PreAuthorize("isAuthenticated()")
     @Operation(summary = "最新扫描")
     public ApiResponse<ScanVO> getLatestScan(@PathVariable Long projectId,
                                               @AuthenticationPrincipal CodeAtlasUserDetails principal) {

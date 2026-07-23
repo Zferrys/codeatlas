@@ -68,7 +68,7 @@ async function fetchRules() {
   loading.value = true; error.value = null
   try {
     const res = await api.get(`/projects/${projectId.value}/rules`, { params: { enabledOnly: false } })
-    rules.value = res.data.data || []
+    rules.value = res.data.data?.records || []
   } catch (e) {
     error.value = e.response?.data?.message || '加载宪法规则失败'
   } finally {

@@ -4,6 +4,7 @@ import com.codeatlas.server.entity.ClassSummaryEntity;
 import org.apache.ibatis.annotations.*;
 
 import java.util.List;
+import java.util.Map;
 
 @Mapper
 public interface ClassSummaryMapper {
@@ -76,4 +77,7 @@ public interface ClassSummaryMapper {
 
     @Delete("DELETE FROM class_summary WHERE scan_id = #{scanId}")
     int deleteByScanId(Long scanId);
+
+    @Select("SELECT layer, COUNT(*) as cnt FROM class_summary WHERE scan_id = #{scanId} GROUP BY layer")
+    List<Map<String, Object>> countLayerByScanId(Long scanId);
 }

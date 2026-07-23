@@ -1,5 +1,7 @@
 package com.codeatlas.server.config;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.springframework.boot.autoconfigure.cache.RedisCacheManagerBuilderCustomizer;
 import org.springframework.cache.annotation.EnableCaching;
 import org.springframework.context.annotation.Bean;
@@ -14,30 +16,38 @@ import java.time.Duration;
 @EnableCaching
 public class CacheConfig {
 
+    private final GenericJackson2JsonRedisSerializer serializer;
+
+    public CacheConfig() {
+        ObjectMapper mapper = new ObjectMapper();
+        mapper.registerModule(new JavaTimeModule());
+        this.serializer = new GenericJackson2JsonRedisSerializer(mapper);
+    }
+
     @Bean
     public RedisCacheManagerBuilderCustomizer cacheManagerBuilderCustomizer() {
         return builder -> {
             builder.cacheDefaults(RedisCacheConfiguration.defaultCacheConfig()
                     .serializeValuesWith(RedisSerializationContext.SerializationPair
-                            .fromSerializer(new GenericJackson2JsonRedisSerializer()))
+                            .fromSerializer(serializer))
                     .entryTtl(Duration.ofMinutes(5)));
 
             builder.withCacheConfiguration("rules",
                     RedisCacheConfiguration.defaultCacheConfig()
                             .serializeValuesWith(RedisSerializationContext.SerializationPair
-                                    .fromSerializer(new GenericJackson2JsonRedisSerializer()))
+                                    .fromSerializer(serializer))
                             .entryTtl(Duration.ofMinutes(10)));
 
             builder.withCacheConfiguration("insights",
                     RedisCacheConfiguration.defaultCacheConfig()
                             .serializeValuesWith(RedisSerializationContext.SerializationPair
-                                    .fromSerializer(new GenericJackson2JsonRedisSerializer()))
+                                    .fromSerializer(serializer))
                             .entryTtl(Duration.ofMinutes(5)));
 
             builder.withCacheConfiguration("violations",
                     RedisCacheConfiguration.defaultCacheConfig()
                             .serializeValuesWith(RedisSerializationContext.SerializationPair
-                                    .fromSerializer(new GenericJackson2JsonRedisSerializer()))
+                                    .fromSerializer(serializer))
                             .entryTtl(Duration.ofMinutes(1)));
         };
     }

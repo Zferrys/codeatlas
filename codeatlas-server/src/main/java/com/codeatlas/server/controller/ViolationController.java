@@ -7,6 +7,7 @@ import com.codeatlas.server.entity.ViolationEntity;
 import com.codeatlas.server.service.ViolationService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -24,6 +25,7 @@ public class ViolationController {
     }
 
     @GetMapping
+    @PreAuthorize("isAuthenticated()")
     @Operation(summary = "获取项目违规列表")
     public ApiResponse<PageResult<ViolationVO>> getViolations(
             @PathVariable Long projectId,
@@ -36,6 +38,7 @@ public class ViolationController {
     }
 
     @PutMapping("/{violationId}/resolve")
+    @PreAuthorize("hasAnyRole('ADMIN','ARCHITECT','DEVELOPER')")
     @Operation(summary = "标记违规为已解决")
     public ApiResponse<Void> resolveViolation(@PathVariable Long projectId,
                                                @PathVariable Long violationId) {

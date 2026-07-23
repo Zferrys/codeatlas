@@ -151,7 +151,7 @@ async function fetchInsights() {
   error.value = null
   try {
     const res = await api.get(`/projects/${projectId.value}/insights`)
-    insights.value = res.data.data || []
+    insights.value = res.data.data?.records || []
   } catch (e) {
     error.value = e.response?.data?.message || '加载 AI 洞察失败'
   } finally {

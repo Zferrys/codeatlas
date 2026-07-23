@@ -25,6 +25,24 @@ const routes = [
     meta: { requiresAuth: true }
   },
   {
+    path: '/profile',
+    name: 'Profile',
+    component: () => import('../views/Profile.vue'),
+    meta: { requiresAuth: true }
+  },
+  {
+    path: '/admin/users',
+    name: 'AdminUsers',
+    component: () => import('../views/admin/AdminUsers.vue'),
+    meta: { requiresAuth: true, requiresAdmin: true }
+  },
+  {
+    path: '/admin/audit-log',
+    name: 'AdminAuditLog',
+    component: () => import('../views/admin/AdminAuditLog.vue'),
+    meta: { requiresAuth: true, requiresAdmin: true }
+  },
+  {
     path: '/project/:id',
     name: 'ProjectDetail',
     component: () => import('../views/ProjectDetail.vue'),
@@ -81,6 +99,8 @@ router.beforeEach((to, from, next) => {
 
   if (to.meta.requiresAuth && !authStore.isLoggedIn) {
     next({ name: 'Login', query: { redirect: to.fullPath } })
+  } else if (to.meta.requiresAdmin && authStore.user?.role !== 'ADMIN') {
+    next({ name: 'Dashboard' })
   } else if (to.meta.guest && authStore.isLoggedIn) {
     next({ name: 'Dashboard' })
   } else {

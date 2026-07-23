@@ -4,6 +4,7 @@ import com.codeatlas.server.entity.ScanRecord;
 import org.apache.ibatis.annotations.*;
 
 import java.util.List;
+import java.util.Map;
 
 @Mapper
 public interface ScanMapper {
@@ -36,4 +37,9 @@ public interface ScanMapper {
             + "total_violations = #{totalViolations}, duration_ms = #{durationMs}, "
             + "error_message = #{errorMessage}, completed_at = #{completedAt} WHERE id = #{id}")
     int updateStats(ScanRecord scan);
+
+    @Select("<script>SELECT project_id, COUNT(*) as cnt FROM scan WHERE project_id IN "
+            + "<foreach collection='list' item='id' open='(' separator=',' close=')'>#{id}</foreach> "
+            + "GROUP BY project_id</script>")
+    List<Map<String, Object>> countGroupByProjectIds(List<Long> projectIds);
 }

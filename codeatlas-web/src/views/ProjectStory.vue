@@ -66,7 +66,7 @@ async function fetchStory() {
   error.value = null
   try {
     const res = await api.get(`/projects/${projectId.value}/insights`, { params: { type: 'ARCH_STORY' } })
-    const list = res.data.data || []
+    const list = res.data.data?.records || []
     story.value = list.length > 0 ? list[0] : null
   } catch (e) {
     error.value = e.response?.data?.message || '加载架构叙事失败'

@@ -7,6 +7,10 @@ import com.codeatlas.server.dto.response.ProjectVO;
 import com.codeatlas.server.entity.Project;
 import com.codeatlas.server.mapper.ProjectMapper;
 import com.codeatlas.server.mapper.ProjectMemberMapper;
+import com.codeatlas.server.mapper.ScanMapper;
+import com.codeatlas.server.mapper.InsightMapper;
+import com.codeatlas.server.mapper.ClassSummaryMapper;
+import com.codeatlas.server.mapper.UserMapper;
 import com.codeatlas.server.service.impl.ProjectServiceImpl;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -32,12 +36,21 @@ class ProjectServiceImplTest {
     private ProjectMapper projectMapper;
     @Mock
     private ProjectMemberMapper projectMemberMapper;
+    @Mock
+    private ScanMapper scanMapper;
+    @Mock
+    private InsightMapper insightMapper;
+    @Mock
+    private ClassSummaryMapper classSummaryMapper;
+    @Mock
+    private UserMapper userMapper;
 
     private ProjectServiceImpl projectService;
 
     @BeforeEach
     void setUp() {
-        projectService = new ProjectServiceImpl(projectMapper, projectMemberMapper);
+        projectService = new ProjectServiceImpl(projectMapper, projectMemberMapper,
+                scanMapper, insightMapper, classSummaryMapper, userMapper);
     }
 
     // ========== create ==========

@@ -15,4 +15,8 @@ public interface ProjectService {
     void deleteProject(Long projectId, Long userId);
 
     ProjectVO updateProject(Long projectId, String name, String description, Long userId);
+
+    void addMember(Long projectId, Long targetUserId, String role, Long operatorUserId);
+
+    void removeMember(Long projectId, Long targetUserId, Long operatorUserId);
 }

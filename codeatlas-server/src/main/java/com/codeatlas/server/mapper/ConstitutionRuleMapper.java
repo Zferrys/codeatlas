@@ -48,4 +48,7 @@ public interface ConstitutionRuleMapper {
     @Update("UPDATE constitution_rule SET description = #{description}, severity = #{severity}, "
             + "rule_definition = #{ruleDefinition}, updated_at = NOW() WHERE id = #{id}")
     int update(ConstitutionRuleEntity rule);
+
+    @Delete("DELETE FROM constitution_rule WHERE id = #{id}")
+    int delete(Long id);
 }

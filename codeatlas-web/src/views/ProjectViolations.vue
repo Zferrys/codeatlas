@@ -84,7 +84,7 @@ async function fetchViolations() {
   loading.value = true; error.value = null
   try {
     const res = await api.get(`/projects/${projectId.value}/violations`)
-    violations.value = res.data.data || []
+    violations.value = res.data.data?.records || []
   } catch (e) {
     error.value = e.response?.data?.message || '加载违规列表失败'
   } finally {

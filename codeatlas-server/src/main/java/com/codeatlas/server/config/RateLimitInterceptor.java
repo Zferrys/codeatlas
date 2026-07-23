@@ -1,5 +1,7 @@
 package com.codeatlas.server.config;
 
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.Metrics;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
@@ -30,6 +32,8 @@ public class RateLimitInterceptor implements HandlerInterceptor {
     private static final int MAX_QUEUE_SIZE = 200;
     /** Redis 限流器（可为 null，此时纯内存限流） */
     private final RedisRateLimiter redisRateLimiter;
+    /** 限流命中计数器 */
+    private final Counter rateLimitCounter;
 
     public RateLimitInterceptor(int maxRequestsPerMinute) {
         this(maxRequestsPerMinute, null);
@@ -39,6 +43,10 @@ public class RateLimitInterceptor implements HandlerInterceptor {
         this.maxRequests = maxRequestsPerMinute;
         this.windowMs = 60_000L;
         this.redisRateLimiter = redisRateLimiter;
+        this.rateLimitCounter = Counter.builder("ratelimit.hit.total")
+                .description("Total rate limit hits")
+                .tag("source", redisRateLimiter != null ? "redis" : "memory")
+                .register(Metrics.globalRegistry);
     }
 
     @Override
@@ -53,6 +61,7 @@ public class RateLimitInterceptor implements HandlerInterceptor {
             if (!redisRateLimiter.tryAcquire(key, maxRequests, windowMs)) {
                 log.warn("Redis rate limit exceeded: ip={}, path={}, limit={}",
                         clientIp, path, maxRequests);
+                rateLimitCounter.increment();
                 sendRateLimitResponse(response);
                 return false;
             }
@@ -74,6 +83,7 @@ public class RateLimitInterceptor implements HandlerInterceptor {
         // 容量保护：如果队列异常膨胀，直接拒绝
         if (timestamps.size() >= MAX_QUEUE_SIZE) {
             log.warn("Rate limit queue overflow: ip={}, path={}, size={}", clientIp, path, timestamps.size());
+            rateLimitCounter.increment();
             sendRateLimitResponse(response);
             return false;
         }
@@ -83,6 +93,7 @@ public class RateLimitInterceptor implements HandlerInterceptor {
         if (timestamps.size() > maxRequests) {
             log.warn("Rate limit exceeded: ip={}, path={}, count={}, limit={}",
                     clientIp, path, timestamps.size(), maxRequests);
+            rateLimitCounter.increment();
             sendRateLimitResponse(response);
             return false;
         }

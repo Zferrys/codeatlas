@@ -7,6 +7,7 @@ import com.codeatlas.server.mapper.ClassSummaryMapper;
 import com.codeatlas.server.mapper.ProjectMapper;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.*;
@@ -25,6 +26,7 @@ public class SearchController {
     }
 
     @GetMapping
+    @PreAuthorize("isAuthenticated()")
     @Operation(summary = "全局搜索项目和类")
     public ApiResponse<Map<String, Object>> search(@RequestParam String q,
                                                     @RequestParam(defaultValue = "all") String type) {
