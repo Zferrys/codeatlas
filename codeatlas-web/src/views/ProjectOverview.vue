@@ -279,9 +279,10 @@ function formatTime(dateStr) {
 }
 
 async function loadData() {
+  const projectId = route.params.id
+  if (!projectId) return
   loading.value = true
   try {
-    const projectId = route.params.id
     const [projectRes, scanRes] = await Promise.all([
       api.get(`/projects/${projectId}`),
       api.get(`/projects/${projectId}/scans`)
@@ -295,7 +296,7 @@ async function loadData() {
       layerDistribution.value = project.layerDistribution
     }
 
-    scans.value = scanRes.data.data || []
+    scans.value = scanRes.data.data?.records || []
 
     // Build violation trend from scans (reverse to chronological)
     if (scans.value.length > 0) {
@@ -313,6 +314,8 @@ async function loadData() {
 }
 
 async function triggerScan() {
+  const projectId = route.params.id
+  if (!projectId) return
   scanning.value = true
   scanProgress.stage = ''
   scanProgress.progress = 0
@@ -320,10 +323,9 @@ async function triggerScan() {
 
   try {
     // 1. 触发扫描
-    await api.post(`/projects/${route.params.id}/scans`)
+    await api.post(`/projects/${projectId}/scans`)
 
     // 2. 订阅 SSE 进度
-    const projectId = route.params.id
     const token = localStorage.getItem('codeatlas_token')
     sseAbortController = new AbortController()
 

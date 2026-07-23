@@ -103,4 +103,21 @@ public class UserServiceImpl implements UserService {
         }
         return user;
     }
+
+    @Override
+    @Transactional
+    public void changePassword(Long userId, String oldPassword, String newPassword) {
+        User user = userMapper.findById(userId);
+        if (user == null) {
+            throw new BusinessException(ErrorCode.UNAUTHORIZED);
+        }
+        if (!passwordEncoder.matches(oldPassword, user.getPasswordHash())) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "当前密码错误");
+        }
+        if (newPassword == null || newPassword.length() < 6) {
+            throw new BusinessException(ErrorCode.PASSWORD_TOO_WEAK);
+        }
+        userMapper.updatePassword(userId, passwordEncoder.encode(newPassword));
+        log.info("Password changed for userId={}", userId);
+    }
 }

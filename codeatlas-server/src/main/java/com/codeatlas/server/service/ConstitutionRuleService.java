@@ -19,4 +19,7 @@ public interface ConstitutionRuleService {
 
     /** 更新规则定义并自动清理旧违规 */
     void updateRuleDefinition(Long ruleId, String newDefinition);
+
+    /** 删除规则（仅项目级规则可删除） */
+    void deleteRule(Long ruleId);
 }

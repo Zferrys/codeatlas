@@ -4,6 +4,7 @@ import com.codeatlas.server.entity.InsightEntity;
 import org.apache.ibatis.annotations.*;
 
 import java.util.List;
+import java.util.Map;
 
 @Mapper
 public interface InsightMapper {
@@ -58,4 +59,9 @@ public interface InsightMapper {
 
     @Delete("DELETE FROM insight WHERE project_id = #{projectId}")
     int deleteByProjectId(Long projectId);
+
+    @Select("<script>SELECT project_id, COUNT(*) as cnt FROM insight WHERE project_id IN "
+            + "<foreach collection='list' item='id' open='(' separator=',' close=')'>#{id}</foreach> "
+            + "GROUP BY project_id</script>")
+    List<Map<String, Object>> countGroupByProjectIds(List<Long> projectIds);
 }

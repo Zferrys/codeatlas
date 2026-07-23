@@ -8,6 +8,7 @@ import com.codeatlas.server.security.CodeAtlasUserDetails;
 import com.codeatlas.server.service.InsightService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
@@ -26,6 +27,7 @@ public class InsightController {
     }
 
     @GetMapping
+    @PreAuthorize("isAuthenticated()")
     @Operation(summary = "获取项目洞察列表")
     public ApiResponse<PageResult<InsightVO>> getInsights(
             @PathVariable Long projectId,

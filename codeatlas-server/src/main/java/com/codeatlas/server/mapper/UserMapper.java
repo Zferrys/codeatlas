@@ -3,6 +3,8 @@ package com.codeatlas.server.mapper;
 import com.codeatlas.server.entity.User;
 import org.apache.ibatis.annotations.*;
 
+import java.util.List;
+
 @Mapper
 public interface UserMapper {
 
@@ -25,4 +27,21 @@ public interface UserMapper {
 
     @Update("UPDATE `user` SET last_login_at = NOW() WHERE id = #{id}")
     int updateLoginTime(Long id);
+
+    @Update("UPDATE `user` SET password_hash = #{newHash} WHERE id = #{id}")
+    int updatePassword(@Param("id") Long id, @Param("newHash") String newHash);
+
+    // --- Admin operations ---
+
+    @Select("SELECT * FROM `user` ORDER BY created_at DESC LIMIT #{offset}, #{size}")
+    List<User> findAllPaged(@Param("offset") int offset, @Param("size") int size);
+
+    @Select("SELECT COUNT(*) FROM `user`")
+    long countAll();
+
+    @Update("UPDATE `user` SET role = #{role} WHERE id = #{id}")
+    int updateRole(@Param("id") Long id, @Param("role") String role);
+
+    @Update("UPDATE `user` SET status = #{status} WHERE id = #{id}")
+    int updateStatus(@Param("id") Long id, @Param("status") int status);
 }

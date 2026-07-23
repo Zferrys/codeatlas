@@ -6,6 +6,7 @@ import com.codeatlas.server.security.CodeAtlasUserDetails;
 import com.codeatlas.server.service.MapService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
@@ -21,6 +22,7 @@ public class MapController {
     }
 
     @GetMapping
+    @PreAuthorize("isAuthenticated()")
     @Operation(summary = "获取项目依赖图谱")
     public ApiResponse<GraphVO> getProjectMap(@PathVariable Long projectId,
                                               @AuthenticationPrincipal CodeAtlasUserDetails principal) {
@@ -28,6 +30,7 @@ public class MapController {
     }
 
     @GetMapping("/graph")
+    @PreAuthorize("isAuthenticated()")
     @Operation(summary = "查询类依赖子图（Neo4j 遍历）")
     public ApiResponse<GraphVO> getSubgraph(@PathVariable Long projectId,
                                             @RequestParam String fqn,

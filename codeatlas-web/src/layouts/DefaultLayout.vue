@@ -35,6 +35,17 @@
           <span>工作台</span>
         </a-menu-item>
 
+        <a-menu-item-group v-if="authStore.user?.role === 'ADMIN'" title="管理后台">
+          <a-menu-item key="admin-users">
+            <template #icon><TeamOutlined /></template>
+            <span>用户管理</span>
+          </a-menu-item>
+          <a-menu-item key="admin-audit-log">
+            <template #icon><AuditOutlined /></template>
+            <span>审计日志</span>
+          </a-menu-item>
+        </a-menu-item-group>
+
         <a-menu-item-group v-if="currentProjectId" title="当前项目">
           <a-menu-item key="overview">
             <template #icon><AppstoreOutlined /></template>
@@ -112,13 +123,25 @@
           </a-tooltip>
 
           <!-- 通知 -->
-          <a-tooltip title="暂无新通知">
-            <a-badge :count="5" :dot="true" :offset="[-2, 4]">
-              <a-button type="text" class="header-btn">
-                <BellOutlined />
-              </a-button>
-            </a-badge>
-          </a-tooltip>
+          <a-dropdown :trigger="['click']">
+            <a-tooltip title="通知">
+              <a-badge :count="0" :dot="false">
+                <a-button type="text" class="header-btn">
+                  <BellOutlined />
+                </a-button>
+              </a-badge>
+            </a-tooltip>
+            <template #overlay>
+              <a-menu style="width:280px">
+                <div style="padding:12px 16px;border-bottom:1px solid #f0f0f0">
+                  <span style="font-weight:600;font-size:14px">通知</span>
+                </div>
+                <div style="padding:24px 16px;text-align:center">
+                  <a-empty description="暂无通知" :image-style="{ height: '40px' }" />
+                </div>
+              </a-menu>
+            </template>
+          </a-dropdown>
 
           <!-- 用户下拉 -->
           <a-dropdown :trigger="['click']">
@@ -161,11 +184,11 @@
             v-model:value="searchQuery"
             size="large"
             placeholder="搜索项目或类名..."
-            :prefix="SearchOutlined"
             allow-clear
             @input="onSearchInput"
             @keydown.esc="closeSearch"
           >
+            <template #prefix><SearchOutlined /></template>
             <template #suffix>
               <a-tag color="processing" v-if="searching">搜索中...</a-tag>
             </template>
@@ -236,7 +259,8 @@ import {
   DashboardOutlined, AppstoreOutlined, AimOutlined, ReadOutlined,
   SafetyOutlined, WarningOutlined, BulbOutlined, SettingOutlined,
   MenuFoldOutlined, MenuUnfoldOutlined, BellOutlined, SearchOutlined,
-  UserOutlined, LogoutOutlined, GithubOutlined, ProjectOutlined, FileTextOutlined
+  UserOutlined, LogoutOutlined, GithubOutlined, ProjectOutlined, FileTextOutlined,
+  TeamOutlined, AuditOutlined
 } from '@ant-design/icons-vue'
 import api from '../api'
 
@@ -247,6 +271,19 @@ const authStore = useAuthStore()
 const collapsed = ref(false)
 const isMobile = ref(false)
 const isDark = ref(false)
+
+// 从 localStorage 恢复主题
+function initTheme() {
+  const saved = localStorage.getItem('codeatlas_theme')
+  if (saved === 'dark') {
+    isDark.value = true
+    document.documentElement.setAttribute('data-theme', 'dark')
+  } else if (saved === 'light') {
+    isDark.value = false
+    document.documentElement.setAttribute('data-theme', 'light')
+  }
+}
+initTheme()
 
 const selectedKeys = ref(['dashboard'])
 
@@ -262,6 +299,13 @@ const breadcrumbs = computed(() => {
 
   if (pathParts[0] === 'dashboard') {
     items.push({ label: '工作台' })
+  } else if (pathParts[0] === 'admin') {
+    items.push({ label: '工作台', path: '/dashboard' })
+    items.push({ label: '管理后台' })
+    const adminTabMap = { users: '用户管理', 'audit-log': '审计日志' }
+    if (pathParts.length >= 2) {
+      items.push({ label: adminTabMap[pathParts[1]] || pathParts[1] })
+    }
   } else if (pathParts[0] === 'project') {
     items.push({ label: '工作台', path: '/dashboard' })
     if (pathParts.length >= 2) {
@@ -285,6 +329,10 @@ watch(() => route.name, (name) => {
   if (!name) return
   if (name === 'Dashboard') {
     selectedKeys.value = ['dashboard']
+  } else if (name === 'AdminUsers') {
+    selectedKeys.value = ['admin-users']
+  } else if (name === 'AdminAuditLog') {
+    selectedKeys.value = ['admin-audit-log']
   } else {
     const key = name.replace('Project', '').toLowerCase()
     selectedKeys.value = [key]
@@ -294,13 +342,19 @@ watch(() => route.name, (name) => {
 function onMenuClick({ key }) {
   if (key === 'dashboard') {
     router.push('/dashboard')
+  } else if (key === 'admin-users') {
+    router.push('/admin/users')
+  } else if (key === 'admin-audit-log') {
+    router.push('/admin/audit-log')
   } else if (currentProjectId.value) {
     router.push(`/project/${currentProjectId.value}/${key}`)
   }
 }
 
 function onUserMenuClick({ key }) {
-  if (key === 'logout') {
+  if (key === 'profile') {
+    router.push('/profile')
+  } else if (key === 'logout') {
     authStore.logout()
     router.push('/login')
   }
@@ -308,7 +362,9 @@ function onUserMenuClick({ key }) {
 
 function toggleTheme() {
   isDark.value = !isDark.value
-  document.documentElement.setAttribute('data-theme', isDark.value ? 'dark' : 'light')
+  const theme = isDark.value ? 'dark' : 'light'
+  document.documentElement.setAttribute('data-theme', theme)
+  localStorage.setItem('codeatlas_theme', theme)
 }
 
 function onBreakpoint(broken) {

@@ -36,6 +36,7 @@ public class ProjectController {
     }
 
     @GetMapping
+    @PreAuthorize("isAuthenticated()")
     @Operation(summary = "项目列表")
     public ApiResponse<PageResult<ProjectVO>> listProjects(
             @AuthenticationPrincipal CodeAtlasUserDetails principal,
@@ -68,5 +69,26 @@ public class ProjectController {
                                                  @AuthenticationPrincipal CodeAtlasUserDetails principal) {
         return ApiResponse.success(projectService.updateProject(
                 id, request.getName(), request.getDescription(), principal.getUserId()));
+    }
+
+    @PostMapping("/{id}/members")
+    @Operation(summary = "添加项目成员")
+    @PreAuthorize("isAuthenticated()")
+    public ApiResponse<Void> addMember(@PathVariable Long id,
+                                        @RequestParam Long userId,
+                                        @RequestParam String role,
+                                        @AuthenticationPrincipal CodeAtlasUserDetails principal) {
+        projectService.addMember(id, userId, role, principal.getUserId());
+        return ApiResponse.success(null);
+    }
+
+    @DeleteMapping("/{id}/members/{userId}")
+    @Operation(summary = "移除项目成员")
+    @PreAuthorize("isAuthenticated()")
+    public ApiResponse<Void> removeMember(@PathVariable Long id,
+                                           @PathVariable Long userId,
+                                           @AuthenticationPrincipal CodeAtlasUserDetails principal) {
+        projectService.removeMember(id, userId, principal.getUserId());
+        return ApiResponse.success(null);
     }
 }

@@ -3,6 +3,7 @@ package com.codeatlas.server.controller;
 import com.codeatlas.common.constant.ErrorCode;
 import com.codeatlas.common.dto.ApiResponse;
 import com.codeatlas.server.annotation.AuditLog;
+import com.codeatlas.server.dto.request.ChangePasswordRequest;
 import com.codeatlas.server.dto.request.LoginRequest;
 import com.codeatlas.server.dto.request.RegisterRequest;
 import com.codeatlas.server.security.CodeAtlasUserDetails;
@@ -59,7 +60,21 @@ public class AuthController {
         result.put("username", user.getUsername());
         result.put("email", user.getEmail());
         result.put("role", user.getRole());
+        result.put("status", user.getStatus());
         result.put("avatarUrl", user.getAvatarUrl());
+        result.put("createdAt", user.getCreatedAt());
         return ApiResponse.success(result);
+    }
+
+    @PutMapping("/password")
+    @Operation(summary = "修改密码")
+    public ApiResponse<Void> changePassword(@AuthenticationPrincipal CodeAtlasUserDetails principal,
+                                            @Valid @RequestBody ChangePasswordRequest request) {
+        if (principal == null) {
+            return ApiResponse.error(ErrorCode.UNAUTHORIZED);
+        }
+        userService.changePassword(principal.getUserId(),
+                request.getOldPassword(), request.getNewPassword());
+        return ApiResponse.success();
     }
 }

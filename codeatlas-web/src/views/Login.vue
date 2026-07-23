@@ -34,7 +34,7 @@
 
       <div class="form-extra">
         <a-checkbox v-model:checked="rememberMe">记住登录</a-checkbox>
-        <a class="forgot-link">忘记密码？</a>
+        <a class="forgot-link" @click="onForgotPassword">忘记密码？</a>
       </div>
 
       <a-form-item>
@@ -93,6 +93,10 @@ async function handleLogin() {
   } finally {
     loading.value = false
   }
+}
+
+function onForgotPassword() {
+  message.info('请联系管理员重置密码')
 }
 </script>
 

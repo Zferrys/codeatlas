@@ -58,4 +58,14 @@ public class ConstitutionRuleController {
         }
         return ApiResponse.success(ConstitutionRuleVO.from(entity));
     }
+
+    @DeleteMapping("/{ruleId}")
+    @Operation(summary = "删除规则（仅项目级规则）")
+    @PreAuthorize("hasAnyRole('ADMIN','ARCHITECT')")
+    @AuditLog(action = "DELETE_RULE", targetType = "RULE", targetIdExpression = "#ruleId", detail = "删除规则")
+    public ApiResponse<Void> deleteRule(@PathVariable Long projectId,
+                                         @PathVariable Long ruleId) {
+        ruleService.deleteRule(ruleId);
+        return ApiResponse.success(null);
+    }
 }

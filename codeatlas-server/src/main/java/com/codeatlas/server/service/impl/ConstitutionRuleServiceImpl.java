@@ -1,6 +1,8 @@
 package com.codeatlas.server.service.impl;
 
+import com.codeatlas.common.constant.ErrorCode;
 import com.codeatlas.common.dto.PageResult;
+import com.codeatlas.common.exception.BusinessException;
 import com.codeatlas.server.entity.ConstitutionRuleEntity;
 import com.codeatlas.server.mapper.ConstitutionRuleMapper;
 import com.codeatlas.server.mapper.ViolationMapper;
@@ -92,5 +94,20 @@ public class ConstitutionRuleServiceImpl implements ConstitutionRuleService {
         int resolved = violationMapper.resolveAllByRuleId(ruleId);
         log.info("Rule {} definition updated to v{}, auto-resolved {} violations",
                 rule.getName(), version, resolved);
+    }
+
+    @Override
+    @Transactional
+    public void deleteRule(Long ruleId) {
+        ConstitutionRuleEntity rule = mapper.findById(ruleId);
+        if (rule == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND, "规则不存在");
+        }
+        if (rule.getProjectId() == null) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "内置规则不可删除");
+        }
+        violationMapper.resolveAllByRuleId(ruleId);
+        mapper.delete(ruleId);
+        log.info("Rule deleted: id={}, name={}", ruleId, rule.getName());
     }
 }
