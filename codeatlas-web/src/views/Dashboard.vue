@@ -407,19 +407,19 @@ function healthColor(score) {
 }
 
 .stat-card {
-  background: #fff;
+  background: var(--color-bg-component);
   border-radius: 12px;
   padding: 20px;
   display: flex;
   align-items: center;
   gap: 16px;
-  box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+  box-shadow: 0 1px 4px var(--color-shadow);
   transition: transform 0.2s, box-shadow 0.2s;
 }
 
 .stat-card:hover {
   transform: translateY(-2px);
-  box-shadow: 0 4px 16px rgba(0,0,0,0.08);
+  box-shadow: 0 4px 16px var(--color-shadow-hover);
 }
 
 .stat-icon {
@@ -441,13 +441,13 @@ function healthColor(score) {
 .stat-value {
   font-size: 28px;
   font-weight: 700;
-  color: #1a1a2e;
+  color: var(--color-text-primary);
   line-height: 1.2;
 }
 
 .stat-label {
   font-size: 13px;
-  color: #999;
+  color: var(--color-text-tertiary);
   margin-top: 2px;
 }
 
@@ -462,7 +462,7 @@ function healthColor(score) {
 .section-title {
   font-size: 20px;
   font-weight: 600;
-  color: #1a1a2e;
+  color: var(--color-text-primary);
   margin: 0;
 }
 
@@ -482,7 +482,7 @@ function healthColor(score) {
 
 .project-card:hover {
   transform: translateY(-3px);
-  box-shadow: 0 8px 24px rgba(0,0,0,0.1);
+  box-shadow: 0 8px 24px var(--color-shadow-hover);
 }
 
 .card-delete {
@@ -539,7 +539,7 @@ function healthColor(score) {
 .card-title {
   font-size: 15px;
   font-weight: 600;
-  color: #1a1a2e;
+  color: var(--color-text-primary);
   margin: 0 0 4px;
   white-space: nowrap;
   overflow: hidden;
@@ -547,7 +547,7 @@ function healthColor(score) {
 }
 
 .card-desc {
-  color: #999;
+  color: var(--color-text-tertiary);
   font-size: 13px;
   margin: 0 0 16px;
   height: 20px;
@@ -559,7 +559,7 @@ function healthColor(score) {
 .card-stats {
   display: flex;
   gap: 16px;
-  color: #666;
+  color: var(--color-text-secondary);
   font-size: 12px;
 }
 
@@ -582,7 +582,7 @@ function healthColor(score) {
 
 .health-label {
   font-size: 10px;
-  color: #999;
+  color: var(--color-text-tertiary);
 }
 
 /* 上传组件 */
