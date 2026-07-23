@@ -63,7 +63,7 @@ public class MapServiceImpl implements MapService {
     }
 
     @Override
-    public GraphVO getSubgraph(Long projectId, String fqn, int depth) {
+    public GraphVO getSubgraph(Long projectId, String fqn, int depth, Long userId) {
         Project project = projectMapper.findById(projectId);
         if (project == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND, "项目不存在");

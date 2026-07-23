@@ -1,6 +1,5 @@
 package com.codeatlas.server.controller;
 
-import com.codeatlas.common.constant.ErrorCode;
 import com.codeatlas.common.dto.ApiResponse;
 import com.codeatlas.server.annotation.AuditLog;
 import com.codeatlas.server.dto.request.ChangePasswordRequest;
@@ -11,6 +10,7 @@ import com.codeatlas.server.service.UserService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
@@ -50,10 +50,8 @@ public class AuthController {
 
     @GetMapping("/me")
     @Operation(summary = "获取当前用户信息")
+    @PreAuthorize("isAuthenticated()")
     public ApiResponse<Map<String, Object>> me(@AuthenticationPrincipal CodeAtlasUserDetails principal) {
-        if (principal == null) {
-            return ApiResponse.error(ErrorCode.UNAUTHORIZED);
-        }
         com.codeatlas.server.entity.User user = userService.getCurrentUser(principal.getUserId());
         Map<String, Object> result = new java.util.HashMap<>();
         result.put("id", user.getId());
@@ -68,11 +66,9 @@ public class AuthController {
 
     @PutMapping("/password")
     @Operation(summary = "修改密码")
+    @PreAuthorize("isAuthenticated()")
     public ApiResponse<Void> changePassword(@AuthenticationPrincipal CodeAtlasUserDetails principal,
                                             @Valid @RequestBody ChangePasswordRequest request) {
-        if (principal == null) {
-            return ApiResponse.error(ErrorCode.UNAUTHORIZED);
-        }
         userService.changePassword(principal.getUserId(),
                 request.getOldPassword(), request.getNewPassword());
         return ApiResponse.success();

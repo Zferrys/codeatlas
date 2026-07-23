@@ -36,6 +36,6 @@ public class MapController {
                                             @RequestParam String fqn,
                                             @RequestParam(defaultValue = "2") int depth,
                                             @AuthenticationPrincipal CodeAtlasUserDetails principal) {
-        return ApiResponse.success(mapService.getSubgraph(projectId, fqn, depth));
+        return ApiResponse.success(mapService.getSubgraph(projectId, fqn, depth, principal.getUserId()));
     }
 }

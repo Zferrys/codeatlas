@@ -25,6 +25,13 @@
             <a-tag v-if="record.targetType">{{ record.targetType }}</a-tag>
             <span v-else>-</span>
           </template>
+          <template v-else-if="column.key === 'ipAddress'">
+            <a-tooltip title="请求来源IP地址（127.0.0.1 表示本地访问）">
+              <span :style="{ color: isLocalIp(record.ipAddress) ? '#999' : '#333' }">
+                {{ formatIp(record.ipAddress) }}
+              </span>
+            </a-tooltip>
+          </template>
           <template v-else-if="column.key === 'createdAt'">
             {{ formatDate(record.createdAt) }}
           </template>
@@ -57,8 +64,8 @@ const columns = [
   { title: '目标类型', dataIndex: 'targetType', key: 'targetType', width: 100 },
   { title: '目标ID', dataIndex: 'targetId', key: 'targetId', width: 80 },
   { title: '详情', dataIndex: 'detail', key: 'detail' },
-  { title: 'IP地址', dataIndex: 'ipAddress', key: 'ipAddress', width: 140 },
-  { title: '时间', dataIndex: 'createdAt', key: 'createdAt', width: 170 }
+  { title: '来源IP', dataIndex: 'ipAddress', key: 'ipAddress', width: 140 },
+  { title: '操作时间', dataIndex: 'createdAt', key: 'createdAt', width: 170 }
 ]
 
 function actionColor(action) {
@@ -71,6 +78,16 @@ function actionColor(action) {
     'REGISTER': 'geekblue'
   }
   return map[action] || 'default'
+}
+
+function isLocalIp(ip) {
+  return !ip || ip === '127.0.0.1' || ip === '0:0:0:0:0:0:0:1' || ip === '::1'
+}
+
+function formatIp(ip) {
+  if (!ip) return '-'
+  if (isLocalIp(ip)) return '本地访问'
+  return ip
 }
 
 function formatDate(val) {

@@ -94,7 +94,7 @@ public class FileServiceImpl implements FileService {
             CreateProjectRequest request = new CreateProjectRequest();
             request.setName(projectName);
             request.setDescription("从上传文件导入: " + originalName);
-            request.setSourceType("LOCAL");
+            request.setSourceType("ZIP_UPLOAD");
             request.setSourceUrl(projectRoot.toAbsolutePath().toString());
 
             ProjectVO project = projectService.createProject(request, userId);

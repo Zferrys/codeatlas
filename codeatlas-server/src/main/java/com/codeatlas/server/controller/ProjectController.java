@@ -47,14 +47,15 @@ public class ProjectController {
 
     @GetMapping("/{id}")
     @Operation(summary = "项目详情")
+    @PreAuthorize("isAuthenticated()")
     public ApiResponse<ProjectVO> getProject(@PathVariable Long id,
                                               @AuthenticationPrincipal CodeAtlasUserDetails principal) {
         return ApiResponse.success(projectService.getProjectById(id, principal.getUserId()));
     }
 
     @DeleteMapping("/{id}")
-    @Operation(summary = "删除项目")
-    @PreAuthorize("hasRole('ADMIN')")
+    @Operation(summary = "删除项目（项目创建者或管理员可删除）")
+    @PreAuthorize("isAuthenticated()")
     public ApiResponse<Void> deleteProject(@PathVariable Long id,
                                             @AuthenticationPrincipal CodeAtlasUserDetails principal) {
         projectService.deleteProject(id, principal.getUserId());
