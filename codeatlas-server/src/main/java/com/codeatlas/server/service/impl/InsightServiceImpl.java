@@ -1,5 +1,6 @@
 package com.codeatlas.server.service.impl;
 
+import com.codeatlas.common.dto.PageResult;
 import com.codeatlas.server.entity.InsightEntity;
 import com.codeatlas.server.mapper.InsightMapper;
 import com.codeatlas.server.service.InsightService;
@@ -24,13 +25,19 @@ public class InsightServiceImpl implements InsightService {
     }
 
     @Override
-    public List<InsightEntity> getInsights(Long projectId) {
-        return insightMapper.findByProjectId(projectId);
+    public PageResult<InsightEntity> getInsights(Long projectId, int page, int size) {
+        long total = insightMapper.countByProjectId(projectId);
+        int offset = (page - 1) * size;
+        List<InsightEntity> records = insightMapper.findByProjectIdPaged(projectId, offset, size);
+        return new PageResult<>(records, total, page, size);
     }
 
     @Override
-    public List<InsightEntity> getInsightsByType(Long projectId, String type) {
-        return insightMapper.findByProjectIdAndType(projectId, type);
+    public PageResult<InsightEntity> getInsightsByType(Long projectId, String type, int page, int size) {
+        long total = insightMapper.countByProjectIdAndType(projectId, type);
+        int offset = (page - 1) * size;
+        List<InsightEntity> records = insightMapper.findByProjectIdAndTypePaged(projectId, type, offset, size);
+        return new PageResult<>(records, total, page, size);
     }
 
     @Override

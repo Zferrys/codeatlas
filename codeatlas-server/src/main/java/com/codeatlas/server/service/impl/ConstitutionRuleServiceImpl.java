@@ -1,11 +1,14 @@
 package com.codeatlas.server.service.impl;
 
+import com.codeatlas.common.dto.PageResult;
 import com.codeatlas.server.entity.ConstitutionRuleEntity;
 import com.codeatlas.server.mapper.ConstitutionRuleMapper;
 import com.codeatlas.server.mapper.ViolationMapper;
 import com.codeatlas.server.service.ConstitutionRuleService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -25,6 +28,7 @@ public class ConstitutionRuleServiceImpl implements ConstitutionRuleService {
     }
 
     @Override
+    @Cacheable(value = "rules", key = "#projectId")
     public List<ConstitutionRuleEntity> getRules(Long projectId) {
         return mapper.findByProjectId(projectId);
     }
@@ -35,7 +39,24 @@ public class ConstitutionRuleServiceImpl implements ConstitutionRuleService {
     }
 
     @Override
+    public PageResult<ConstitutionRuleEntity> getRulesPaged(Long projectId, int page, int size) {
+        long total = mapper.countByProjectId(projectId);
+        int offset = (page - 1) * size;
+        List<ConstitutionRuleEntity> records = mapper.findByProjectIdPaged(projectId, offset, size);
+        return new PageResult<>(records, total, page, size);
+    }
+
+    @Override
+    public PageResult<ConstitutionRuleEntity> getAllRulesPaged(Long projectId, int page, int size) {
+        long total = mapper.countAllByProjectId(projectId);
+        int offset = (page - 1) * size;
+        List<ConstitutionRuleEntity> records = mapper.findAllByProjectIdPaged(projectId, offset, size);
+        return new PageResult<>(records, total, page, size);
+    }
+
+    @Override
     @Transactional
+    @CacheEvict(value = "rules", allEntries = true)
     public ConstitutionRuleEntity toggleRule(Long ruleId, boolean enabled) {
         ConstitutionRuleEntity rule = mapper.findById(ruleId);
         if (rule == null) {

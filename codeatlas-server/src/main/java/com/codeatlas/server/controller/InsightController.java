@@ -1,6 +1,7 @@
 package com.codeatlas.server.controller;
 
 import com.codeatlas.common.dto.ApiResponse;
+import com.codeatlas.common.dto.PageResult;
 import com.codeatlas.server.dto.response.InsightVO;
 import com.codeatlas.server.entity.InsightEntity;
 import com.codeatlas.server.security.CodeAtlasUserDetails;
@@ -26,16 +27,20 @@ public class InsightController {
 
     @GetMapping
     @Operation(summary = "获取项目洞察列表")
-    public ApiResponse<List<InsightVO>> getInsights(@PathVariable Long projectId,
-                                                     @RequestParam(required = false) String type,
-                                                     @AuthenticationPrincipal CodeAtlasUserDetails principal) {
-        List<InsightEntity> insights;
+    public ApiResponse<PageResult<InsightVO>> getInsights(
+            @PathVariable Long projectId,
+            @RequestParam(required = false) String type,
+            @AuthenticationPrincipal CodeAtlasUserDetails principal,
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        PageResult<InsightEntity> pageResult;
         if (type != null && !type.isEmpty()) {
-            insights = insightService.getInsightsByType(projectId, type);
+            pageResult = insightService.getInsightsByType(projectId, type, page, size);
         } else {
-            insights = insightService.getInsights(projectId);
+            pageResult = insightService.getInsights(projectId, page, size);
         }
-        List<InsightVO> result = insights.stream().map(InsightVO::from).collect(Collectors.toList());
-        return ApiResponse.success(result);
+        List<InsightVO> records = pageResult.getRecords().stream()
+                .map(InsightVO::from).collect(Collectors.toList());
+        return ApiResponse.success(new PageResult<>(records, pageResult.getTotal(), page, size));
     }
 }

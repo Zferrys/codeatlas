@@ -1,6 +1,7 @@
 package com.codeatlas.server.service.impl;
 
 import com.codeatlas.common.constant.ErrorCode;
+import com.codeatlas.common.dto.PageResult;
 import com.codeatlas.common.exception.BusinessException;
 import com.codeatlas.server.entity.ViolationEntity;
 import com.codeatlas.server.mapper.ViolationMapper;
@@ -24,8 +25,11 @@ public class ViolationServiceImpl implements ViolationService {
     }
 
     @Override
-    public List<ViolationEntity> getViolations(Long projectId) {
-        return mapper.findByProjectId(projectId);
+    public PageResult<ViolationEntity> getViolations(Long projectId, int page, int size) {
+        long total = mapper.countByProjectId(projectId);
+        int offset = (page - 1) * size;
+        List<ViolationEntity> records = mapper.findByProjectIdPaged(projectId, offset, size);
+        return new PageResult<>(records, total, page, size);
     }
 
     @Override

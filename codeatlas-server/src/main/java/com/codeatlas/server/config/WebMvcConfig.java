@@ -4,6 +4,7 @@ import com.codeatlas.server.security.CodeAtlasUserDetails;
 import org.slf4j.MDC;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.MethodParameter;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.support.WebDataBinderFactory;
 import org.springframework.web.context.request.NativeWebRequest;
@@ -20,6 +21,12 @@ import java.util.UUID;
 
 @Configuration
 public class WebMvcConfig implements WebMvcConfigurer {
+
+    private final StringRedisTemplate redisTemplate;
+
+    public WebMvcConfig(StringRedisTemplate redisTemplate) {
+        this.redisTemplate = redisTemplate;
+    }
 
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
@@ -45,10 +52,21 @@ public class WebMvcConfig implements WebMvcConfigurer {
             }
         }).order(1);
 
-        // API 限流：默认 60 次/分钟，登录接口更严格
+        // 登录端点限流：10 次/分钟
+        registry.addInterceptor(new RateLimitInterceptor(10))
+                .addPathPatterns("/api/v1/auth/login")
+                .order(2);
+
+        // AI 端点限流：5 次/分钟
+        registry.addInterceptor(new RateLimitInterceptor(5))
+                .addPathPatterns("/api/v1/projects/*/scans")
+                .order(3);
+
+        // 通用 API 限流：60 次/分钟
         registry.addInterceptor(new RateLimitInterceptor(60))
                 .addPathPatterns("/api/**")
-                .order(2);
+                .excludePathPatterns("/api/v1/auth/login", "/api/v1/projects/*/scans")
+                .order(4);
     }
 
     @Override

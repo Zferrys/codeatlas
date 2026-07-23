@@ -1,6 +1,7 @@
 package com.codeatlas.server.controller;
 
 import com.codeatlas.common.dto.ApiResponse;
+import com.codeatlas.common.dto.PageResult;
 import com.codeatlas.server.annotation.AuditLog;
 import com.codeatlas.server.dto.request.CreateProjectRequest;
 import com.codeatlas.server.dto.request.UpdateProjectRequest;
@@ -13,10 +14,6 @@ import jakarta.validation.Valid;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
-
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
 
 @RestController
 @RequestMapping("/api/v1/projects")
@@ -40,11 +37,11 @@ public class ProjectController {
 
     @GetMapping
     @Operation(summary = "项目列表")
-    public ApiResponse<Map<String, Object>> listProjects(@AuthenticationPrincipal CodeAtlasUserDetails principal) {
-        List<ProjectVO> projects = projectService.listProjects(principal.getUserId());
-        Map<String, Object> result = new HashMap<>();
-        result.put("records", projects);
-        return ApiResponse.success(result);
+    public ApiResponse<PageResult<ProjectVO>> listProjects(
+            @AuthenticationPrincipal CodeAtlasUserDetails principal,
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        return ApiResponse.success(projectService.listProjects(principal.getUserId(), page, size));
     }
 
     @GetMapping("/{id}")

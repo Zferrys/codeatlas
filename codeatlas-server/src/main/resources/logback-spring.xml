@@ -3,6 +3,8 @@
     <property name="LOG_PATH" value="logs"/>
     <property name="LOG_PATTERN" value="%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %X{traceId} - %msg%n"/>
     <property name="CONSOLE_PATTERN" value="%d{HH:mm:ss.SSS} %highlight(%-5level) [%thread] %logger{36} - %X{traceId} - %msg%n"/>
+    <!-- JWT token 脱敏正则：匹配 eyJ 开头的 Base64URL token -->
+    <property name="LOG_PATTERN_MASK" value="%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %X{traceId} - %replace(%msg){'eyJ[a-zA-Z0-9_\-]+\.[a-zA-Z0-9_\-]+\.[a-zA-Z0-9_\-]+','***'}%n"/>
 
     <!-- 控制台输出 -->
     <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
@@ -57,8 +59,26 @@
         </encoder>
     </appender>
 
-    <!-- 业务日志 -->
-    <logger name="com.codeatlas" level="DEBUG"/>
+    <!-- AsyncAppender 包装 — 异步写日志，不阻塞业务线程 -->
+    <appender name="ASYNC_FILE" class="ch.qos.logback.classic.AsyncAppender">
+        <queueSize>512</queueSize>
+        <discardingThreshold>0</discardingThreshold>
+        <appender-ref ref="FILE"/>
+    </appender>
+
+    <appender name="ASYNC_ERROR_FILE" class="ch.qos.logback.classic.AsyncAppender">
+        <queueSize>256</queueSize>
+        <discardingThreshold>0</discardingThreshold>
+        <appender-ref ref="ERROR_FILE"/>
+    </appender>
+
+    <!-- 业务日志：生产 INFO，开发 DEBUG -->
+    <springProfile name="dev,default">
+        <logger name="com.codeatlas" level="DEBUG"/>
+    </springProfile>
+    <springProfile name="prod">
+        <logger name="com.codeatlas" level="INFO"/>
+    </springProfile>
     <logger name="org.springframework.security" level="INFO"/>
 
     <!-- AI 审计 logger -->
@@ -68,7 +88,7 @@
 
     <root level="INFO">
         <appender-ref ref="CONSOLE"/>
-        <appender-ref ref="FILE"/>
-        <appender-ref ref="ERROR_FILE"/>
+        <appender-ref ref="ASYNC_FILE"/>
+        <appender-ref ref="ASYNC_ERROR_FILE"/>
     </root>
 </configuration>
