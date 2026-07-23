@@ -144,6 +144,23 @@
         <a-form-item v-if="createForm.sourceType === 'GIT_URL'" label="Git URL">
           <a-input v-model:value="createForm.sourceUrl" placeholder="https://github.com/user/repo.git" />
         </a-form-item>
+        <a-form-item v-if="createForm.sourceType === 'ZIP_UPLOAD'" label="上传源码包">
+          <a-upload-dragger
+            :custom-request="handleZipUpload"
+            :before-upload="beforeZipUpload"
+            :show-upload-list="false"
+            accept=".zip,.tar.gz,.tgz"
+          >
+            <p class="upload-icon">
+              <InboxOutlined style="font-size:36px;color:#667eea" />
+            </p>
+            <p class="upload-text">点击或拖拽 ZIP / TAR.GZ 文件到此处</p>
+            <p class="upload-hint">文件大小不超过 100MB</p>
+          </a-upload-dragger>
+          <div v-if="uploading" style="margin-top:12px">
+            <a-progress :percent="uploadPercent" status="active" />
+          </div>
+        </a-form-item>
         <a-form-item label="项目描述">
           <a-textarea v-model:value="createForm.description" placeholder="可选描述" :rows="3" />
         </a-form-item>
@@ -159,7 +176,7 @@ import { useAuthStore } from '../stores/auth'
 import { message } from 'ant-design-vue'
 import {
   ProjectOutlined, FileTextOutlined, ScanOutlined, BulbOutlined,
-  PlusOutlined, ClockCircleOutlined
+  PlusOutlined, ClockCircleOutlined, InboxOutlined
 } from '@ant-design/icons-vue'
 import api from '../api'
 
@@ -209,6 +226,58 @@ onMounted(async () => {
     loading.value = false
   }
 })
+
+const uploading = ref(false)
+const uploadPercent = ref(0)
+const uploadFile = ref(null)
+
+function beforeZipUpload(file) {
+  const isValidType = file.name.endsWith('.zip') || file.name.endsWith('.tar.gz') || file.name.endsWith('.tgz')
+  if (!isValidType) {
+    message.error('仅支持 .zip / .tar.gz / .tgz 格式文件')
+    return false
+  }
+  const isUnderSize = file.size / 1024 / 1024 < 100
+  if (!isUnderSize) {
+    message.error('文件大小不能超过 100MB')
+    return false
+  }
+  return true
+}
+
+async function handleZipUpload({ file, onProgress, onSuccess, onError }) {
+  uploading.value = true
+  uploadPercent.value = 0
+  try {
+    const formData = new FormData()
+    formData.append('file', file)
+    const res = await api.post('/files/upload', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      onUploadProgress: (e) => {
+        if (e.total > 0) {
+          uploadPercent.value = Math.round((e.loaded / e.total) * 100)
+        }
+      }
+    })
+    const newProject = res.data.data
+    message.success('项目创建成功，即将开始扫描')
+    showCreateModal.value = false
+    createForm.name = ''
+    createForm.sourceType = 'GIT_URL'
+    createForm.sourceUrl = ''
+    createForm.description = ''
+    uploadFile.value = null
+    if (newProject?.id) {
+      router.push(`/project/${newProject.id}/overview`)
+    }
+    onSuccess(res.data, file)
+  } catch (e) {
+    message.error('上传失败: ' + (e.response?.data?.message || e.message))
+    onError(e, file)
+  } finally {
+    uploading.value = false
+  }
+}
 
 function goProject(id) {
   router.push(`/project/${id}/overview`)
@@ -429,5 +498,21 @@ function healthColor(score) {
 .health-label {
   font-size: 10px;
   color: #999;
+}
+
+/* 上传组件 */
+.upload-icon {
+  margin-bottom: 8px;
+}
+
+.upload-text {
+  font-size: 14px;
+  color: #555;
+}
+
+.upload-hint {
+  font-size: 12px;
+  color: #bbb;
+  margin-top: 4px;
 }
 </style>
