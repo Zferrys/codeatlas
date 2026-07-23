@@ -1,6 +1,7 @@
 package com.codeatlas.server.controller;
 
 import com.codeatlas.common.dto.ApiResponse;
+import com.codeatlas.common.dto.PageResult;
 import com.codeatlas.common.exception.BusinessException;
 import com.codeatlas.common.constant.ErrorCode;
 import com.codeatlas.server.annotation.AuditLog;
@@ -28,17 +29,20 @@ public class ConstitutionRuleController {
 
     @GetMapping
     @Operation(summary = "获取项目的宪法规则列表")
-    public ApiResponse<List<ConstitutionRuleVO>> getRules(@PathVariable Long projectId,
-                                                           @RequestParam(defaultValue = "true") boolean enabledOnly) {
-        List<ConstitutionRuleVO> result;
+    public ApiResponse<PageResult<ConstitutionRuleVO>> getRules(
+            @PathVariable Long projectId,
+            @RequestParam(defaultValue = "true") boolean enabledOnly,
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        PageResult<ConstitutionRuleEntity> pageResult;
         if (enabledOnly) {
-            result = ruleService.getRules(projectId).stream()
-                    .map(ConstitutionRuleVO::from).collect(Collectors.toList());
+            pageResult = ruleService.getRulesPaged(projectId, page, size);
         } else {
-            result = ruleService.getAllRules(projectId).stream()
-                    .map(ConstitutionRuleVO::from).collect(Collectors.toList());
+            pageResult = ruleService.getAllRulesPaged(projectId, page, size);
         }
-        return ApiResponse.success(result);
+        List<ConstitutionRuleVO> records = pageResult.getRecords().stream()
+                .map(ConstitutionRuleVO::from).collect(Collectors.toList());
+        return ApiResponse.success(new PageResult<>(records, pageResult.getTotal(), page, size));
     }
 
     @PutMapping("/{ruleId}/toggle")

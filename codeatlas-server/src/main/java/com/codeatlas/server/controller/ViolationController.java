@@ -1,7 +1,9 @@
 package com.codeatlas.server.controller;
 
 import com.codeatlas.common.dto.ApiResponse;
+import com.codeatlas.common.dto.PageResult;
 import com.codeatlas.server.dto.response.ViolationVO;
+import com.codeatlas.server.entity.ViolationEntity;
 import com.codeatlas.server.service.ViolationService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -23,10 +25,14 @@ public class ViolationController {
 
     @GetMapping
     @Operation(summary = "获取项目违规列表")
-    public ApiResponse<List<ViolationVO>> getViolations(@PathVariable Long projectId) {
-        List<ViolationVO> result = violationService.getViolations(projectId).stream()
+    public ApiResponse<PageResult<ViolationVO>> getViolations(
+            @PathVariable Long projectId,
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        PageResult<ViolationEntity> pageResult = violationService.getViolations(projectId, page, size);
+        List<ViolationVO> records = pageResult.getRecords().stream()
                 .map(ViolationVO::from).collect(Collectors.toList());
-        return ApiResponse.success(result);
+        return ApiResponse.success(new PageResult<>(records, pageResult.getTotal(), page, size));
     }
 
     @PutMapping("/{violationId}/resolve")

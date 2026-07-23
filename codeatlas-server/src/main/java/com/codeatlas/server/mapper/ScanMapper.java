@@ -14,6 +14,14 @@ public interface ScanMapper {
     @Select("SELECT * FROM scan WHERE project_id = #{projectId} ORDER BY created_at DESC")
     List<ScanRecord> findByProjectId(Long projectId);
 
+    @Select("SELECT COUNT(*) FROM scan WHERE project_id = #{projectId}")
+    long countByProjectId(Long projectId);
+
+    @Select("SELECT * FROM scan WHERE project_id = #{projectId} ORDER BY created_at DESC LIMIT #{offset}, #{size}")
+    List<ScanRecord> findByProjectIdPaged(@Param("projectId") Long projectId,
+                                          @Param("offset") int offset,
+                                          @Param("size") int size);
+
     @Select("SELECT * FROM scan WHERE project_id = #{projectId} ORDER BY created_at DESC LIMIT 1")
     ScanRecord findLatestByProjectId(Long projectId);
 

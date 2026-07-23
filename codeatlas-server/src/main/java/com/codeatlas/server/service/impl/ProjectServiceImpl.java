@@ -1,6 +1,7 @@
 package com.codeatlas.server.service.impl;
 
 import com.codeatlas.common.constant.ErrorCode;
+import com.codeatlas.common.dto.PageResult;
 import com.codeatlas.common.exception.BusinessException;
 import com.codeatlas.server.dto.request.CreateProjectRequest;
 import com.codeatlas.server.dto.response.ProjectVO;
@@ -60,9 +61,12 @@ public class ProjectServiceImpl implements ProjectService {
     }
 
     @Override
-    public List<ProjectVO> listProjects(Long userId) {
-        List<Project> projects = projectMapper.findByUserId(userId);
-        return projects.stream().map(this::toVO).collect(Collectors.toList());
+    public PageResult<ProjectVO> listProjects(Long userId, int page, int size) {
+        long total = projectMapper.countByUserId(userId);
+        int offset = (page - 1) * size;
+        List<Project> projects = projectMapper.findByUserIdPaged(userId, offset, size);
+        List<ProjectVO> records = projects.stream().map(this::toVO).collect(Collectors.toList());
+        return new PageResult<>(records, total, page, size);
     }
 
     @Override

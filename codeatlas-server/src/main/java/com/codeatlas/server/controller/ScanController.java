@@ -1,6 +1,7 @@
 package com.codeatlas.server.controller;
 
 import com.codeatlas.common.dto.ApiResponse;
+import com.codeatlas.common.dto.PageResult;
 import com.codeatlas.server.annotation.AuditLog;
 import com.codeatlas.server.dto.response.ScanVO;
 import com.codeatlas.server.security.CodeAtlasUserDetails;
@@ -10,8 +11,6 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
-
-import java.util.List;
 
 @RestController
 @RequestMapping("/api/v1/projects/{projectId}/scans")
@@ -35,9 +34,12 @@ public class ScanController {
 
     @GetMapping
     @Operation(summary = "扫描历史")
-    public ApiResponse<List<ScanVO>> getScanHistory(@PathVariable Long projectId,
-                                                      @AuthenticationPrincipal CodeAtlasUserDetails principal) {
-        return ApiResponse.success(scanService.getScanHistory(projectId, principal.getUserId()));
+    public ApiResponse<PageResult<ScanVO>> getScanHistory(
+            @PathVariable Long projectId,
+            @AuthenticationPrincipal CodeAtlasUserDetails principal,
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        return ApiResponse.success(scanService.getScanHistory(projectId, principal.getUserId(), page, size));
     }
 
     @GetMapping("/latest")

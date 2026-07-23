@@ -1,8 +1,6 @@
-package com.codeatlas.server.service;
+package com.codeatlas.engine.rule;
 
 import com.codeatlas.engine.parser.ClassSummaryResult;
-import com.codeatlas.server.entity.ConstitutionRuleEntity;
-import com.codeatlas.server.entity.ViolationEntity;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -19,7 +17,7 @@ import static org.junit.jupiter.api.Assertions.*;
 class RuleEngineTest {
 
     private RuleEngine engine;
-    private List<ConstitutionRuleEntity> rules;
+    private List<RuleDefinition> rules;
 
     @BeforeEach
     void setUp() {
@@ -29,8 +27,8 @@ class RuleEngineTest {
 
     // ---- 辅助方法 ----
 
-    private ConstitutionRuleEntity rule(String name, String severity, String definition) {
-        ConstitutionRuleEntity r = new ConstitutionRuleEntity();
+    private RuleDefinition rule(String name, String severity, String definition) {
+        RuleDefinition r = new RuleDefinition();
         r.setId((long) rules.size() + 1);
         r.setName(name);
         r.setSeverity(severity);
@@ -76,7 +74,7 @@ class RuleEngineTest {
                     "INTERFACE", 3, 50, null, null);
 
             List<ClassSummaryResult> classes = Arrays.asList(controller, repo);
-            List<ViolationEntity> violations = engine.check(rules, classes, 1L, 1L);
+            List<ViolationResult> violations = engine.check(rules, classes);
 
             assertEquals(1, violations.size());
             assertTrue(violations.get(0).getMessage().contains("Controller"));
@@ -94,7 +92,7 @@ class RuleEngineTest {
                     null);
 
             List<ClassSummaryResult> classes = Collections.singletonList(controller);
-            List<ViolationEntity> violations = engine.check(rules, classes, 1L, 1L);
+            List<ViolationResult> violations = engine.check(rules, classes);
 
             assertEquals(0, violations.size());
         }
@@ -114,7 +112,7 @@ class RuleEngineTest {
             ClassSummaryResult godClass = cls("com.example.service.GodService", "SERVICE",
                     "CLASS", 15, 500, null, null);
 
-            List<ViolationEntity> violations = engine.check(rules, Collections.singletonList(godClass), 1L, 1L);
+            List<ViolationResult> violations = engine.check(rules, Collections.singletonList(godClass));
 
             assertEquals(1, violations.size());
             assertTrue(violations.get(0).getMessage().contains("15"));
@@ -128,7 +126,7 @@ class RuleEngineTest {
             ClassSummaryResult good = cls("com.example.service.SmallService", "SERVICE",
                     "CLASS", 5, 100, null, null);
 
-            List<ViolationEntity> violations = engine.check(rules, Collections.singletonList(good), 1L, 1L);
+            List<ViolationResult> violations = engine.check(rules, Collections.singletonList(good));
 
             assertEquals(0, violations.size());
         }
@@ -149,7 +147,7 @@ class RuleEngineTest {
             ClassSummaryResult cls = cls("com.example.Foo", "UTIL", "CLASS", 3, 50, null,
                     Arrays.asList("java.util.*", "com.example.Bar"));
 
-            List<ViolationEntity> violations = engine.check(rules, Collections.singletonList(cls), 1L, 1L);
+            List<ViolationResult> violations = engine.check(rules, Collections.singletonList(cls));
 
             assertEquals(1, violations.size());
             assertTrue(violations.get(0).getMessage().contains("星号导入"));
@@ -163,7 +161,7 @@ class RuleEngineTest {
             ClassSummaryResult cls = cls("com.example.Foo", "UTIL", "CLASS", 3, 50, null,
                     Arrays.asList("java.util.List", "java.util.Map", "com.example.Bar"));
 
-            List<ViolationEntity> violations = engine.check(rules, Collections.singletonList(cls), 1L, 1L);
+            List<ViolationResult> violations = engine.check(rules, Collections.singletonList(cls));
 
             assertEquals(0, violations.size());
         }
@@ -187,7 +185,7 @@ class RuleEngineTest {
                     Collections.singletonList("com.example.A"), null);
 
             List<ClassSummaryResult> classes = Arrays.asList(a, b);
-            List<ViolationEntity> violations = engine.check(rules, classes, 1L, 1L);
+            List<ViolationResult> violations = engine.check(rules, classes);
 
             assertTrue(violations.size() >= 1, "应检测到至少一个循环依赖");
             assertTrue(violations.get(0).getMessage().contains("循环依赖"));
@@ -206,7 +204,7 @@ class RuleEngineTest {
                     null, null);
 
             List<ClassSummaryResult> classes = Arrays.asList(controller, service, repo);
-            List<ViolationEntity> violations = engine.check(rules, classes, 1L, 1L);
+            List<ViolationResult> violations = engine.check(rules, classes);
 
             assertEquals(0, violations.size());
         }
@@ -220,7 +218,7 @@ class RuleEngineTest {
                     Collections.singletonList("com.example.SelfRef"), null);
 
             List<ClassSummaryResult> classes = Collections.singletonList(self);
-            List<ViolationEntity> violations = engine.check(rules, classes, 1L, 1L);
+            List<ViolationResult> violations = engine.check(rules, classes);
 
             assertTrue(violations.size() >= 1, "自循环应被检测");
         }
@@ -241,7 +239,7 @@ class RuleEngineTest {
             ClassSummaryResult impl = cls("com.example.service.UserServiceImpl", "SERVICE",
                     "CLASS", 8, 200, null, null);
 
-            List<ViolationEntity> violations = engine.check(rules, Collections.singletonList(impl), 1L, 1L);
+            List<ViolationResult> violations = engine.check(rules, Collections.singletonList(impl));
 
             assertEquals(1, violations.size());
             assertTrue(violations.get(0).getMessage().contains("缺少对应接口"));
@@ -258,7 +256,7 @@ class RuleEngineTest {
                     "CLASS", 8, 200, null, null);
 
             List<ClassSummaryResult> classes = Arrays.asList(iface, impl);
-            List<ViolationEntity> violations = engine.check(rules, classes, 1L, 1L);
+            List<ViolationResult> violations = engine.check(rules, classes);
 
             assertEquals(0, violations.size());
         }
@@ -278,7 +276,7 @@ class RuleEngineTest {
             ClassSummaryResult big = cls("com.example.service.BigService", "SERVICE",
                     "CLASS", 10, 500, null, null);
 
-            List<ViolationEntity> violations = engine.check(rules, Collections.singletonList(big), 1L, 1L);
+            List<ViolationResult> violations = engine.check(rules, Collections.singletonList(big));
 
             assertEquals(1, violations.size());
             assertTrue(violations.get(0).getMessage().contains("500"));
@@ -292,7 +290,7 @@ class RuleEngineTest {
             ClassSummaryResult small = cls("com.example.service.SmallService", "SERVICE",
                     "CLASS", 5, 150, null, null);
 
-            List<ViolationEntity> violations = engine.check(rules, Collections.singletonList(small), 1L, 1L);
+            List<ViolationResult> violations = engine.check(rules, Collections.singletonList(small));
 
             assertEquals(0, violations.size());
         }
@@ -303,24 +301,24 @@ class RuleEngineTest {
     @Test
     @DisplayName("空输入不抛异常")
     void shouldHandleEmptyInput() {
-        List<ViolationEntity> violations = engine.check(null, null, 1L, 1L);
+        List<ViolationResult> violations = engine.check(null, null);
         assertEquals(0, violations.size());
 
-        violations = engine.check(Collections.emptyList(), Collections.emptyList(), 1L, 1L);
+        violations = engine.check(Collections.emptyList(), Collections.emptyList());
         assertEquals(0, violations.size());
     }
 
     @Test
     @DisplayName("禁用规则不检查")
     void shouldSkipDisabledRules() {
-        ConstitutionRuleEntity disabled = rule("no-star-import", "INFO", "{}");
+        RuleDefinition disabled = rule("no-star-import", "INFO", "{}");
         disabled.setIsEnabled(false);
         rules.add(disabled);
 
         ClassSummaryResult cls = cls("com.example.Foo", "UTIL", "CLASS", 3, 50, null,
                 Arrays.asList("java.util.*"));
 
-        List<ViolationEntity> violations = engine.check(rules, Collections.singletonList(cls), 1L, 1L);
+        List<ViolationResult> violations = engine.check(rules, Collections.singletonList(cls));
 
         assertEquals(0, violations.size());
     }

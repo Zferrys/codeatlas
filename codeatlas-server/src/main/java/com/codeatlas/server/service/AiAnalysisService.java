@@ -15,8 +15,13 @@ import com.codeatlas.server.mapper.ProjectMapper;
 import com.codeatlas.server.mapper.ScanMapper;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.github.resilience4j.bulkhead.annotation.Bulkhead;
+import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
+import io.github.resilience4j.retry.annotation.Retry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
@@ -35,6 +40,10 @@ public class AiAnalysisService {
     private final ClassSummaryMapper classSummaryMapper;
     private final InsightService insightService;
     private final AiClient aiClient;
+
+    @Lazy
+    @Autowired
+    private AiAnalysisService self;
 
     public AiAnalysisService(ProjectMapper projectMapper, ScanMapper scanMapper,
                               ClassSummaryMapper classSummaryMapper, InsightService insightService) {
@@ -105,7 +114,7 @@ public class AiAnalysisService {
         request.setTemperature(0.3);
         request.setMaxTokens(4096);
 
-        AiResponse response = callAiWithRetry(request, 2);
+        AiResponse response = self.callAiWithResilience(request);
         if (response == null) {
             log.warn("AI analysis failed after retries for projectId={}, scanId={}", projectId, scanId);
             return null;
@@ -130,31 +139,26 @@ public class AiAnalysisService {
     }
 
     /**
-     * 带指数退避的 AI 调用重试。
+     * 带 Resilience4j 熔断、重试、隔离的 AI 调用。
+     * 通过 self-injection 确保注解代理生效。
      */
-    private AiResponse callAiWithRetry(AiRequest request, int maxRetries) {
-        for (int attempt = 0; attempt <= maxRetries; attempt++) {
-            try {
-                long start = System.currentTimeMillis();
-                AiResponse response = aiClient.chat(request);
-                // 注入实际耗时（如果客户端没填）
-                if (response.getLatencyMs() <= 0) {
-                    response.setLatencyMs(System.currentTimeMillis() - start);
-                }
-                return response;
-            } catch (Exception e) {
-                log.warn("AI call failed (attempt {}/{}): {}", attempt + 1, maxRetries + 1, e.getMessage());
-                if (attempt < maxRetries) {
-                    long backoffMs = (long) Math.pow(2, attempt) * 1000L;
-                    try {
-                        Thread.sleep(backoffMs);
-                    } catch (InterruptedException ie) {
-                        Thread.currentThread().interrupt();
-                        return null;
-                    }
-                }
-            }
+    @CircuitBreaker(name = "aiClient", fallbackMethod = "aiFallback")
+    @Retry(name = "aiClient")
+    @Bulkhead(name = "aiClient")
+    public AiResponse callAiWithResilience(AiRequest request) {
+        long start = System.currentTimeMillis();
+        AiResponse response = aiClient.chat(request);
+        if (response.getLatencyMs() <= 0) {
+            response.setLatencyMs(System.currentTimeMillis() - start);
         }
+        return response;
+    }
+
+    /**
+     * 熔断/重试耗尽时的降级方法。
+     */
+    public AiResponse aiFallback(AiRequest request, Exception e) {
+        log.warn("AI call fallback: circuit breaker open or retries exhausted: {}", e.getMessage());
         return null;
     }
 

@@ -11,8 +11,24 @@ public interface ConstitutionRuleMapper {
     @Select("SELECT * FROM constitution_rule WHERE (project_id = #{projectId} OR project_id IS NULL) AND is_enabled = 1 ORDER BY category, severity")
     List<ConstitutionRuleEntity> findByProjectId(Long projectId);
 
+    @Select("SELECT COUNT(*) FROM constitution_rule WHERE (project_id = #{projectId} OR project_id IS NULL) AND is_enabled = 1")
+    long countByProjectId(Long projectId);
+
+    @Select("SELECT * FROM constitution_rule WHERE (project_id = #{projectId} OR project_id IS NULL) AND is_enabled = 1 ORDER BY category, severity LIMIT #{offset}, #{size}")
+    List<ConstitutionRuleEntity> findByProjectIdPaged(@Param("projectId") Long projectId,
+                                                       @Param("offset") int offset,
+                                                       @Param("size") int size);
+
     @Select("SELECT * FROM constitution_rule WHERE (project_id = #{projectId} OR project_id IS NULL) ORDER BY category, severity")
     List<ConstitutionRuleEntity> findAllByProjectId(Long projectId);
+
+    @Select("SELECT COUNT(*) FROM constitution_rule WHERE (project_id = #{projectId} OR project_id IS NULL)")
+    long countAllByProjectId(Long projectId);
+
+    @Select("SELECT * FROM constitution_rule WHERE (project_id = #{projectId} OR project_id IS NULL) ORDER BY category, severity LIMIT #{offset}, #{size}")
+    List<ConstitutionRuleEntity> findAllByProjectIdPaged(@Param("projectId") Long projectId,
+                                                          @Param("offset") int offset,
+                                                          @Param("size") int size);
 
     @Select("SELECT * FROM constitution_rule WHERE id = #{id}")
     ConstitutionRuleEntity findById(Long id);

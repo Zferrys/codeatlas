@@ -1,27 +1,26 @@
-package com.codeatlas.server.service;
+package com.codeatlas.engine.rule;
 
 import com.codeatlas.engine.parser.ClassSummaryResult;
-import com.codeatlas.server.entity.ConstitutionRuleEntity;
-import com.codeatlas.server.entity.ViolationEntity;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.stereotype.Component;
 
 import java.util.*;
 import java.util.stream.Collectors;
 
-@Component
+/**
+ * 纯 Java 规则引擎 — 无 Spring 依赖，由调用方手动实例化。
+ * 检查类摘要列表，返回违反规则的违规结果列表。
+ */
 public class RuleEngine {
 
     private static final Logger log = LoggerFactory.getLogger(RuleEngine.class);
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
-    public List<ViolationEntity> check(List<ConstitutionRuleEntity> rules,
-                                        List<ClassSummaryResult> classes,
-                                        Long scanId, Long projectId) {
-        List<ViolationEntity> violations = new ArrayList<>();
+    public List<ViolationResult> check(List<RuleDefinition> rules,
+                                        List<ClassSummaryResult> classes) {
+        List<ViolationResult> violations = new ArrayList<>();
         if (rules == null || rules.isEmpty() || classes == null || classes.isEmpty()) {
             return violations;
         }
@@ -29,28 +28,28 @@ public class RuleEngine {
         Set<String> allFqns = classes.stream()
                 .map(ClassSummaryResult::getFqn).collect(Collectors.toSet());
 
-        for (ConstitutionRuleEntity rule : rules) {
+        for (RuleDefinition rule : rules) {
             if (Boolean.FALSE.equals(rule.getIsEnabled())) continue;
 
             try {
                 switch (rule.getName()) {
                     case "no-controller-direct-dao":
-                        violations.addAll(checkControllerDirectDao(rule, classes, scanId, projectId, allFqns));
+                        violations.addAll(checkControllerDirectDao(rule, classes, allFqns));
                         break;
                     case "max-public-methods":
-                        violations.addAll(checkMaxPublicMethods(rule, classes, scanId, projectId));
+                        violations.addAll(checkMaxPublicMethods(rule, classes));
                         break;
                     case "service-interface-required":
-                        violations.addAll(checkServiceInterface(rule, classes, scanId, projectId));
+                        violations.addAll(checkServiceInterface(rule, classes));
                         break;
                     case "max-class-line-count":
-                        violations.addAll(checkMaxLineCount(rule, classes, scanId, projectId));
+                        violations.addAll(checkMaxLineCount(rule, classes));
                         break;
                     case "no-star-import":
-                        violations.addAll(checkNoStarImport(rule, classes, scanId, projectId));
+                        violations.addAll(checkNoStarImport(rule, classes));
                         break;
                     case "no-circular-dependency":
-                        violations.addAll(checkNoCircularDependency(rule, classes, scanId, projectId, allFqns));
+                        violations.addAll(checkNoCircularDependency(rule, classes, allFqns));
                         break;
                     default:
                         break;
@@ -63,11 +62,10 @@ public class RuleEngine {
         return violations;
     }
 
-    private List<ViolationEntity> checkControllerDirectDao(ConstitutionRuleEntity rule,
+    private List<ViolationResult> checkControllerDirectDao(RuleDefinition rule,
                                                             List<ClassSummaryResult> classes,
-                                                            Long scanId, Long projectId,
                                                             Set<String> allFqns) {
-        List<ViolationEntity> violations = new ArrayList<>();
+        List<ViolationResult> violations = new ArrayList<>();
         for (ClassSummaryResult cls : classes) {
             if (!"controller".equalsIgnoreCase(cls.getLayer())) continue;
 
@@ -78,7 +76,7 @@ public class RuleEngine {
                 if (lowerDep.contains(".repository.") || lowerDep.contains(".dao.")
                         || lowerDep.contains(".mapper.")) {
                     if (allFqns.contains(dep)) {
-                        violations.add(buildViolation(rule, scanId, projectId, cls,
+                        violations.add(new ViolationResult(rule.getId(), rule.getSeverity(), cls.getFqn(),
                                 "Controller 直接依赖 DAO/Repository: " + shorten(dep),
                                 "通过 Service 层封装对 " + shorten(dep) + " 的调用"));
                     }
@@ -88,14 +86,13 @@ public class RuleEngine {
         return violations;
     }
 
-    private List<ViolationEntity> checkMaxPublicMethods(ConstitutionRuleEntity rule,
-                                                         List<ClassSummaryResult> classes,
-                                                         Long scanId, Long projectId) {
-        List<ViolationEntity> violations = new ArrayList<>();
+    private List<ViolationResult> checkMaxPublicMethods(RuleDefinition rule,
+                                                         List<ClassSummaryResult> classes) {
+        List<ViolationResult> violations = new ArrayList<>();
         int max = parseMaxFromRule(rule.getRuleDefinition(), 20);
         for (ClassSummaryResult cls : classes) {
             if (cls.getPublicMethods() > max) {
-                violations.add(buildViolation(rule, scanId, projectId, cls,
+                violations.add(new ViolationResult(rule.getId(), rule.getSeverity(), cls.getFqn(),
                         String.format("公开方法数 %d 超过上限 %d", cls.getPublicMethods(), max),
                         "考虑拆分类或将相关方法提取到独立的 Service 中"));
             }
@@ -103,10 +100,9 @@ public class RuleEngine {
         return violations;
     }
 
-    private List<ViolationEntity> checkServiceInterface(ConstitutionRuleEntity rule,
-                                                         List<ClassSummaryResult> classes,
-                                                         Long scanId, Long projectId) {
-        List<ViolationEntity> violations = new ArrayList<>();
+    private List<ViolationResult> checkServiceInterface(RuleDefinition rule,
+                                                         List<ClassSummaryResult> classes) {
+        List<ViolationResult> violations = new ArrayList<>();
         Set<String> interfaceNames = classes.stream()
                 .filter(c -> "INTERFACE".equalsIgnoreCase(c.getClassType()))
                 .map(ClassSummaryResult::getSimpleName)
@@ -120,7 +116,7 @@ public class RuleEngine {
             if (name == null) continue;
             String expectedInterface = name.replace("Impl", "").replace("impl", "");
             if (name.endsWith("Impl") && !interfaceNames.contains(expectedInterface)) {
-                violations.add(buildViolation(rule, scanId, projectId, cls,
+                violations.add(new ViolationResult(rule.getId(), rule.getSeverity(), cls.getFqn(),
                         "Service 实现类 " + name + " 缺少对应接口 " + expectedInterface,
                         "为 " + name + " 提取接口 " + expectedInterface));
             }
@@ -128,14 +124,13 @@ public class RuleEngine {
         return violations;
     }
 
-    private List<ViolationEntity> checkMaxLineCount(ConstitutionRuleEntity rule,
-                                                     List<ClassSummaryResult> classes,
-                                                     Long scanId, Long projectId) {
-        List<ViolationEntity> violations = new ArrayList<>();
+    private List<ViolationResult> checkMaxLineCount(RuleDefinition rule,
+                                                     List<ClassSummaryResult> classes) {
+        List<ViolationResult> violations = new ArrayList<>();
         int max = parseMaxFromRule(rule.getRuleDefinition(), 500);
         for (ClassSummaryResult cls : classes) {
             if (cls.getLineCount() > max) {
-                violations.add(buildViolation(rule, scanId, projectId, cls,
+                violations.add(new ViolationResult(rule.getId(), rule.getSeverity(), cls.getFqn(),
                         String.format("代码行数 %d 超过上限 %d", cls.getLineCount(), max),
                         "按职责拆分类，单一职责原则 — 每个类只做一件事"));
             }
@@ -143,16 +138,15 @@ public class RuleEngine {
         return violations;
     }
 
-    private List<ViolationEntity> checkNoStarImport(ConstitutionRuleEntity rule,
-                                                      List<ClassSummaryResult> classes,
-                                                      Long scanId, Long projectId) {
-        List<ViolationEntity> violations = new ArrayList<>();
+    private List<ViolationResult> checkNoStarImport(RuleDefinition rule,
+                                                      List<ClassSummaryResult> classes) {
+        List<ViolationResult> violations = new ArrayList<>();
         for (ClassSummaryResult cls : classes) {
             List<String> imports = cls.getImports();
             if (imports == null) continue;
             for (String imp : imports) {
                 if (imp.endsWith(".*")) {
-                    violations.add(buildViolation(rule, scanId, projectId, cls,
+                    violations.add(new ViolationResult(rule.getId(), rule.getSeverity(), cls.getFqn(),
                             "使用了星号导入: " + imp,
                             "将 " + imp + " 替换为具体的单类导入"));
                     break;
@@ -162,11 +156,9 @@ public class RuleEngine {
         return violations;
     }
 
-    private List<ViolationEntity> checkNoCircularDependency(ConstitutionRuleEntity rule,
+    private List<ViolationResult> checkNoCircularDependency(RuleDefinition rule,
                                                              List<ClassSummaryResult> classes,
-                                                             Long scanId, Long projectId,
                                                              Set<String> allFqns) {
-        // 构建邻接表
         Map<String, Set<String>> graph = new LinkedHashMap<>();
         Map<String, ClassSummaryResult> classMap = new LinkedHashMap<>();
         for (ClassSummaryResult cls : classes) {
@@ -183,17 +175,16 @@ public class RuleEngine {
             graph.put(cls.getFqn(), filtered);
         }
 
-        // DFS 着色法检测回边
         Set<String> whiteSet = new LinkedHashSet<>(graph.keySet());
         Set<String> graySet = new LinkedHashSet<>();
         Set<String> blackSet = new LinkedHashSet<>();
-        List<ViolationEntity> violations = new ArrayList<>();
+        List<ViolationResult> violations = new ArrayList<>();
         Set<String> reported = new LinkedHashSet<>();
 
         while (!whiteSet.isEmpty()) {
             String current = whiteSet.iterator().next();
             dfsDetect(current, whiteSet, graySet, blackSet, graph,
-                    rule, scanId, projectId, classMap, violations, reported);
+                    rule, classMap, violations, reported);
         }
 
         return violations;
@@ -201,9 +192,9 @@ public class RuleEngine {
 
     private void dfsDetect(String current, Set<String> whiteSet, Set<String> graySet,
                            Set<String> blackSet, Map<String, Set<String>> graph,
-                           ConstitutionRuleEntity rule, Long scanId, Long projectId,
+                           RuleDefinition rule,
                            Map<String, ClassSummaryResult> classMap,
-                           List<ViolationEntity> violations, Set<String> reported) {
+                           List<ViolationResult> violations, Set<String> reported) {
         whiteSet.remove(current);
         graySet.add(current);
 
@@ -214,14 +205,14 @@ public class RuleEngine {
                     reported.add(current);
                     ClassSummaryResult cls = classMap.get(current);
                     if (cls != null) {
-                        violations.add(buildViolation(rule, scanId, projectId, cls,
+                        violations.add(new ViolationResult(rule.getId(), rule.getSeverity(), cls.getFqn(),
                                 "检测到循环依赖: " + shorten(current) + " ⇄ " + shorten(neighbor),
                                 "引入接口或提取公共模块解耦 " + shorten(current) + " 和 " + shorten(neighbor)));
                     }
                 }
             } else if (whiteSet.contains(neighbor)) {
                 dfsDetect(neighbor, whiteSet, graySet, blackSet, graph,
-                        rule, scanId, projectId, classMap, violations, reported);
+                        rule, classMap, violations, reported);
             }
         }
 
@@ -241,21 +232,6 @@ public class RuleEngine {
         } catch (Exception ignored) {
         }
         return defaultMax;
-    }
-
-    private ViolationEntity buildViolation(ConstitutionRuleEntity rule, Long scanId,
-                                            Long projectId, ClassSummaryResult cls,
-                                            String message, String suggestion) {
-        ViolationEntity v = new ViolationEntity();
-        v.setScanId(scanId);
-        v.setRuleId(rule.getId());
-        v.setProjectId(projectId);
-        v.setSeverity(rule.getSeverity());
-        v.setClassFqn(cls.getFqn());
-        v.setMessage(message);
-        v.setSuggestion(suggestion);
-        v.setIsResolved(false);
-        return v;
     }
 
     private String shorten(String fqn) {
