@@ -70,7 +70,7 @@ public class ScanProgressController {
                         emitter.complete();
                     }
                 } catch (IOException e) {
-                    emitter.completeWithError(e);
+                    removeEmitter(event.getProjectId(), emitter);
                 }
             }
 

@@ -61,9 +61,10 @@ public class WebMvcConfig implements WebMvcConfigurer {
                 .addPathPatterns("/api/v1/auth/login")
                 .order(2);
 
-        // AI 端点限流：5 次/分钟
-        registry.addInterceptor(new RateLimitInterceptor(5, redisRateLimiter))
+        // 扫描端点限流：20 次/分钟（扫描本身有互斥保护，限流仅防滥用）
+        registry.addInterceptor(new RateLimitInterceptor(20, redisRateLimiter))
                 .addPathPatterns("/api/v1/projects/*/scans")
+                .excludePathPatterns("/api/v1/projects/*/scans/progress")
                 .order(3);
 
         // 通用 API 限流：60 次/分钟
