@@ -7,27 +7,33 @@ target/
 # Node
 node_modules/
 dist/
-.env.local
+*.local
 *.log
 
 # IDE
 .idea/
 *.iml
 .vscode/
+.settings/
+.project
+.classpath
+.factorypath
 
 # OS
 .DS_Store
 Thumbs.db
+desktop.ini
+
+# Build
+build/
 
 # Logs
 logs/
-*.log
 
 # Sensitive
 *.pem
 *.key
 .env
-application-local.yml
 
 # AI cache
 .ai-cache/
@@ -43,6 +49,12 @@ plugins/*.jar
 # Claude Code config (local dev tool, user-specific)
 .claude/
 
+# Dev config (local overrides)
+application-dev.yml
+application-local.yml
+
 # Temp
 temp/
 tmp/
+*.swp
+*.swo

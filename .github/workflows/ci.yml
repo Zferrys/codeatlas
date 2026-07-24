@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [main]
 
+# CI 专用密码仅用于临时测试容器，非生产环境凭据
+env:
+  CI_MYSQL_PASSWORD: codeatlas
+
 jobs:
   backend-build:
     runs-on: ubuntu-latest
@@ -14,7 +18,7 @@ jobs:
       mysql:
         image: mysql:5.7
         env:
-          MYSQL_ROOT_PASSWORD: codeatlas
+          MYSQL_ROOT_PASSWORD: ${{ env.CI_MYSQL_PASSWORD }}
           MYSQL_DATABASE: codeatlas_test
         ports:
           - 3306:3306
@@ -57,7 +61,7 @@ jobs:
       mysql:
         image: mysql:5.7
         env:
-          MYSQL_ROOT_PASSWORD: codeatlas
+          MYSQL_ROOT_PASSWORD: ${{ env.CI_MYSQL_PASSWORD }}
           MYSQL_DATABASE: codeatlas
         ports:
           - 3306:3306
@@ -79,11 +83,9 @@ jobs:
           cache: maven
 
       - name: Validate Flyway Migrations
-        run: mvn flyway:validate -pl codeatlas-server -Dflyway.url=jdbc:mysql://127.0.0.1:3306/codeatlas -Dflyway.user=root -Dflyway.password=codeatlas
+        run: mvn flyway:validate -pl codeatlas-server -Dflyway.url=jdbc:mysql://127.0.0.1:3306/codeatlas -Dflyway.user=root -Dflyway.password="$CI_MYSQL_PASSWORD"
         env:
-          FLYWAY_URL: jdbc:mysql://127.0.0.1:3306/codeatlas
-          FLYWAY_USER: root
-          FLYWAY_PASSWORD: codeatlas
+          CI_MYSQL_PASSWORD: ${{ env.CI_MYSQL_PASSWORD }}
 
   frontend-build:
     runs-on: ubuntu-latest
