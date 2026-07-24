@@ -10,6 +10,8 @@ public class AiResponse {
     private int tokensUsed;
     private long latencyMs;
     private List<AiSource> sources;
+    private String modelUsed;
+    private boolean fallback;
 
     public AiResponse() {
         this.sources = new ArrayList<>();
@@ -26,6 +28,12 @@ public class AiResponse {
 
     public List<AiSource> getSources() { return sources; }
     public void setSources(List<AiSource> sources) { this.sources = sources != null ? sources : new ArrayList<>(); }
+
+    public String getModelUsed() { return modelUsed; }
+    public void setModelUsed(String modelUsed) { this.modelUsed = modelUsed; }
+
+    public boolean isFallback() { return fallback; }
+    public void setFallback(boolean fallback) { this.fallback = fallback; }
 
     public static AiResponse of(String content, int tokensUsed, long latencyMs) {
         AiResponse r = new AiResponse();
