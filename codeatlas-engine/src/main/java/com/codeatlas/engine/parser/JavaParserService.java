@@ -1,5 +1,6 @@
 package com.codeatlas.engine.parser;
 
+import com.github.javaparser.ParserConfiguration;
 import com.github.javaparser.StaticJavaParser;
 import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
@@ -23,6 +24,10 @@ import java.util.stream.Collectors;
 public class JavaParserService {
 
     private static final Logger log = LoggerFactory.getLogger(JavaParserService.class);
+
+    static {
+        StaticJavaParser.getParserConfiguration().setLanguageLevel(ParserConfiguration.LanguageLevel.JAVA_17);
+    }
 
     public List<ClassSummaryResult> analyzeDirectory(Path directory) throws IOException {
         List<Path> javaFiles = Files.walk(directory)
