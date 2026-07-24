@@ -5,6 +5,7 @@ import com.codeatlas.common.exception.BusinessException;
 import com.codeatlas.server.controller.AuthController;
 import com.codeatlas.server.security.JwtAuthFilter;
 import com.codeatlas.server.security.JwtTokenProvider;
+import com.codeatlas.server.security.TokenBlacklistService;
 import com.codeatlas.server.security.UserDetailsServiceImpl;
 import com.codeatlas.server.service.UserService;
 import org.junit.jupiter.api.DisplayName;
@@ -40,6 +41,9 @@ class GlobalExceptionHandlerTest {
 
     @MockBean
     private JwtAuthFilter jwtAuthFilter;
+
+    @MockBean
+    private TokenBlacklistService tokenBlacklistService;
 
     @MockBean
     private UserDetailsServiceImpl userDetailsService;

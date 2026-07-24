@@ -74,6 +74,11 @@ public class JwtTokenProvider {
         }
     }
 
+    /** 获取 token 过期时间戳（毫秒），用于设置黑名单 TTL */
+    public long getExpiresAtMillis(String token) {
+        return parseClaims(token).getExpiration().getTime();
+    }
+
     private Claims parseClaims(String token) {
         return Jwts.parser()
                 .verifyWith(secretKey)

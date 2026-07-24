@@ -1,9 +1,11 @@
 package com.codeatlas.server.service;
 
+import com.codeatlas.common.util.AiPromptSanitizer;
 import com.codeatlas.engine.ai.AiClient;
 import com.codeatlas.engine.ai.AiRequest;
 import com.codeatlas.engine.ai.AiResponse;
 import com.codeatlas.engine.ai.PromptTemplate;
+import com.codeatlas.server.config.TokenBudgetManager;
 import com.codeatlas.server.entity.AiAuditLogEntity;
 import com.codeatlas.server.entity.ClassSummaryEntity;
 import com.codeatlas.server.entity.InsightEntity;
@@ -49,6 +51,7 @@ public class AiAnalysisService {
     private final AiAuditLogMapper aiAuditLogMapper;
     private final HallucinationChecker hallucinationChecker;
     private final AlertService alertService;
+    private final TokenBudgetManager tokenBudgetManager;
 
     @Lazy
     @Autowired
@@ -59,6 +62,7 @@ public class AiAnalysisService {
                               AiAuditLogMapper aiAuditLogMapper,
                               HallucinationChecker hallucinationChecker,
                               AlertService alertService,
+                              TokenBudgetManager tokenBudgetManager,
                               @Autowired(required = false) AiClient aiClient) {
         this.projectMapper = projectMapper;
         this.scanMapper = scanMapper;
@@ -67,6 +71,7 @@ public class AiAnalysisService {
         this.aiAuditLogMapper = aiAuditLogMapper;
         this.hallucinationChecker = hallucinationChecker;
         this.alertService = alertService;
+        this.tokenBudgetManager = tokenBudgetManager;
         this.aiClient = aiClient;
         if (aiClient != null) {
             log.info("AiAnalysisService initialized with AI client: {}", aiClient.getModelName());
@@ -130,8 +135,20 @@ public class AiAnalysisService {
                 return null;
             }
 
+            // 预算前置检查：预估 token 数（中文约 1.5 字符/token）
+            int estimatedTokens = prompt.length() * 2 / 3 + 4096;
+            if (!tokenBudgetManager.tryConsume(estimatedTokens)) {
+                log.warn("AI token monthly budget exceeded, rejecting analysis for projectId={}", projectId);
+                self.saveAiAuditLog(aiClient.getModelName(), "ARCHITECTURE_STORY", projectId, null,
+                        0, 0, 0, 0, "Monthly token budget exceeded", false);
+                return null;
+            }
+
+            // 提示注入过滤
+            String sanitizedPrompt = AiPromptSanitizer.sanitize(prompt);
+
             AiRequest request = new AiRequest();
-            request.setPrompt(prompt);
+            request.setPrompt(sanitizedPrompt);
             request.setSystemPrompt("你是一位资深软件架构师。请分析代码库并用中文生成深入、准确的架构叙事报告。所有结论必须引用具体的类和包。专业术语保留英文，类名/包名保留原文。");
             request.setTemperature(0.3);
             request.setMaxTokens(4096);

@@ -3,6 +3,7 @@ package com.codeatlas.server.controller;
 import com.codeatlas.server.config.GlobalExceptionHandler;
 import com.codeatlas.server.security.JwtAuthFilter;
 import com.codeatlas.server.security.JwtTokenProvider;
+import com.codeatlas.server.security.TokenBlacklistService;
 import com.codeatlas.server.security.UserDetailsServiceImpl;
 import com.codeatlas.server.service.UserService;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -46,6 +47,9 @@ class AuthControllerTest {
 
     @MockBean
     private JwtAuthFilter jwtAuthFilter;
+
+    @MockBean
+    private TokenBlacklistService tokenBlacklistService;
 
     @MockBean
     private UserDetailsServiceImpl userDetailsService;

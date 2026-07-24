@@ -24,10 +24,13 @@ public class JwtAuthFilter extends OncePerRequestFilter {
 
     private final JwtTokenProvider jwtTokenProvider;
     private final UserMapper userMapper;
+    private final TokenBlacklistService tokenBlacklistService;
 
-    public JwtAuthFilter(JwtTokenProvider jwtTokenProvider, UserMapper userMapper) {
+    public JwtAuthFilter(JwtTokenProvider jwtTokenProvider, UserMapper userMapper,
+                         TokenBlacklistService tokenBlacklistService) {
         this.jwtTokenProvider = jwtTokenProvider;
         this.userMapper = userMapper;
+        this.tokenBlacklistService = tokenBlacklistService;
     }
 
     @Override
@@ -36,7 +39,8 @@ public class JwtAuthFilter extends OncePerRequestFilter {
                                     FilterChain filterChain) throws ServletException, IOException {
         String token = extractToken(request);
 
-        if (StringUtils.hasText(token) && jwtTokenProvider.validateToken(token)) {
+        if (StringUtils.hasText(token) && jwtTokenProvider.validateToken(token)
+                && !tokenBlacklistService.isBlacklisted(token)) {
             Long userId = jwtTokenProvider.getUserId(token);
             String username = jwtTokenProvider.getUsername(token);
             String role = jwtTokenProvider.getRole(token);
