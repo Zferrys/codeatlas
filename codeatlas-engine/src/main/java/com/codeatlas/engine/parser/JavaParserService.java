@@ -26,7 +26,9 @@ public class JavaParserService {
     private static final Logger log = LoggerFactory.getLogger(JavaParserService.class);
 
     static {
-        StaticJavaParser.getParserConfiguration().setLanguageLevel(ParserConfiguration.LanguageLevel.JAVA_17);
+        ParserConfiguration config = new ParserConfiguration();
+        config.setLanguageLevel(ParserConfiguration.LanguageLevel.JAVA_17);
+        StaticJavaParser.setConfiguration(config);
     }
 
     public List<ClassSummaryResult> analyzeDirectory(Path directory) throws IOException {

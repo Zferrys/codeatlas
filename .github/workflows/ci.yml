@@ -41,7 +41,7 @@ jobs:
           cache: maven
 
       - name: Code Quality Check
-        run: mvn checkstyle:check pmd:check
+        run: mvn compile checkstyle:check pmd:check
 
       - name: Unit Tests
         run: mvn test -pl codeatlas-server,codeatlas-engine,codeatlas-common
