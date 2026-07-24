@@ -1,0 +1,19 @@
+- generic [ref=f2e4]:
+  - heading "CodeAtlas" [level=1] [ref=f2e5]
+  - paragraph [ref=f2e6]: AI 驱动的代码地图与架构叙事平台
+  - generic [ref=f2e7]:
+    - generic [ref=f2e9]:
+      - generic "用户名" [ref=f2e11]: "* 用户名"
+      - textbox "* 用户名" [ref=f2e15]:
+        - /placeholder: 请输入用户名
+    - generic [ref=f2e17]:
+      - generic "密码" [ref=f2e19]: "* 密码"
+      - generic [ref=f2e23]:
+        - textbox "* 密码" [ref=f2e24]:
+          - /placeholder: 请输入密码
+        - img "eye-invisible" [ref=f2e26] [cursor=pointer]
+    - button "登 录" [ref=f2e35] [cursor=pointer]
+  - generic [ref=f2e37]:
+    - text: 还没有账号？
+    - link "立即注册" [ref=f2e38] [cursor=pointer]:
+      - /url: "#/register"

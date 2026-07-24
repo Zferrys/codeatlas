@@ -1,0 +1,140 @@
+- generic [ref=f11e3]:
+  - complementary [ref=f11e4]:
+    - generic [ref=f11e5]:
+      - link "CodeAtlas" [ref=f11e7] [cursor=pointer]:
+        - /url: "#/dashboard"
+      - menu [ref=f11e14]:
+        - menuitem "dashboard 工作台" [ref=f11e15] [cursor=pointer]:
+          - img "dashboard" [ref=f11e16]
+          - generic [ref=f11e19]: 工作台
+      - generic [ref=f11e20]: v0.1.0
+  - generic [ref=f11e21]:
+    - generic [ref=f11e22]:
+      - generic [ref=f11e23]:
+        - img "menu-fold" [ref=f11e24] [cursor=pointer]
+        - navigation [ref=f11e27]:
+          - list [ref=f11e28]:
+            - listitem [ref=f11e29]:
+              - generic [ref=f11e30]: 工作台
+      - generic [ref=f11e31]:
+        - button "search Ctrl+K" [ref=f11e32] [cursor=pointer]:
+          - img "search" [ref=f11e33]
+          - generic [ref=f11e36]: Ctrl+K
+        - button [ref=f11e37] [cursor=pointer]:
+          - img "bulb" [ref=f11e38]
+        - button [ref=f11e42] [cursor=pointer]:
+          - img "bell" [ref=f11e43]
+        - generic [ref=f11e46] [cursor=pointer]: A
+        - generic [ref=f11e48]: admin
+    - main [ref=f11e49]:
+      - generic [ref=f11e50]:
+        - generic [ref=f11e51]:
+          - generic [ref=f11e53]:
+            - img "project" [ref=f11e55]
+            - generic [ref=f11e58]:
+              - generic [ref=f11e59]: "4"
+              - generic [ref=f11e60]: 项目总数
+          - generic [ref=f11e62]:
+            - img "file-text" [ref=f11e64]
+            - generic [ref=f11e67]:
+              - generic [ref=f11e68]: "78"
+              - generic [ref=f11e69]: 总类数
+          - generic [ref=f11e71]:
+            - img "scan" [ref=f11e73]
+            - generic [ref=f11e76]:
+              - generic [ref=f11e77]: "6"
+              - generic [ref=f11e78]: 活跃扫描
+          - generic [ref=f11e80]:
+            - img "bulb" [ref=f11e82]
+            - generic [ref=f11e85]:
+              - generic [ref=f11e86]: "2"
+              - generic [ref=f11e87]: AI 洞察
+        - generic [ref=f11e88]:
+          - heading "我的项目" [level=2] [ref=f11e89]
+          - generic [ref=f11e90]:
+            - generic [ref=f11e92]:
+              - textbox "搜索项目..." [ref=f11e93]
+              - button [ref=f11e95] [cursor=pointer]:
+                - img "search" [ref=f11e96]
+            - button "plus 新建项目" [ref=f11e99] [cursor=pointer]:
+              - img "plus" [ref=f11e100]
+              - generic [ref=f11e104]: 新建项目
+        - generic [ref=f11e135]:
+          - generic [ref=f11e138] [cursor=pointer]:
+            - generic [ref=f11e139]:
+              - generic [ref=f11e140]: C
+              - generic [ref=f11e141]:
+                - heading "CodeAtlas-Server" [level=3] [ref=f11e142]
+                - generic [ref=f11e143]: Java
+            - paragraph [ref=f11e144]: CodeAtlas Server module - full scan test
+            - generic [ref=f11e145]:
+              - generic [ref=f11e146]:
+                - img "file-text" [ref=f11e147]
+                - generic [ref=f11e150]: 74 类
+              - generic [ref=f11e151]:
+                - img "clock-circle" [ref=f11e152]
+                - generic [ref=f11e156]: 24 分钟前
+            - generic [ref=f11e157]:
+              - progressbar [ref=f11e158]:
+                - generic "90%" [ref=f11e164]
+              - generic [ref=f11e165]: 健康度
+          - generic [ref=f11e168] [cursor=pointer]:
+            - generic [ref=f11e169]:
+              - generic [ref=f11e170]: C
+              - generic [ref=f11e171]:
+                - heading "codeatlas-common" [level=3] [ref=f11e172]
+                - generic [ref=f11e173]: Java
+            - paragraph [ref=f11e174]: CodeAtlas Common module - real production code
+            - generic [ref=f11e175]:
+              - generic [ref=f11e176]:
+                - img "file-text" [ref=f11e177]
+                - generic [ref=f11e180]: 4 类
+              - generic [ref=f11e181]:
+                - img "clock-circle" [ref=f11e182]
+                - generic [ref=f11e186]: 26 分钟前
+            - generic [ref=f11e187]:
+              - progressbar [ref=f11e188]:
+                - generic "100%" [ref=f11e194]
+              - generic [ref=f11e195]: 健康度
+          - generic [ref=f11e198] [cursor=pointer]:
+            - generic [ref=f11e199]:
+              - generic [ref=f11e200]: J
+              - generic [ref=f11e201]:
+                - heading "jsoup" [level=3] [ref=f11e202]
+                - generic [ref=f11e203]: Java
+            - paragraph [ref=f11e204]: jsoup HTML parser from Gitee mirror
+            - generic [ref=f11e205]:
+              - generic [ref=f11e206]:
+                - img "file-text" [ref=f11e207]
+                - generic [ref=f11e210]: 0 类
+              - generic [ref=f11e211]:
+                - img "clock-circle" [ref=f11e212]
+                - generic [ref=f11e216]: 34 分钟前
+            - generic [ref=f11e217]:
+              - progressbar [ref=f11e218]:
+                - generic "0%" [ref=f11e224]
+              - generic [ref=f11e225]: 健康度
+          - generic [ref=f11e228] [cursor=pointer]:
+            - generic [ref=f11e229]:
+              - generic [ref=f11e230]: J
+              - generic [ref=f11e231]:
+                - heading "jsoup" [level=3] [ref=f11e232]
+                - generic [ref=f11e233]: Java
+            - paragraph [ref=f11e234]: jsoup Java HTML Parser - real open source project
+            - generic [ref=f11e235]:
+              - generic [ref=f11e236]:
+                - img "file-text" [ref=f11e237]
+                - generic [ref=f11e240]: 0 类
+              - generic [ref=f11e241]:
+                - img "clock-circle" [ref=f11e242]
+                - generic [ref=f11e246]: 37 分钟前
+            - generic [ref=f11e247]:
+              - progressbar [ref=f11e248]:
+                - generic "0%" [ref=f11e254]
+              - generic [ref=f11e255]: 健康度
+    - generic [ref=f11e130]:
+      - text: CodeAtlas © 2026 — AI 驱动的代码地图与架构叙事平台
+      - link [ref=f11e131] [cursor=pointer]:
+        - /url: https://github.com/zferrys/codeatlas
+        - img "github" [ref=f11e132]
+        - text: GitHub

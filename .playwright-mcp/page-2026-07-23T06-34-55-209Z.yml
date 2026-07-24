@@ -1,0 +1,12 @@
+- generic [ref=f3e4]:
+  - generic [ref=f3e5]:
+    - heading "CodeAtlas" [level=2] [ref=f3e7]
+    - generic [ref=f3e8]:
+      - generic [ref=f3e9]: demo
+      - button "退出" [ref=f3e10] [cursor=pointer]
+  - main [ref=f3e12]:
+    - generic [ref=f3e13]:
+      - generic [ref=f3e14]:
+        - heading "我的项目" [level=1] [ref=f3e15]
+        - button "+ 新建项目" [ref=f3e16] [cursor=pointer]
+      - paragraph [ref=f3e32]: 还没有项目，点击右上角创建一个吧

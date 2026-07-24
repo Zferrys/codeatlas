@@ -1,0 +1,70 @@
+- generic [ref=f3e67]:
+  - generic [ref=f3e68]:
+    - navigation [ref=f3e69]:
+      - list [ref=f3e70]:
+        - listitem [ref=f3e71]:
+          - link "项目" [ref=f3e73] [cursor=pointer]:
+            - /url: "#/dashboard"
+          - text: /
+        - listitem [ref=f3e74]:
+          - generic [ref=f3e75]: CodeAtlas Server
+    - menu [ref=f3e76]:
+      - menuitem "概览" [ref=f3e77] [cursor=pointer]
+      - menuitem "代码地图" [ref=f3e79] [cursor=pointer]
+      - menuitem "架构叙事" [ref=f3e81] [cursor=pointer]
+      - menuitem "宪法规则" [ref=f3e83] [cursor=pointer]
+      - menuitem "违规列表" [ref=f3e85] [cursor=pointer]
+      - menuitem "AI 洞察" [ref=f3e87] [cursor=pointer]
+      - menuitem "设置" [ref=f3e89] [cursor=pointer]
+  - main [ref=f3e91]:
+    - table [ref=f3e420]:
+      - rowgroup [ref=f3e427]:
+        - row [ref=f3e428]:
+          - columnheader "规则名称" [ref=f3e429]
+          - columnheader "描述" [ref=f3e430]
+          - columnheader "分类" [ref=f3e431]
+          - columnheader "严重度" [ref=f3e432]
+          - columnheader "状态" [ref=f3e433]
+      - rowgroup [ref=f3e434]:
+        - row "no-controller-direct-dao Controller 不得直接调用 DAO/Repository，必须通过 Service 依赖 BLOCKER" [ref=f3e435]:
+          - cell "no-controller-direct-dao" [ref=f3e436]
+          - cell "Controller 不得直接调用 DAO/Repository，必须通过 Service" [ref=f3e437]
+          - cell "依赖" [ref=f3e438]
+          - cell [ref=f3e440]
+          - cell [ref=f3e443]:
+            - switch [checked] [ref=f3e444] [cursor=pointer]
+        - row "no-circular-dependency 模块间不得存在循环依赖 依赖 BLOCKER" [ref=f3e447]:
+          - cell "no-circular-dependency" [ref=f3e448]
+          - cell "模块间不得存在循环依赖" [ref=f3e449]
+          - cell "依赖" [ref=f3e450]
+          - cell [ref=f3e452]
+          - cell [ref=f3e455]:
+            - switch [checked] [ref=f3e456] [cursor=pointer]
+        - row "no-star-import 禁止使用通配符 import (*) 命名 INFO" [ref=f3e459]:
+          - cell "no-star-import" [ref=f3e460]
+          - cell "禁止使用通配符 import (*)" [ref=f3e461]
+          - cell "命名" [ref=f3e462]
+          - cell [ref=f3e464]
+          - cell [ref=f3e467]:
+            - switch [checked] [ref=f3e468] [cursor=pointer]
+        - row "service-interface-required Service 层类必须有对应接口 结构 ERROR" [ref=f3e471]:
+          - cell "service-interface-required" [ref=f3e472]
+          - cell "Service 层类必须有对应接口" [ref=f3e473]
+          - cell "结构" [ref=f3e474]
+          - cell "ERROR" [ref=f3e476]
+          - cell [ref=f3e479]:
+            - switch [checked] [ref=f3e480] [cursor=pointer]
+        - row "max-class-line-count 单类代码行数不超过 500 行 结构 INFO" [ref=f3e483]:
+          - cell "max-class-line-count" [ref=f3e484]
+          - cell "单类代码行数不超过 500 行" [ref=f3e485]
+          - cell "结构" [ref=f3e486]
+          - cell [ref=f3e488]
+          - cell [ref=f3e491]:
+            - switch [checked] [ref=f3e492] [cursor=pointer]
+        - row "max-public-methods 单一类 public 方法不超过 20 个 结构 WARN" [ref=f3e495]:
+          - cell "max-public-methods" [ref=f3e496]
+          - cell "单一类 public 方法不超过 20 个" [ref=f3e497]
+          - cell "结构" [ref=f3e498]
+          - cell [ref=f3e500]
+          - cell [ref=f3e503]:
+            - switch [checked] [ref=f3e504] [cursor=pointer]

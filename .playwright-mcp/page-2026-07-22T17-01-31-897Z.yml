@@ -1,0 +1,20 @@
+- generic [ref=e71]:
+  - generic [ref=e72]:
+    - navigation [ref=e73]:
+      - list [ref=e74]:
+        - listitem [ref=e75]:
+          - link "项目" [ref=e77] [cursor=pointer]:
+            - /url: "#/dashboard"
+          - text: /
+        - listitem [ref=e78]:
+          - generic [ref=e79]: CodeAtlas Self Scan
+    - menu [ref=e80]:
+      - menuitem "概览" [ref=e81] [cursor=pointer]
+      - menuitem "代码地图" [ref=e83] [cursor=pointer]
+      - menuitem "架构叙事" [ref=e85] [cursor=pointer]
+      - menuitem "宪法规则" [ref=e87] [cursor=pointer]
+      - menuitem "违规列表" [ref=e89] [cursor=pointer]
+      - menuitem "AI 洞察" [ref=e91] [cursor=pointer]
+      - menuitem "设置" [active] [ref=e93] [cursor=pointer]
+  - main [ref=e95]:
+    - paragraph [ref=e546]: 项目设置 — 管理项目配置和成员

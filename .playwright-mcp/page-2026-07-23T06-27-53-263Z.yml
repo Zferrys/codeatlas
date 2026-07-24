@@ -1,0 +1,20 @@
+- generic [ref=e52]:
+  - generic [ref=e53]:
+    - navigation [ref=e54]:
+      - list [ref=e55]:
+        - listitem [ref=e56]:
+          - link "项目" [ref=e58] [cursor=pointer]:
+            - /url: "#/dashboard"
+          - text: /
+        - listitem [ref=e59]:
+          - generic [ref=e60]: CodeAtlas Server
+    - menu [ref=e61]:
+      - menuitem "概览" [ref=e62] [cursor=pointer]
+      - menuitem "代码地图" [active] [ref=e64] [cursor=pointer]
+      - menuitem "架构叙事" [ref=e66] [cursor=pointer]
+      - menuitem "宪法规则" [ref=e68] [cursor=pointer]
+      - menuitem "违规列表" [ref=e70] [cursor=pointer]
+      - menuitem "AI 洞察" [ref=e72] [cursor=pointer]
+      - menuitem "设置" [ref=e74] [cursor=pointer]
+  - main [ref=e76]:
+    - paragraph [ref=e205]: 暂无图谱数据，请先触发扫描

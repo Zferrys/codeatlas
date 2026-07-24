@@ -1,0 +1,8 @@
+- generic [ref=f2e351]:
+  - heading "页面出现了异常" [level=2] [ref=f2e356]
+  - paragraph [ref=f2e357]: 很抱歉，页面渲染过程中遇到了错误。请尝试刷新页面，或返回首页。
+  - generic [ref=f2e358]:
+    - button "刷新页面" [ref=f2e359] [cursor=pointer]
+    - button "返回首页" [ref=f2e361] [cursor=pointer]
+  - group [ref=f2e363] [cursor=pointer]:
+    - generic "错误详情" [ref=f2e364]

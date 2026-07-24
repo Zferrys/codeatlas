@@ -1,0 +1,127 @@
+- generic [ref=f3e1]:
+  - generic [ref=f3e1208]:
+    - complementary [ref=f3e1209]:
+      - generic [ref=f3e1210]:
+        - link "CodeAtlas" [ref=f3e1212] [cursor=pointer]:
+          - /url: "#/dashboard"
+        - menu [ref=f3e1219]:
+          - menuitem "dashboard 工作台" [ref=f3e1220] [cursor=pointer]:
+            - img "dashboard" [ref=f3e1221]
+            - generic [ref=f3e1224]: 工作台
+          - listitem [ref=f3e1336]:
+            - generic "当前项目" [ref=f3e1337]
+            - list [ref=f3e1338]:
+              - menuitem "appstore 项目概览" [ref=f3e1339] [cursor=pointer]:
+                - img "appstore" [ref=f3e1340]
+                - generic [ref=f3e1343]: 项目概览
+              - menuitem "aim 代码地图" [ref=f3e1344] [cursor=pointer]:
+                - img "aim" [ref=f3e1345]
+                - generic [ref=f3e1349]: 代码地图
+              - menuitem "read 架构叙事" [ref=f3e1350] [cursor=pointer]:
+                - img "read" [ref=f3e1351]
+                - generic [ref=f3e1354]: 架构叙事
+              - menuitem "safety 宪法规则" [ref=f3e1355] [cursor=pointer]:
+                - img "safety" [ref=f3e1356]
+                - generic [ref=f3e1360]: 宪法规则
+              - menuitem "warning 违规列表" [ref=f3e1361] [cursor=pointer]:
+                - img "warning" [ref=f3e1362]
+                - generic [ref=f3e1365]: 违规列表
+              - menuitem "bulb AI 洞察" [ref=f3e1366] [cursor=pointer]:
+                - img "bulb" [ref=f3e1367]
+                - generic [ref=f3e1370]: AI 洞察
+              - menuitem "setting 项目设置" [ref=f3e1371] [cursor=pointer]:
+                - img "setting" [ref=f3e1372]
+                - generic [ref=f3e1375]: 项目设置
+        - generic [ref=f3e1225]: v0.1.0
+    - generic [ref=f3e1226]:
+      - generic [ref=f3e1227]:
+        - generic [ref=f3e1228]:
+          - img "menu-fold" [ref=f3e1229] [cursor=pointer]
+          - navigation [ref=f3e1232]:
+            - list [ref=f3e1233]:
+              - listitem [ref=f3e1234]:
+                - link "工作台" [ref=f3e1376] [cursor=pointer]:
+                  - /url: "#/dashboard"
+                - text: /
+              - listitem [ref=f3e1377]:
+                - generic [ref=f3e1378]: "项目 #6"
+                - text: /
+              - listitem [ref=f3e1379]:
+                - generic [ref=f3e1380]: 宪法规则
+        - generic [ref=f3e1236]:
+          - button "search Ctrl+K" [ref=f3e1237] [cursor=pointer]:
+            - img "search" [ref=f3e1238]
+            - generic [ref=f3e1241]: Ctrl+K
+          - button [ref=f3e1242] [cursor=pointer]:
+            - img "bulb" [ref=f3e1243]
+          - generic [ref=f3e1246]:
+            - button [ref=f3e1247] [cursor=pointer]:
+              - img "bell" [ref=f3e1248]
+            - superscript [ref=f3e1251]
+          - generic [ref=f3e1252] [cursor=pointer]: Z
+          - generic [ref=f3e1254]: zph
+      - main [ref=f3e1255]:
+        - generic [ref=f3e1393]:
+          - generic [ref=f3e1394]:
+            - heading "架构宪法规则" [level=3] [ref=f3e1395]
+            - generic [ref=f3e1396]: 6 条规则
+          - table [ref=f3e1403]:
+            - rowgroup [ref=f3e1410]:
+              - row [ref=f3e1411]:
+                - columnheader "规则名称" [ref=f3e1412]
+                - columnheader "描述" [ref=f3e1413]
+                - columnheader "分类" [ref=f3e1414]
+                - columnheader "严重度" [ref=f3e1415]
+                - columnheader "启用" [ref=f3e1416]
+            - rowgroup [ref=f3e1417]:
+              - row "no-controller-direct-dao Controller 不得直接调用 DAO/Repository，必须通过 Service 依赖 BLOCKER" [ref=f3e1418]:
+                - cell "no-controller-direct-dao" [ref=f3e1419]
+                - cell "Controller 不得直接调用 DAO/Repository，必须通过 Service" [ref=f3e1420]
+                - cell "依赖" [ref=f3e1421]
+                - cell [ref=f3e1423]
+                - cell [ref=f3e1426]:
+                  - switch [active] [ref=f3e1427] [cursor=pointer]
+              - row "no-circular-dependency 模块间不得存在循环依赖 依赖 BLOCKER" [ref=f3e1430]:
+                - cell "no-circular-dependency" [ref=f3e1431]
+                - cell "模块间不得存在循环依赖" [ref=f3e1432]
+                - cell "依赖" [ref=f3e1433]
+                - cell [ref=f3e1435]
+                - cell [ref=f3e1438]:
+                  - switch [checked] [ref=f3e1439] [cursor=pointer]
+              - row "no-star-import 禁止使用通配符 import (*) 命名 INFO" [ref=f3e1442]:
+                - cell "no-star-import" [ref=f3e1443]
+                - cell "禁止使用通配符 import (*)" [ref=f3e1444]
+                - cell "命名" [ref=f3e1445]
+                - cell [ref=f3e1447]
+                - cell [ref=f3e1450]:
+                  - switch [checked] [ref=f3e1451] [cursor=pointer]
+              - row "service-interface-required Service 层类必须有对应接口 结构 ERROR" [ref=f3e1454]:
+                - cell "service-interface-required" [ref=f3e1455]
+                - cell "Service 层类必须有对应接口" [ref=f3e1456]
+                - cell "结构" [ref=f3e1457]
+                - cell "ERROR" [ref=f3e1459]
+                - cell [ref=f3e1462]:
+                  - switch [checked] [ref=f3e1463] [cursor=pointer]
+              - row "max-class-line-count 单类代码行数不超过 500 行 结构 INFO" [ref=f3e1466]:
+                - cell "max-class-line-count" [ref=f3e1467]
+                - cell "单类代码行数不超过 500 行" [ref=f3e1468]
+                - cell "结构" [ref=f3e1469]
+                - cell [ref=f3e1471]
+                - cell [ref=f3e1474]:
+                  - switch [checked] [ref=f3e1475] [cursor=pointer]
+              - row "max-public-methods 单一类 public 方法不超过 20 个 结构 WARN" [ref=f3e1478]:
+                - cell "max-public-methods" [ref=f3e1479]
+                - cell "单一类 public 方法不超过 20 个" [ref=f3e1480]
+                - cell "结构" [ref=f3e1481]
+                - cell [ref=f3e1483]
+                - cell [ref=f3e1486]:
+                  - switch [checked] [ref=f3e1487] [cursor=pointer]
+      - generic [ref=f3e1326]:
+        - text: CodeAtlas © 2026 — AI 驱动的代码地图与架构叙事平台
+        - link [ref=f3e1327] [cursor=pointer]:
+          - /url: https://github.com/zferrys/codeatlas
+          - img "github" [ref=f3e1328]
+          - text: GitHub
+  - generic [ref=f3e1491]:
+    - img "check-circle" [ref=f3e1492]
+    - text: 规则已禁用

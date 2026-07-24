@@ -1,0 +1,34 @@
+- generic [ref=f3e299]:
+  - generic [ref=f3e310]:
+    - heading "CodeAtlas" [level=1] [ref=f3e317]
+    - paragraph [ref=f3e318]: AI 驱动的代码地图与架构叙事平台
+    - generic [ref=f3e319]:
+      - generic [ref=f3e320]: 3D 代码拓扑可视化
+      - generic [ref=f3e323]: 架构宪法自动检查
+      - generic [ref=f3e326]: AI 智能架构洞察
+  - generic [ref=f3e329]:
+    - generic [ref=f3e331]:
+      - heading "欢迎回来" [level=2] [ref=f3e332]
+      - paragraph [ref=f3e333]: 登录您的 CodeAtlas 账号
+      - generic [ref=f3e334]:
+        - generic [ref=f3e340]:
+          - img "user" [ref=f3e342]
+          - textbox "用户名" [ref=f3e345]
+        - generic [ref=f3e351]:
+          - img "lock" [ref=f3e353]
+          - textbox "密码" [ref=f3e356]
+          - img "eye-invisible" [ref=f3e358] [cursor=pointer]
+        - generic [ref=f3e362]:
+          - generic [ref=f3e363] [cursor=pointer]:
+            - checkbox "记住登录" [ref=f3e365]
+            - generic [ref=f3e367]: 记住登录
+          - generic [ref=f3e368] [cursor=pointer]: 忘记密码？
+        - button "登 录" [ref=f3e374] [cursor=pointer]
+      - generic [ref=f3e376]:
+        - text: 还没有账号？
+        - link "立即注册" [ref=f3e377] [cursor=pointer]:
+          - /url: "#/register"
+    - generic [ref=f3e378]:
+      - generic [ref=f3e379]: CodeAtlas © 2026
+      - link "GitHub" [ref=f3e380] [cursor=pointer]:
+        - /url: https://github.com/zferrys/codeatlas

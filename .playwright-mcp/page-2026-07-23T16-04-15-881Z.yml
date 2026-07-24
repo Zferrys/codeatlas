@@ -1,0 +1,144 @@
+- generic [active] [ref=f11e1]:
+  - generic [ref=f11e1189]:
+    - complementary [ref=f11e1190]:
+      - generic [ref=f11e1191]:
+        - link "CodeAtlas" [ref=f11e1193] [cursor=pointer]:
+          - /url: "#/dashboard"
+        - menu [ref=f11e1200]:
+          - menuitem "dashboard 工作台" [ref=f11e1201] [cursor=pointer]:
+            - img "dashboard" [ref=f11e1202]
+            - generic [ref=f11e1205]: 工作台
+        - generic [ref=f11e1206]: v0.1.0
+    - generic [ref=f11e1207]:
+      - generic [ref=f11e1208]:
+        - generic [ref=f11e1209]:
+          - img "menu-fold" [ref=f11e1210] [cursor=pointer]
+          - navigation [ref=f11e1213]:
+            - list [ref=f11e1214]:
+              - listitem [ref=f11e1215]:
+                - generic [ref=f11e1216]: 工作台
+        - generic [ref=f11e1217]:
+          - button "search Ctrl+K" [ref=f11e1218] [cursor=pointer]:
+            - img "search" [ref=f11e1219]
+            - generic [ref=f11e1222]: Ctrl+K
+          - button [ref=f11e1223] [cursor=pointer]:
+            - img "bulb" [ref=f11e1224]
+          - button [ref=f11e1228] [cursor=pointer]:
+            - img "bell" [ref=f11e1229]
+          - generic [ref=f11e1232] [cursor=pointer]: A
+          - generic [ref=f11e1234]: admin
+      - main [ref=f11e1235]:
+        - generic [ref=f11e1236]:
+          - generic [ref=f11e1237]:
+            - generic [ref=f11e1239]:
+              - img "project" [ref=f11e1241]
+              - generic [ref=f11e1244]:
+                - generic [ref=f11e1245]: "4"
+                - generic [ref=f11e1246]: 项目总数
+            - generic [ref=f11e1248]:
+              - img "file-text" [ref=f11e1250]
+              - generic [ref=f11e1253]:
+                - generic [ref=f11e1254]: "78"
+                - generic [ref=f11e1255]: 总类数
+            - generic [ref=f11e1257]:
+              - img "scan" [ref=f11e1259]
+              - generic [ref=f11e1262]:
+                - generic [ref=f11e1263]: "7"
+                - generic [ref=f11e1264]: 活跃扫描
+            - generic [ref=f11e1266]:
+              - img "bulb" [ref=f11e1268]
+              - generic [ref=f11e1271]:
+                - generic [ref=f11e1272]: "3"
+                - generic [ref=f11e1273]: AI 洞察
+          - generic [ref=f11e1274]:
+            - heading "我的项目" [level=2] [ref=f11e1275]
+            - generic [ref=f11e1276]:
+              - generic [ref=f11e1278]:
+                - textbox "搜索项目..." [ref=f11e1279]
+                - button [ref=f11e1281] [cursor=pointer]:
+                  - img "search" [ref=f11e1282]
+              - button "plus 新建项目" [ref=f11e1285] [cursor=pointer]:
+                - img "plus" [ref=f11e1286]
+                - generic [ref=f11e1290]: 新建项目
+          - generic [ref=f11e1291]:
+            - generic [ref=f11e1294] [cursor=pointer]:
+              - generic [ref=f11e1295]:
+                - generic [ref=f11e1296]: C
+                - generic [ref=f11e1297]:
+                  - heading "CodeAtlas-Server" [level=3] [ref=f11e1298]
+                  - generic [ref=f11e1299]: Java
+              - paragraph [ref=f11e1300]: CodeAtlas Server module - full scan test
+              - generic [ref=f11e1301]:
+                - generic [ref=f11e1302]:
+                  - img "file-text" [ref=f11e1303]
+                  - generic [ref=f11e1306]: 74 类
+                - generic [ref=f11e1307]:
+                  - img "clock-circle" [ref=f11e1308]
+                  - generic [ref=f11e1312]: 15 分钟前
+              - generic [ref=f11e1313]:
+                - progressbar [ref=f11e1314]:
+                  - generic "90%" [ref=f11e1320]
+                - generic [ref=f11e1321]: 健康度
+            - generic [ref=f11e1324] [cursor=pointer]:
+              - generic [ref=f11e1325]:
+                - generic [ref=f11e1326]: C
+                - generic [ref=f11e1327]:
+                  - heading "codeatlas-common" [level=3] [ref=f11e1328]
+                  - generic [ref=f11e1329]: Java
+              - paragraph [ref=f11e1330]: CodeAtlas Common module - real production code
+              - generic [ref=f11e1331]:
+                - generic [ref=f11e1332]:
+                  - img "file-text" [ref=f11e1333]
+                  - generic [ref=f11e1336]: 4 类
+                - generic [ref=f11e1337]:
+                  - img "clock-circle" [ref=f11e1338]
+                  - generic [ref=f11e1342]: 52 分钟前
+              - generic [ref=f11e1343]:
+                - progressbar [ref=f11e1344]:
+                  - generic "100%" [ref=f11e1350]
+                - generic [ref=f11e1351]: 健康度
+            - generic [ref=f11e1354] [cursor=pointer]:
+              - generic [ref=f11e1355]:
+                - generic [ref=f11e1356]: J
+                - generic [ref=f11e1357]:
+                  - heading "jsoup" [level=3] [ref=f11e1358]
+                  - generic [ref=f11e1359]: Java
+              - paragraph [ref=f11e1360]: jsoup HTML parser from Gitee mirror
+              - generic [ref=f11e1361]:
+                - generic [ref=f11e1362]:
+                  - img "file-text" [ref=f11e1363]
+                  - generic [ref=f11e1366]: 0 类
+                - generic [ref=f11e1367]:
+                  - img "clock-circle" [ref=f11e1368]
+                  - generic [ref=f11e1372]: 1 小时前
+              - generic [ref=f11e1373]:
+                - progressbar [ref=f11e1374]:
+                  - generic "0%" [ref=f11e1380]
+                - generic [ref=f11e1381]: 健康度
+            - generic [ref=f11e1384] [cursor=pointer]:
+              - generic [ref=f11e1385]:
+                - generic [ref=f11e1386]: J
+                - generic [ref=f11e1387]:
+                  - heading "jsoup" [level=3] [ref=f11e1388]
+                  - generic [ref=f11e1389]: Java
+              - paragraph [ref=f11e1390]: jsoup Java HTML Parser - real open source project
+              - generic [ref=f11e1391]:
+                - generic [ref=f11e1392]:
+                  - img "file-text" [ref=f11e1393]
+                  - generic [ref=f11e1396]: 0 类
+                - generic [ref=f11e1397]:
+                  - img "clock-circle" [ref=f11e1398]
+                  - generic [ref=f11e1402]: 1 小时前
+              - generic [ref=f11e1403]:
+                - progressbar [ref=f11e1404]:
+                  - generic "0%" [ref=f11e1410]
+                - generic [ref=f11e1411]: 健康度
+      - generic [ref=f11e1412]:
+        - text: CodeAtlas © 2026 — AI 驱动的代码地图与架构叙事平台
+        - link [ref=f11e1413] [cursor=pointer]:
+          - /url: https://github.com/zferrys/codeatlas
+          - img "github" [ref=f11e1414]
+          - text: GitHub
+  - generic [ref=f11e1418]:
+    - img "check-circle" [ref=f11e1419]
+    - text: 登录成功

@@ -1,0 +1,57 @@
+- generic [ref=e71]:
+  - generic [ref=e72]:
+    - navigation [ref=e73]:
+      - list [ref=e74]:
+        - listitem [ref=e75]:
+          - link "项目" [ref=e77] [cursor=pointer]:
+            - /url: "#/dashboard"
+          - text: /
+        - listitem [ref=e78]:
+          - generic [ref=e79]: CodeAtlas Self Scan
+    - menu [ref=e80]:
+      - menuitem "概览" [ref=e81] [cursor=pointer]
+      - menuitem "代码地图" [ref=e83] [cursor=pointer]
+      - menuitem "架构叙事" [ref=e85] [cursor=pointer]
+      - menuitem "宪法规则" [ref=e87] [cursor=pointer]
+      - menuitem "违规列表" [ref=e89] [cursor=pointer]
+      - menuitem "AI 洞察" [ref=e91] [cursor=pointer]
+      - menuitem "设置" [active] [ref=e93] [cursor=pointer]
+  - main [ref=e95]:
+    - generic [ref=e1072]:
+      - generic [ref=e1073]:
+        - generic [ref=e1074]: 基本信息
+        - generic [ref=e1078]:
+          - generic [ref=e1080]:
+            - generic "项目名称" [ref=e1082]
+            - textbox "输入项目名称" [ref=e1086]: CodeAtlas Self Scan
+          - generic [ref=e1088]:
+            - generic "项目描述" [ref=e1090]
+            - textbox "输入项目描述" [ref=e1094]
+          - button "保存修改" [ref=e1100] [cursor=pointer]
+      - generic [ref=e1102]:
+        - generic [ref=e1103]: 项目信息
+        - table [ref=e1109]:
+          - rowgroup [ref=e1110]:
+            - row [ref=e1111]:
+              - 'cell "语言 : Java" [ref=e1112]':
+                - generic [ref=e1113]:
+                  - generic [ref=e1114]: "语言 :"
+                  - generic [ref=e1115]: Java
+              - 'cell "源码类型 : LOCAL_PATH" [ref=e1116]':
+                - generic [ref=e1117]:
+                  - generic [ref=e1118]: "源码类型 :"
+                  - generic [ref=e1119]: LOCAL_PATH
+            - row [ref=e1120]:
+              - 'cell "总类数 : 68" [ref=e1121]':
+                - generic [ref=e1122]:
+                  - generic [ref=e1123]: "总类数 :"
+                  - generic [ref=e1124]: "68"
+              - 'cell "健康度 : 60 分" [ref=e1125]':
+                - generic [ref=e1126]:
+                  - generic [ref=e1127]: "健康度 :"
+                  - generic [ref=e1128]: 60 分
+            - row [ref=e1129]:
+              - 'cell "创建时间 : 2026年7月23日" [ref=e1130]':
+                - generic [ref=e1131]:
+                  - generic [ref=e1132]: "创建时间 :"
+                  - generic [ref=e1133]: 2026年7月23日

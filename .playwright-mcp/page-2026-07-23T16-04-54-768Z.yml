@@ -1,0 +1,137 @@
+- generic [ref=f11e1189]:
+  - complementary [ref=f11e1190]:
+    - generic [ref=f11e1191]:
+      - link "CodeAtlas" [ref=f11e1193] [cursor=pointer]:
+        - /url: "#/dashboard"
+      - menu [ref=f11e1200]:
+        - menuitem "dashboard 工作台" [ref=f11e1201] [cursor=pointer]:
+          - img "dashboard" [ref=f11e1202]
+          - generic [ref=f11e1205]: 工作台
+        - listitem [ref=f11e1656]:
+          - generic "当前项目" [ref=f11e1657]
+          - list [ref=f11e1658]:
+            - menuitem "appstore 项目概览" [ref=f11e1659] [cursor=pointer]:
+              - img "appstore" [ref=f11e1660]
+              - generic [ref=f11e1663]: 项目概览
+            - menuitem "aim 代码地图" [ref=f11e1664] [cursor=pointer]:
+              - img "aim" [ref=f11e1665]
+              - generic [ref=f11e1669]: 代码地图
+            - menuitem "read 架构叙事" [ref=f11e1670] [cursor=pointer]:
+              - img "read" [ref=f11e1671]
+              - generic [ref=f11e1674]: 架构叙事
+            - menuitem "safety 宪法规则" [ref=f11e1675] [cursor=pointer]:
+              - img "safety" [ref=f11e1676]
+              - generic [ref=f11e1680]: 宪法规则
+            - menuitem "warning 违规列表" [active] [ref=f11e1681] [cursor=pointer]:
+              - img "warning" [ref=f11e1682]
+              - generic [ref=f11e1685]: 违规列表
+            - menuitem "bulb AI 洞察" [ref=f11e1686] [cursor=pointer]:
+              - img "bulb" [ref=f11e1687]
+              - generic [ref=f11e1690]: AI 洞察
+            - menuitem "setting 项目设置" [ref=f11e1691] [cursor=pointer]:
+              - img "setting" [ref=f11e1692]
+              - generic [ref=f11e1695]: 项目设置
+      - generic [ref=f11e1206]: v0.1.0
+  - generic [ref=f11e1207]:
+    - generic [ref=f11e1208]:
+      - generic [ref=f11e1209]:
+        - img "menu-fold" [ref=f11e1210] [cursor=pointer]
+        - navigation [ref=f11e1213]:
+          - list [ref=f11e1214]:
+            - listitem [ref=f11e1215]:
+              - link "工作台" [ref=f11e1696] [cursor=pointer]:
+                - /url: "#/dashboard"
+              - text: /
+            - listitem [ref=f11e1697]:
+              - generic [ref=f11e1698]: "项目 #12"
+              - text: /
+            - listitem [ref=f11e1699]:
+              - generic [ref=f11e1700]: 违规列表
+      - generic [ref=f11e1217]:
+        - button "search Ctrl+K" [ref=f11e1218] [cursor=pointer]:
+          - img "search" [ref=f11e1219]
+          - generic [ref=f11e1222]: Ctrl+K
+        - button [ref=f11e1223] [cursor=pointer]:
+          - img "bulb" [ref=f11e1224]
+        - button [ref=f11e1228] [cursor=pointer]:
+          - img "bell" [ref=f11e1229]
+        - generic [ref=f11e1232] [cursor=pointer]: A
+        - generic [ref=f11e1234]: admin
+    - main [ref=f11e1235]:
+      - generic [ref=f11e1886]:
+        - generic [ref=f11e1887]:
+          - heading "违规列表" [level=3] [ref=f11e1888]
+          - generic [ref=f11e1889]:
+            - generic [ref=f11e1890]: 4 阻断
+            - generic [ref=f11e1892]: 0 错误
+            - generic [ref=f11e1894]: 0 警告
+        - generic [ref=f11e1898]:
+          - table [ref=f11e1902]:
+            - rowgroup [ref=f11e1910]:
+              - row [ref=f11e1911]:
+                - columnheader "严重度" [ref=f11e1912]
+                - columnheader "类" [ref=f11e1913]
+                - columnheader "违规说明" [ref=f11e1914]
+                - columnheader "建议" [ref=f11e1915]
+                - columnheader "状态" [ref=f11e1916]
+                - columnheader "操作" [ref=f11e1917]
+            - rowgroup [ref=f11e1918]:
+              - row [ref=f11e1919]:
+                - cell "阻断" [ref=f11e1920]
+                - cell "SearchController com.codeatlas.server.controller.SearchController" [ref=f11e1922]:
+                  - code [ref=f11e1923]: SearchController
+                  - generic [ref=f11e1924]: com.codeatlas.server.controller.SearchController
+                - 'cell "Controller 直接依赖 DAO/Repository: ProjectMapper" [ref=f11e1925]'
+                - cell "通过 Service 层封装对 ProjectMapper 的调用" [ref=f11e1926]
+                - cell [ref=f11e1927]
+                - cell [ref=f11e1930]:
+                  - button "标记解决" [ref=f11e1931] [cursor=pointer]
+              - row [ref=f11e1933]:
+                - cell "阻断" [ref=f11e1934]
+                - cell "SearchController com.codeatlas.server.controller.SearchController" [ref=f11e1936]:
+                  - code [ref=f11e1937]: SearchController
+                  - generic [ref=f11e1938]: com.codeatlas.server.controller.SearchController
+                - 'cell "Controller 直接依赖 DAO/Repository: ClassSummaryMapper" [ref=f11e1939]'
+                - cell "通过 Service 层封装对 ClassSummaryMapper 的调用" [ref=f11e1940]
+                - cell [ref=f11e1941]
+                - cell [ref=f11e1944]:
+                  - button "标记解决" [ref=f11e1945] [cursor=pointer]
+              - row [ref=f11e1947]:
+                - cell "阻断" [ref=f11e1948]
+                - cell "SearchController com.codeatlas.server.controller.SearchController" [ref=f11e1950]:
+                  - code [ref=f11e1951]: SearchController
+                  - generic [ref=f11e1952]: com.codeatlas.server.controller.SearchController
+                - 'cell "Controller 直接依赖 DAO/Repository: ProjectMapper" [ref=f11e1953]'
+                - cell "通过 Service 层封装对 ProjectMapper 的调用" [ref=f11e1954]
+                - cell [ref=f11e1955]
+                - cell [ref=f11e1958]:
+                  - button "标记解决" [ref=f11e1959] [cursor=pointer]
+              - row [ref=f11e1961]:
+                - cell "阻断" [ref=f11e1962]
+                - cell "SearchController com.codeatlas.server.controller.SearchController" [ref=f11e1964]:
+                  - code [ref=f11e1965]: SearchController
+                  - generic [ref=f11e1966]: com.codeatlas.server.controller.SearchController
+                - 'cell "Controller 直接依赖 DAO/Repository: ClassSummaryMapper" [ref=f11e1967]'
+                - cell "通过 Service 层封装对 ClassSummaryMapper 的调用" [ref=f11e1968]
+                - cell [ref=f11e1969]
+                - cell [ref=f11e1972]:
+                  - button "标记解决" [ref=f11e1973] [cursor=pointer]
+          - list [ref=f11e1975]:
+            - listitem [ref=f11e1976]: 共 4 条
+            - listitem "Previous Page" [ref=f11e1977]:
+              - button [disabled] [ref=f11e1978]:
+                - img "left" [ref=f11e1979]
+            - listitem "1" [ref=f11e1982] [cursor=pointer]
+            - listitem "Next Page" [ref=f11e1984]:
+              - button [disabled] [ref=f11e1985]:
+                - img "right" [ref=f11e1986]
+            - listitem [ref=f11e1989]:
+              - generic [ref=f11e1991] [cursor=pointer]:
+                - combobox [ref=f11e1993]
+                - generic [ref=f11e1994]: 20 / page
+    - generic [ref=f11e1412]:
+      - text: CodeAtlas © 2026 — AI 驱动的代码地图与架构叙事平台
+      - link [ref=f11e1413] [cursor=pointer]:
+        - /url: https://github.com/zferrys/codeatlas
+        - img "github" [ref=f11e1414]
+        - text: GitHub

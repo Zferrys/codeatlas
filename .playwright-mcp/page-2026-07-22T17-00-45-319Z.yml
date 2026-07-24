@@ -1,0 +1,377 @@
+- generic [ref=e71]:
+  - generic [ref=e72]:
+    - navigation [ref=e73]:
+      - list [ref=e74]:
+        - listitem [ref=e75]:
+          - link "项目" [ref=e77] [cursor=pointer]:
+            - /url: "#/dashboard"
+          - text: /
+        - listitem [ref=e78]:
+          - generic [ref=e79]: CodeAtlas Self Scan
+    - menu [ref=e80]:
+      - menuitem "概览" [ref=e81] [cursor=pointer]
+      - menuitem "代码地图" [ref=e83] [cursor=pointer]
+      - menuitem "架构叙事" [active] [ref=e85] [cursor=pointer]
+      - menuitem "宪法规则" [ref=e87] [cursor=pointer]
+      - menuitem "违规列表" [ref=e89] [cursor=pointer]
+      - menuitem "AI 洞察" [ref=e91] [cursor=pointer]
+      - menuitem "设置" [ref=e93] [cursor=pointer]
+  - main [ref=e95]:
+    - generic [ref=e221]:
+      - generic [ref=e224]:
+        - generic "架构叙事 — CodeAtlas Self Scan" [ref=e225]
+        - generic "AI 生成 · 2026年7月23日 00:53" [ref=e226]
+        - generic [ref=e227]:
+          - generic [ref=e228]: 架构叙事
+          - generic [ref=e229]: 置信度 85%
+      - generic [ref=e230]:
+        - heading "CodeAtlas Self Scan — Architectural Narrative" [level=1] [ref=e231]
+        - heading "1. Project Overview" [level=2] [ref=e232]
+        - paragraph [ref=e233]:
+          - text: CodeAtlas Self Scan is a
+          - strong [ref=e234]: code analysis and visualization platform
+          - text: "that scans Java projects, extracts architectural metadata, and presents insights through a REST API. The core domain revolves around three primary use cases:"
+        - list [ref=e235]:
+          - listitem [ref=e236]:
+            - strong [ref=e237]: Project Management
+            - text: — Users create and manage scanned projects (
+            - code [ref=e238]: ProjectController
+            - text: ","
+            - code [ref=e239]: ProjectService
+            - text: ","
+            - code [ref=e240]: ProjectRepository
+            - text: )
+          - listitem [ref=e241]:
+            - strong [ref=e242]: Code Scanning & Analysis
+            - text: — The system scans source code, builds dependency graphs, and generates architectural metrics (
+            - code [ref=e243]: ScanController
+            - text: ","
+            - code [ref=e244]: ScanServiceImpl
+            - text: ","
+            - code [ref=e245]: AiAnalysisService
+            - text: )
+          - listitem [ref=e246]:
+            - strong [ref=e247]: Visualization & Insights
+            - text: — Results are exposed as interactive maps and AI-generated summaries (
+            - code [ref=e248]: MapController
+            - text: ","
+            - code [ref=e249]: MapService
+            - text: ","
+            - code [ref=e250]: InsightController
+            - text: ","
+            - code [ref=e251]: InsightServiceImpl
+            - text: )
+        - paragraph [ref=e252]:
+          - text: The package structure (
+          - code [ref=e253]: com.codeatlas.server
+          - text: ","
+          - code [ref=e254]: com.codeatlas.common
+          - text: ) suggests a clear separation between server-specific logic and shared utilities. The presence of
+          - code [ref=e255]: SecurityConfig
+          - text: ","
+          - code [ref=e256]: JwtAuthFilter
+          - text: ", and"
+          - code [ref=e257]: CodeAtlasUserDetails
+          - text: indicates authenticated access, likely tied to user accounts managed via
+          - code [ref=e258]: UserServiceImpl
+          - text: .
+        - heading "2. Architecture Style" [level=2] [ref=e259]
+        - paragraph [ref=e260]:
+          - text: This is a
+          - strong [ref=e261]: classic layered architecture
+          - text: "with strong MVC leanings. Evidence:"
+        - list [ref=e262]:
+          - listitem [ref=e263]:
+            - strong [ref=e264]: Controller layer
+            - text: (
+            - code [ref=e265]: com.codeatlas.server.controller
+            - text: ) handles HTTP concerns — request parsing, response formatting, authentication context extraction
+          - listitem [ref=e266]:
+            - strong [ref=e267]: Service layer
+            - text: (
+            - code [ref=e268]: com.codeatlas.server.service
+            - text: ) contains business logic, with interfaces (
+            - code [ref=e269]: ProjectService
+            - text: ","
+            - code [ref=e270]: InsightService
+            - text: ) and implementations (
+            - code [ref=e271]: ScanServiceImpl
+            - text: ","
+            - code [ref=e272]: MapServiceImpl
+            - text: )
+          - listitem [ref=e273]:
+            - strong [ref=e274]: Repository layer
+            - text: (
+            - code [ref=e275]: com.codeatlas.server.repository
+            - text: ) manages data persistence (JPA repositories)
+          - listitem [ref=e276]:
+            - strong [ref=e277]: DTO layer
+            - text: (
+            - code [ref=e278]: com.codeatlas.common.dto
+            - text: ) provides data transfer objects like
+            - code [ref=e279]: ApiResponse
+            - text: that decouple internal models from API contracts
+        - paragraph [ref=e280]:
+          - text: The architecture is
+          - strong [ref=e281]: not strictly hexagonal
+          - text: — there's no explicit port/adapter separation, and services directly depend on repositories rather than through interfaces. However, the use of service interfaces (e.g.,
+          - code [ref=e282]: ProjectService
+          - text: as an interface with
+          - code [ref=e283]: ProjectServiceImpl
+          - text: ) shows awareness of dependency inversion, even if not consistently applied.
+        - heading "3. Layer Analysis" [level=2] [ref=e284]
+        - heading "Config Layer (4 classes)" [level=3] [ref=e285]
+        - list [ref=e286]:
+          - listitem [ref=e287]:
+            - strong [ref=e288]: Responsibility
+            - text: ": Cross-cutting configuration — security, exception handling, bean wiring"
+          - listitem [ref=e289]:
+            - strong [ref=e290]: Key classes
+            - text: ":"
+            - code [ref=e291]: SecurityConfig
+            - text: (JWT filter chain),
+            - code [ref=e292]: GlobalExceptionHandler
+            - text: (maps
+            - code [ref=e293]: BusinessException
+            - text: to
+            - code [ref=e294]: ApiResponse
+            - text: with
+            - code [ref=e295]: ErrorCode
+            - text: )
+          - listitem [ref=e296]:
+            - strong [ref=e297]: Interaction
+            - text: ":"
+            - code [ref=e298]: SecurityConfig
+            - text: injects
+            - code [ref=e299]: JwtAuthFilter
+            - text: ;
+            - code [ref=e300]: GlobalExceptionHandler
+            - text: catches exceptions from all layers
+        - heading "Controller Layer (5 classes)" [level=3] [ref=e301]
+        - list [ref=e302]:
+          - listitem [ref=e303]:
+            - strong [ref=e304]: Responsibility
+            - text: ": HTTP boundary — validates input, delegates to services, formats responses"
+          - listitem [ref=e305]:
+            - strong [ref=e306]: Key classes
+            - text: ":"
+            - code [ref=e307]: ProjectController
+            - text: (4 methods, 4 deps),
+            - code [ref=e308]: AuthController
+            - text: (4 methods, 3 deps),
+            - code [ref=e309]: InsightController
+            - text: (1 method, 3 deps)
+          - listitem [ref=e310]:
+            - strong [ref=e311]: Pattern
+            - text: ": Thin controllers — most have <60 lines, delegating heavily to services."
+            - code [ref=e312]: InsightController
+            - text: has only one method, suggesting a focused endpoint
+        - heading "Service Layer (11 classes)" [level=3] [ref=e313]
+        - list [ref=e314]:
+          - listitem [ref=e315]:
+            - strong [ref=e316]: Responsibility
+            - text: ": Business logic orchestration — scanning, analysis, user management"
+          - listitem [ref=e317]:
+            - strong [ref=e318]: Key classes
+            - text: ":"
+            - code [ref=e319]: AiAnalysisService
+            - text: (8 methods, 221 lines — the most complex class),
+            - code [ref=e320]: ScanServiceImpl
+            - text: (5 methods, 201 lines),
+            - code [ref=e321]: ProjectServiceImpl
+            - text: (5 methods, 103 lines)
+          - listitem [ref=e322]:
+            - strong [ref=e323]: Notable
+            - text: ":"
+            - code [ref=e324]: AiAnalysisService
+            - text: has 9 dependencies, making it the most coupled class. This suggests it orchestrates multiple subsystems (AI, scanning, persistence)
+        - heading "Repository Layer (6 classes)" [level=3] [ref=e325]
+        - list [ref=e326]:
+          - listitem [ref=e327]:
+            - strong [ref=e328]: Responsibility
+            - text: ": Data access — JPA repositories for domain entities"
+          - listitem [ref=e329]:
+            - strong [ref=e330]: Interaction
+            - text: ": Services call repositories directly; no repository interfaces are shown in the top 15, but the layer exists"
+        - heading "DTO Layer (6 classes)" [level=3] [ref=e331]
+        - list [ref=e332]:
+          - listitem [ref=e333]:
+            - strong [ref=e334]: Responsibility
+            - text: ": API contracts —"
+            - code [ref=e335]: ApiResponse
+            - text: wraps all responses with status, data, and error codes
+          - listitem [ref=e336]:
+            - strong [ref=e337]: Pattern
+            - text: ":"
+            - code [ref=e338]: ApiResponse
+            - text: depends on
+            - code [ref=e339]: ErrorCode
+            - text: ", creating a consistent error envelope across all endpoints"
+        - heading "4. Core Business Flows" [level=2] [ref=e340]
+        - 'heading "Flow 1: User Authentication" [level=3] [ref=e341]'
+        - code [ref=e343]: AuthController (POST /auth/login) → UserService (interface) → UserServiceImpl.authenticate() → UserRepository (JPA) → JwtAuthFilter (token generation) → ApiResponse (wraps token + user details)
+        - paragraph [ref=e344]:
+          - code [ref=e345]: AuthController
+          - text: receives credentials, delegates to
+          - code [ref=e346]: UserServiceImpl
+          - text: ", which validates against the repository and returns a JWT via"
+          - code [ref=e347]: CodeAtlasUserDetails
+          - text: . The response is wrapped in
+          - code [ref=e348]: ApiResponse
+          - text: .
+        - 'heading "Flow 2: Project Scan" [level=3] [ref=e349]'
+        - code [ref=e351]: "ScanController (POST /scan/{projectId}) → ScanServiceImpl.scanProject() → ProjectRepository (load project metadata) → AiAnalysisService.analyze() → [multiple internal dependencies — likely parsing, graph building, metric calculation] → MapServiceImpl.generateMap() → ApiResponse (returns scan results)"
+        - paragraph [ref=e352]:
+          - text: This is the most complex flow.
+          - code [ref=e353]: ScanServiceImpl
+          - text: "orchestrates the scan lifecycle: loading the project, invoking"
+          - code [ref=e354]: AiAnalysisService
+          - text: for deep analysis, and
+          - code [ref=e355]: MapServiceImpl
+          - text: for visualization data. The 8 dependencies of
+          - code [ref=e356]: AiAnalysisService
+          - text: suggest it coordinates file parsing, dependency extraction, and AI summarization.
+        - 'heading "Flow 3: Insight Retrieval" [level=3] [ref=e357]'
+        - code [ref=e359]: "InsightController (GET /insights/{projectId}) → InsightServiceImpl.getInsights() → [likely calls AiAnalysisService or repository for stored insights] → ApiResponse"
+        - paragraph [ref=e360]:
+          - text: The simplest flow —
+          - code [ref=e361]: InsightController
+          - text: has only one method, suggesting a focused endpoint that returns pre-computed or cached insights.
+        - heading "5. Design Decisions & Tradeoffs" [level=2] [ref=e362]
+        - 'heading "Decision 1: Monolithic Service Classes" [level=3] [ref=e363]'
+        - paragraph [ref=e364]:
+          - code [ref=e365]: AiAnalysisService
+          - text: (221 lines, 9 deps) and
+          - code [ref=e366]: ScanServiceImpl
+          - text: (201 lines, 8 deps) are large, multi-responsibility classes.
+        - list [ref=e367]:
+          - listitem [ref=e368]:
+            - strong [ref=e369]: Rationale
+            - text: ": Simplicity — fewer files, easier to understand the full scan pipeline in one place"
+          - listitem [ref=e370]:
+            - strong [ref=e371]: Tradeoff
+            - text: ": Violates Single Responsibility Principle. Testing becomes harder (9 mocks needed). Future changes to scanning logic risk breaking analysis logic"
+          - listitem [ref=e372]:
+            - strong [ref=e373]: Alternative
+            - text: ": Split into"
+            - code [ref=e374]: ScanOrchestrator
+            - text: ","
+            - code [ref=e375]: DependencyAnalyzer
+            - text: ","
+            - code [ref=e376]: MetricCalculator
+            - text: ","
+            - code [ref=e377]: AiSummarizer
+            - text: — each with focused dependencies
+        - 'heading "Decision 2: Direct Repository Injection in Services" [level=3] [ref=e378]'
+        - paragraph [ref=e379]:
+          - text: Services like
+          - code [ref=e380]: ProjectServiceImpl
+          - text: directly inject JPA repositories rather than going through repository interfaces.
+        - list [ref=e381]:
+          - listitem [ref=e382]:
+            - strong [ref=e383]: Rationale
+            - text: ": Speed of development — JPA repositories are already interfaces, so adding another layer seemed redundant"
+          - listitem [ref=e384]:
+            - strong [ref=e385]: Tradeoff
+            - text: ": Tight coupling to Spring Data JPA. Switching to a different persistence technology (e.g., MongoDB, event store) would require changing service implementations"
+          - listitem [ref=e386]:
+            - strong [ref=e387]: Alternative
+            - text: ": Introduce repository interfaces in the domain layer, with JPA implementations in infrastructure"
+        - 'heading "Decision 3: ApiResponse as Universal Envelope" [level=3] [ref=e388]'
+        - paragraph [ref=e389]:
+          - text: Every controller returns
+          - code [ref=e390]: ApiResponse
+          - text: ", which wraps success data or error codes."
+        - list [ref=e391]:
+          - listitem [ref=e392]:
+            - strong [ref=e393]: Rationale
+            - text: ": Consistent API contract — clients always parse the same envelope structure"
+          - listitem [ref=e394]:
+            - strong [ref=e395]: Tradeoff
+            - text: ": Adds boilerplate; every controller method must construct"
+            - code [ref=e396]: ApiResponse
+            - text: . Also,
+            - code [ref=e397]: ApiResponse
+            - text: depends on
+            - code [ref=e398]: ErrorCode
+            - text: ", creating a dependency from DTO to domain"
+          - listitem [ref=e399]:
+            - strong [ref=e400]: Alternative
+            - text: ": Use Spring's"
+            - code [ref=e401]: ResponseEntity
+            - text: directly, or implement a response interceptor that auto-wraps
+        - heading "6. Improvement Suggestions" [level=2] [ref=e402]
+        - 'heading "Suggestion 1: Decompose AiAnalysisService" [level=3] [ref=e403]'
+        - paragraph [ref=e404]:
+          - strong [ref=e405]: Problem
+          - text: ":"
+          - code [ref=e406]: AiAnalysisService
+          - text: has 9 dependencies and 221 lines — it's doing too much.
+        - paragraph [ref=e407]:
+          - strong [ref=e408]: Action
+          - text: ": Extract distinct responsibilities:"
+        - list [ref=e409]:
+          - listitem [ref=e410]:
+            - code [ref=e411]: ScanOrchestrator
+            - text: — coordinates the scan pipeline
+          - listitem [ref=e412]:
+            - code [ref=e413]: DependencyGraphBuilder
+            - text: — builds dependency graphs from parsed code
+          - listitem [ref=e414]:
+            - code [ref=e415]: MetricCalculator
+            - text: — computes architectural metrics (coupling, cohesion, layer violations)
+          - listitem [ref=e416]:
+            - code [ref=e417]: AiSummarizer
+            - text: — calls external AI service for natural language insights
+        - paragraph [ref=e418]:
+          - strong [ref=e419]: Benefit
+          - text: ": Each class becomes testable in isolation, dependencies are explicit, and changes to one concern don't affect others."
+        - 'heading "Suggestion 2: Introduce Domain Events for Scan Completion" [level=3] [ref=e420]'
+        - paragraph [ref=e421]:
+          - strong [ref=e422]: Problem
+          - text: ":"
+          - code [ref=e423]: ScanServiceImpl
+          - text: directly calls
+          - code [ref=e424]: MapServiceImpl
+          - text: and likely
+          - code [ref=e425]: InsightServiceImpl
+          - text: — creating temporal coupling.
+        - paragraph [ref=e426]:
+          - strong [ref=e427]: Action
+          - text: ": After a scan completes, publish a"
+          - code [ref=e428]: ScanCompletedEvent
+          - text: . Let
+          - code [ref=e429]: MapServiceImpl
+          - text: and
+          - code [ref=e430]: InsightServiceImpl
+          - text: subscribe to this event asynchronously.
+        - paragraph [ref=e431]:
+          - strong [ref=e432]: Benefit
+          - text: ": Decouples scan execution from visualization generation. Enables future extensions (e.g., email notifications, webhook callbacks) without modifying"
+          - code [ref=e433]: ScanServiceImpl
+          - text: .
+        - 'heading "Suggestion 3: Add Repository Interfaces in Domain Layer" [level=3] [ref=e434]'
+        - paragraph [ref=e435]:
+          - strong [ref=e436]: Problem
+          - text: ": Services depend directly on Spring Data JPA repositories."
+        - paragraph [ref=e437]:
+          - strong [ref=e438]: Action
+          - text: ": Define repository interfaces in"
+          - code [ref=e439]: com.codeatlas.domain.repository
+          - text: (e.g.,
+          - code [ref=e440]: ProjectRepository
+          - text: as an interface). Keep JPA implementations in
+          - code [ref=e441]: com.codeatlas.server.repository
+          - text: .
+        - paragraph [ref=e442]:
+          - strong [ref=e443]: Benefit
+          - text: ": Domain layer becomes technology-agnostic. Testing services becomes easier (mock the interface). Future migration to a different persistence technology is isolated to the infrastructure layer."
+        - separator [ref=e444]
+        - paragraph [ref=e445]:
+          - text: This architecture is
+          - strong [ref=e446]: pragmatic and well-structured for a mid-sized project
+          - text: (55 classes, 3288 lines). The layered approach with MVC leanings makes it easy to understand and extend. The main risks are the
+          - strong [ref=e447]: monolithic service classes
+          - text: and
+          - strong [ref=e448]: tight coupling to Spring Data JPA
+          - text: ", which become problematic as the codebase grows. The suggestions above address these risks while preserving the existing structure's strengths."

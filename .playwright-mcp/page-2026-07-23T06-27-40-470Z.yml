@@ -1,0 +1,93 @@
+- generic [ref=e52]:
+  - generic [ref=e53]:
+    - navigation [ref=e54]:
+      - list [ref=e55]:
+        - listitem [ref=e56]:
+          - link "项目" [ref=e58] [cursor=pointer]:
+            - /url: "#/dashboard"
+          - text: /
+        - listitem [ref=e59]:
+          - generic [ref=e60]: CodeAtlas Server
+    - menu [ref=e61]:
+      - menuitem "概览" [ref=e62] [cursor=pointer]
+      - menuitem "代码地图" [ref=e64] [cursor=pointer]
+      - menuitem "架构叙事" [ref=e66] [cursor=pointer]
+      - menuitem "宪法规则" [ref=e68] [cursor=pointer]
+      - menuitem "违规列表" [ref=e70] [cursor=pointer]
+      - menuitem "AI 洞察" [ref=e72] [cursor=pointer]
+      - menuitem "设置" [ref=e74] [cursor=pointer]
+  - main [ref=e76]:
+    - generic [ref=e77]:
+      - generic [ref=e78]:
+        - generic [ref=e82]:
+          - generic [ref=e83]: 健康度评分
+          - generic [ref=e84]:
+            - generic [ref=e85]: "60"
+            - generic [ref=e87]: 分
+        - generic [ref=e91]:
+          - generic [ref=e92]: 总类数
+          - generic [ref=e93]: "27"
+        - generic [ref=e99]:
+          - generic [ref=e100]: 违规数
+          - generic [ref=e101]: "0"
+        - generic [ref=e107]:
+          - generic [ref=e108]: 最近扫描
+          - generic [ref=e109]: COMPLETED
+      - generic [ref=e111]:
+        - generic [ref=e112]: 扫描历史
+        - generic [ref=e115]:
+          - button "触发扫描" [ref=e116] [cursor=pointer]
+          - generic [ref=e120]:
+            - table [ref=e124]:
+              - rowgroup [ref=e126]:
+                - row [ref=e127]:
+                  - columnheader "状态" [ref=e128]
+                  - columnheader "类数" [ref=e129]
+                  - columnheader "行数" [ref=e130]
+                  - columnheader "违规" [ref=e131]
+                  - columnheader "耗时" [ref=e132]
+                  - columnheader "时间" [ref=e133]
+              - rowgroup [ref=e134]:
+                - row [ref=e135]:
+                  - cell "COMPLETED" [ref=e136]
+                  - cell "27" [ref=e138]
+                  - cell "1311" [ref=e139]
+                  - cell "0" [ref=e140]
+                  - cell "76" [ref=e141]
+                  - cell "2026-07-22T23:53:54" [ref=e142]
+                - row [ref=e143]:
+                  - cell "COMPLETED" [ref=e144]
+                  - cell "27" [ref=e146]
+                  - cell "1311" [ref=e147]
+                  - cell "0" [ref=e148]
+                  - cell "83" [ref=e149]
+                  - cell "2026-07-22T23:53:54" [ref=e150]
+                - row [ref=e151]:
+                  - cell "COMPLETED" [ref=e152]
+                  - cell "27" [ref=e154]
+                  - cell "1311" [ref=e155]
+                  - cell "0" [ref=e156]
+                  - cell "54" [ref=e157]
+                  - cell "2026-07-22T23:49:46" [ref=e158]
+                - row [ref=e159]:
+                  - cell "COMPLETED" [ref=e160]
+                  - cell "27" [ref=e162]
+                  - cell "1311" [ref=e163]
+                  - cell "0" [ref=e164]
+                  - cell "53" [ref=e165]
+                  - cell "2026-07-22T23:49:46" [ref=e166]
+                - row [ref=e167]:
+                  - cell "COMPLETED" [ref=e168]
+                  - cell "27" [ref=e170]
+                  - cell "1311" [ref=e171]
+                  - cell "0" [ref=e172]
+                  - cell "330" [ref=e173]
+                  - cell "2026-07-22T23:42:20" [ref=e174]
+            - list [ref=e175]:
+              - listitem "Previous Page" [ref=e176]:
+                - button [disabled] [ref=e177]:
+                  - img "left" [ref=e178]
+              - listitem "1" [ref=e181] [cursor=pointer]
+              - listitem "Next Page" [ref=e183]:
+                - button [disabled] [ref=e184]:
+                  - img "right" [ref=e185]

@@ -1,0 +1,138 @@
+- generic [ref=f3e67]:
+  - generic [ref=f3e68]:
+    - navigation [ref=f3e69]:
+      - list [ref=f3e70]:
+        - listitem [ref=f3e71]:
+          - link "项目" [ref=f3e73] [cursor=pointer]:
+            - /url: "#/dashboard"
+          - text: /
+        - listitem [ref=f3e74]:
+          - generic [ref=f3e75]: CodeAtlas Server
+    - menu [ref=f3e76]:
+      - menuitem "概览" [ref=f3e77] [cursor=pointer]
+      - menuitem "代码地图" [ref=f3e79] [cursor=pointer]
+      - menuitem "架构叙事" [ref=f3e81] [cursor=pointer]
+      - menuitem "宪法规则" [ref=f3e83] [cursor=pointer]
+      - menuitem "违规列表" [ref=f3e85] [cursor=pointer]
+      - menuitem "AI 洞察" [ref=f3e87] [cursor=pointer]
+      - menuitem "设置" [ref=f3e89] [cursor=pointer]
+  - main [ref=f3e91]:
+    - generic [ref=f3e217]:
+      - table [ref=f3e221]:
+        - rowgroup [ref=f3e229]:
+          - row [ref=f3e230]:
+            - columnheader "严重度" [ref=f3e231]
+            - columnheader "类" [ref=f3e232]
+            - columnheader "违规说明" [ref=f3e233]
+            - columnheader "建议" [ref=f3e234]
+            - columnheader "状态" [ref=f3e235]
+            - columnheader "操作" [ref=f3e236]
+        - rowgroup [ref=f3e237]:
+          - row [ref=f3e238]:
+            - cell "警告" [ref=f3e239]
+            - cell "ConstitutionRuleVO com.codeatlas.server.dto.response.ConstitutionRuleVO" [ref=f3e241]:
+              - code [ref=f3e242]: ConstitutionRuleVO
+              - generic [ref=f3e243]: com.codeatlas.server.dto.response.ConstitutionRuleVO
+            - cell "公开方法数 21 超过上限 20" [ref=f3e244]
+            - cell "考虑拆分类或将相关方法提取到独立的 Service 中" [ref=f3e245]
+            - cell [ref=f3e246]
+            - cell [ref=f3e249]:
+              - button "标记解决" [ref=f3e250] [cursor=pointer]
+          - row [ref=f3e252]:
+            - cell "警告" [ref=f3e253]
+            - cell "InsightVO com.codeatlas.server.dto.response.InsightVO" [ref=f3e255]:
+              - code [ref=f3e256]: InsightVO
+              - generic [ref=f3e257]: com.codeatlas.server.dto.response.InsightVO
+            - cell "公开方法数 21 超过上限 20" [ref=f3e258]
+            - cell "考虑拆分类或将相关方法提取到独立的 Service 中" [ref=f3e259]
+            - cell [ref=f3e260]
+            - cell [ref=f3e263]:
+              - button "标记解决" [ref=f3e264] [cursor=pointer]
+          - row [ref=f3e266]:
+            - cell "警告" [ref=f3e267]
+            - cell "ProjectVO com.codeatlas.server.dto.response.ProjectVO" [ref=f3e269]:
+              - code [ref=f3e270]: ProjectVO
+              - generic [ref=f3e271]: com.codeatlas.server.dto.response.ProjectVO
+            - cell "公开方法数 22 超过上限 20" [ref=f3e272]
+            - cell "考虑拆分类或将相关方法提取到独立的 Service 中" [ref=f3e273]
+            - cell [ref=f3e274]
+            - cell [ref=f3e277]:
+              - button "标记解决" [ref=f3e278] [cursor=pointer]
+          - row [ref=f3e280]:
+            - cell "警告" [ref=f3e281]
+            - cell "ScanVO com.codeatlas.server.dto.response.ScanVO" [ref=f3e283]:
+              - code [ref=f3e284]: ScanVO
+              - generic [ref=f3e285]: com.codeatlas.server.dto.response.ScanVO
+            - cell "公开方法数 24 超过上限 20" [ref=f3e286]
+            - cell "考虑拆分类或将相关方法提取到独立的 Service 中" [ref=f3e287]
+            - cell [ref=f3e288]
+            - cell [ref=f3e291]:
+              - button "标记解决" [ref=f3e292] [cursor=pointer]
+          - row [ref=f3e294]:
+            - cell "警告" [ref=f3e295]
+            - cell "ViolationVO com.codeatlas.server.dto.response.ViolationVO" [ref=f3e297]:
+              - code [ref=f3e298]: ViolationVO
+              - generic [ref=f3e299]: com.codeatlas.server.dto.response.ViolationVO
+            - cell "公开方法数 27 超过上限 20" [ref=f3e300]
+            - cell "考虑拆分类或将相关方法提取到独立的 Service 中" [ref=f3e301]
+            - cell [ref=f3e302]
+            - cell [ref=f3e305]:
+              - button "标记解决" [ref=f3e306] [cursor=pointer]
+          - row [ref=f3e308]:
+            - cell "警告" [ref=f3e309]
+            - cell "ClassSummaryEntity com.codeatlas.server.entity.ClassSummaryEntity" [ref=f3e311]:
+              - code [ref=f3e312]: ClassSummaryEntity
+              - generic [ref=f3e313]: com.codeatlas.server.entity.ClassSummaryEntity
+            - cell "公开方法数 30 超过上限 20" [ref=f3e314]
+            - cell "考虑拆分类或将相关方法提取到独立的 Service 中" [ref=f3e315]
+            - cell [ref=f3e316]
+            - cell [ref=f3e319]:
+              - button "标记解决" [ref=f3e320] [cursor=pointer]
+          - row [ref=f3e322]:
+            - cell "警告" [ref=f3e323]
+            - cell "ConstitutionRuleEntity com.codeatlas.server.entity.ConstitutionRuleEntity" [ref=f3e325]:
+              - code [ref=f3e326]: ConstitutionRuleEntity
+              - generic [ref=f3e327]: com.codeatlas.server.entity.ConstitutionRuleEntity
+            - cell "公开方法数 22 超过上限 20" [ref=f3e328]
+            - cell "考虑拆分类或将相关方法提取到独立的 Service 中" [ref=f3e329]
+            - cell [ref=f3e330]
+            - cell [ref=f3e333]:
+              - button "标记解决" [ref=f3e334] [cursor=pointer]
+          - row [ref=f3e336]:
+            - cell "警告" [ref=f3e337]
+            - cell "Project com.codeatlas.server.entity.Project" [ref=f3e339]:
+              - code [ref=f3e340]: Project
+              - generic [ref=f3e341]: com.codeatlas.server.entity.Project
+            - cell "公开方法数 28 超过上限 20" [ref=f3e342]
+            - cell "考虑拆分类或将相关方法提取到独立的 Service 中" [ref=f3e343]
+            - cell [ref=f3e344]
+            - cell [ref=f3e347]:
+              - button "标记解决" [ref=f3e348] [cursor=pointer]
+          - row [ref=f3e350]:
+            - cell "警告" [ref=f3e351]
+            - cell "ScanRecord com.codeatlas.server.entity.ScanRecord" [ref=f3e353]:
+              - code [ref=f3e354]: ScanRecord
+              - generic [ref=f3e355]: com.codeatlas.server.entity.ScanRecord
+            - cell "公开方法数 26 超过上限 20" [ref=f3e356]
+            - cell "考虑拆分类或将相关方法提取到独立的 Service 中" [ref=f3e357]
+            - cell [ref=f3e358]
+            - cell [ref=f3e361]:
+              - button "标记解决" [ref=f3e362] [cursor=pointer]
+          - row [ref=f3e364]:
+            - cell "警告" [ref=f3e365]
+            - cell "ViolationEntity com.codeatlas.server.entity.ViolationEntity" [ref=f3e367]:
+              - code [ref=f3e368]: ViolationEntity
+              - generic [ref=f3e369]: com.codeatlas.server.entity.ViolationEntity
+            - cell "公开方法数 26 超过上限 20" [ref=f3e370]
+            - cell "考虑拆分类或将相关方法提取到独立的 Service 中" [ref=f3e371]
+            - cell [ref=f3e372]
+            - cell [ref=f3e375]:
+              - button "标记解决" [ref=f3e376] [cursor=pointer]
+      - list [ref=f3e378]:
+        - listitem "Previous Page" [ref=f3e379]:
+          - button [disabled] [ref=f3e380]:
+            - img "left" [ref=f3e381]
+        - listitem "1" [ref=f3e384] [cursor=pointer]
+        - listitem "Next Page" [ref=f3e386]:
+          - button [disabled] [ref=f3e387]:
+            - img "right" [ref=f3e388]

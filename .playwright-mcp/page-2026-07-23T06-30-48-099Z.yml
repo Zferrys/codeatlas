@@ -1,0 +1,20 @@
+- generic [ref=f2e3]:
+  - generic [ref=f2e4]:
+    - navigation [ref=f2e5]:
+      - list [ref=f2e6]:
+        - listitem [ref=f2e7]:
+          - link "项目" [ref=f2e9] [cursor=pointer]:
+            - /url: "#/dashboard"
+          - text: /
+        - listitem [ref=f2e10]:
+          - generic [ref=f2e11]: CodeAtlas Server
+    - menu [ref=f2e12]:
+      - menuitem "概览" [ref=f2e13] [cursor=pointer]
+      - menuitem "代码地图" [ref=f2e15] [cursor=pointer]
+      - menuitem "架构叙事" [ref=f2e17] [cursor=pointer]
+      - menuitem "宪法规则" [ref=f2e19] [cursor=pointer]
+      - menuitem "违规列表" [ref=f2e21] [cursor=pointer]
+      - menuitem "AI 洞察" [ref=f2e23] [cursor=pointer]
+      - menuitem "设置" [ref=f2e25] [cursor=pointer]
+  - main [ref=f2e27]:
+    - paragraph [ref=f2e310]: 暂无 AI 洞察

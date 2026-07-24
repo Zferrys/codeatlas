@@ -1,0 +1,108 @@
+- generic [ref=f7e225]:
+  - complementary [ref=f7e226]:
+    - generic [ref=f7e227]:
+      - link "CodeAtlas" [ref=f7e229] [cursor=pointer]:
+        - /url: "#/dashboard"
+      - menu [ref=f7e236]:
+        - menuitem "dashboard 工作台" [ref=f7e237] [cursor=pointer]:
+          - img "dashboard" [ref=f7e238]
+          - generic [ref=f7e241]: 工作台
+        - listitem [ref=f7e458]:
+          - generic "当前项目" [ref=f7e459]
+          - list [ref=f7e460]:
+            - menuitem "appstore 项目概览" [ref=f7e461] [cursor=pointer]:
+              - img "appstore" [ref=f7e462]
+              - generic [ref=f7e465]: 项目概览
+            - menuitem "aim 代码地图" [ref=f7e466] [cursor=pointer]:
+              - img "aim" [ref=f7e467]
+              - generic [ref=f7e471]: 代码地图
+            - menuitem "read 架构叙事" [ref=f7e472] [cursor=pointer]:
+              - img "read" [ref=f7e473]
+              - generic [ref=f7e476]: 架构叙事
+            - menuitem "safety 宪法规则" [ref=f7e477] [cursor=pointer]:
+              - img "safety" [ref=f7e478]
+              - generic [ref=f7e482]: 宪法规则
+            - menuitem "warning 违规列表" [ref=f7e483] [cursor=pointer]:
+              - img "warning" [ref=f7e484]
+              - generic [ref=f7e487]: 违规列表
+            - menuitem "bulb AI 洞察" [active] [ref=f7e488] [cursor=pointer]:
+              - img "bulb" [ref=f7e489]
+              - generic [ref=f7e492]: AI 洞察
+            - menuitem "setting 项目设置" [ref=f7e493] [cursor=pointer]:
+              - img "setting" [ref=f7e494]
+              - generic [ref=f7e497]: 项目设置
+      - generic [ref=f7e242]: v0.1.0
+  - generic [ref=f7e243]:
+    - generic [ref=f7e244]:
+      - generic [ref=f7e245]:
+        - img "menu-fold" [ref=f7e246] [cursor=pointer]
+        - navigation [ref=f7e249]:
+          - list [ref=f7e250]:
+            - listitem [ref=f7e251]:
+              - link "工作台" [ref=f7e498] [cursor=pointer]:
+                - /url: "#/dashboard"
+              - text: /
+            - listitem [ref=f7e499]:
+              - generic [ref=f7e500]: "项目 #12"
+              - text: /
+            - listitem [ref=f7e501]:
+              - generic [ref=f7e502]: AI洞察
+      - generic [ref=f7e253]:
+        - button "search Ctrl+K" [ref=f7e254] [cursor=pointer]:
+          - img "search" [ref=f7e255]
+          - generic [ref=f7e258]: Ctrl+K
+        - button [ref=f7e259] [cursor=pointer]:
+          - img "bulb" [ref=f7e260]
+        - button [ref=f7e264] [cursor=pointer]:
+          - img "bell" [ref=f7e265]
+        - generic [ref=f7e268] [cursor=pointer]: A
+        - generic [ref=f7e270]: admin
+    - main [ref=f7e271]:
+      - generic [ref=f7e734]:
+        - generic [ref=f7e735]:
+          - generic [ref=f7e736]:
+            - generic [ref=f7e737] [cursor=pointer]:
+              - generic [ref=f7e738]:
+                - radio "全部" [checked]
+              - generic [ref=f7e739]: 全部
+            - generic [ref=f7e740] [cursor=pointer]:
+              - generic [ref=f7e741]:
+                - radio "架构叙事"
+              - generic [ref=f7e742]: 架构叙事
+            - generic [ref=f7e743] [cursor=pointer]:
+              - generic [ref=f7e744]:
+                - radio "反模式"
+              - generic [ref=f7e745]: 反模式
+            - generic [ref=f7e746] [cursor=pointer]:
+              - generic [ref=f7e747]:
+                - radio "设计模式"
+              - generic [ref=f7e748]: 设计模式
+            - generic [ref=f7e749] [cursor=pointer]:
+              - generic [ref=f7e750]:
+                - radio "影响分析"
+              - generic [ref=f7e751]: 影响分析
+            - generic [ref=f7e752] [cursor=pointer]:
+              - generic [ref=f7e753]:
+                - radio "问答"
+              - generic [ref=f7e754]: 问答
+          - generic [ref=f7e755]: 共 1 条
+        - generic [ref=f7e758] [cursor=pointer]:
+          - generic [ref=f7e760]:
+            - generic [ref=f7e762]:
+              - generic [ref=f7e763]: A
+              - generic [ref=f7e764]: 架构叙事 — CodeAtlas-Server
+            - generic [ref=f7e765]: 架构叙事
+          - generic [ref=f7e767]:
+            - generic [ref=f7e768]: "CodeAtlas-Server: Architectural Narrative 1. Project Overview CodeAtlas-Server appears to be the backend for a code analysis and visuali..."
+            - generic [ref=f7e769]:
+              - generic [ref=f7e770]: 置信度
+              - generic [ref=f7e773]: 85%
+            - generic [ref=f7e774]:
+              - img "clock-circle" [ref=f7e775]
+              - text: 7月23日 23:14
+    - generic [ref=f7e448]:
+      - text: CodeAtlas © 2026 — AI 驱动的代码地图与架构叙事平台
+      - link [ref=f7e449] [cursor=pointer]:
+        - /url: https://github.com/zferrys/codeatlas
+        - img "github" [ref=f7e450]
+        - text: GitHub

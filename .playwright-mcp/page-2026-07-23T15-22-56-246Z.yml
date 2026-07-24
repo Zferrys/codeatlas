@@ -1,0 +1,139 @@
+- generic [ref=f7e225]:
+  - complementary [ref=f7e226]:
+    - generic [ref=f7e227]:
+      - link "CodeAtlas" [ref=f7e229] [cursor=pointer]:
+        - /url: "#/dashboard"
+      - menu [ref=f7e236]:
+        - menuitem "dashboard 工作台" [ref=f7e237] [cursor=pointer]:
+          - img "dashboard" [ref=f7e238]
+          - generic [ref=f7e241]: 工作台
+        - listitem [ref=f7e458]:
+          - generic "当前项目" [ref=f7e459]
+          - list [ref=f7e460]:
+            - menuitem "appstore 项目概览" [ref=f7e461] [cursor=pointer]:
+              - img "appstore" [ref=f7e462]
+              - generic [ref=f7e465]: 项目概览
+            - menuitem "aim 代码地图" [ref=f7e466] [cursor=pointer]:
+              - img "aim" [ref=f7e467]
+              - generic [ref=f7e471]: 代码地图
+            - menuitem "read 架构叙事" [ref=f7e472] [cursor=pointer]:
+              - img "read" [ref=f7e473]
+              - generic [ref=f7e476]: 架构叙事
+            - menuitem "safety 宪法规则" [ref=f7e477] [cursor=pointer]:
+              - img "safety" [ref=f7e478]
+              - generic [ref=f7e482]: 宪法规则
+            - menuitem "warning 违规列表" [ref=f7e483] [cursor=pointer]:
+              - img "warning" [ref=f7e484]
+              - generic [ref=f7e487]: 违规列表
+            - menuitem "bulb AI 洞察" [ref=f7e488] [cursor=pointer]:
+              - img "bulb" [ref=f7e489]
+              - generic [ref=f7e492]: AI 洞察
+            - menuitem "setting 项目设置" [ref=f7e493] [cursor=pointer]:
+              - img "setting" [ref=f7e494]
+              - generic [ref=f7e497]: 项目设置
+      - generic [ref=f7e242]: v0.1.0
+  - generic [ref=f7e243]:
+    - generic [ref=f7e244]:
+      - generic [ref=f7e245]:
+        - img "menu-fold" [ref=f7e246] [cursor=pointer]
+        - navigation [ref=f7e249]:
+          - list [ref=f7e250]:
+            - listitem [ref=f7e251]:
+              - link "工作台" [ref=f7e498] [cursor=pointer]:
+                - /url: "#/dashboard"
+              - text: /
+            - listitem [ref=f7e499]:
+              - generic [ref=f7e500]: "项目 #12"
+              - text: /
+            - listitem [ref=f7e501]:
+              - generic [ref=f7e502]: 概览
+      - generic [ref=f7e253]:
+        - button "search Ctrl+K" [ref=f7e254] [cursor=pointer]:
+          - img "search" [ref=f7e255]
+          - generic [ref=f7e258]: Ctrl+K
+        - button [ref=f7e259] [cursor=pointer]:
+          - img "bulb" [ref=f7e260]
+        - button [ref=f7e264] [cursor=pointer]:
+          - img "bell" [ref=f7e265]
+        - generic [ref=f7e268] [cursor=pointer]: A
+        - generic [ref=f7e270]: admin
+    - main [ref=f7e271]:
+      - generic [ref=f7e504]:
+        - generic [ref=f7e505]:
+          - generic [ref=f7e507]:
+            - heading "健康度评分" [level=4] [ref=f7e508]
+            - progressbar [ref=f7e510]
+            - generic [ref=f7e516]: 优秀
+          - generic [ref=f7e517]:
+            - generic [ref=f7e518]:
+              - generic [ref=f7e520]:
+                - img "apartment" [ref=f7e522]
+                - generic [ref=f7e525]:
+                  - generic [ref=f7e526]: 架构合规
+                  - progressbar [ref=f7e527]
+                  - text: 92分
+              - generic [ref=f7e532]:
+                - img "code" [ref=f7e534]
+                - generic [ref=f7e537]:
+                  - generic [ref=f7e538]: 代码结构
+                  - progressbar [ref=f7e539]
+                  - text: 94分
+              - generic [ref=f7e544]:
+                - img "bug" [ref=f7e546]
+                - generic [ref=f7e550]:
+                  - generic [ref=f7e551]: 代码质量
+                  - progressbar [ref=f7e552]
+                  - text: 86分
+              - generic [ref=f7e557]:
+                - img "safety" [ref=f7e559]
+                - generic [ref=f7e563]:
+                  - generic [ref=f7e564]: 依赖健康
+                  - progressbar [ref=f7e565]
+                  - text: 86分
+            - generic [ref=f7e569]:
+              - heading "违规趋势（最近扫描）" [level=4] [ref=f7e570]
+              - generic [ref=f7e571]: "#1"
+        - generic [ref=f7e576]:
+          - generic [ref=f7e578]:
+            - generic [ref=f7e579]:
+              - heading "类分层分布" [level=4] [ref=f7e580]
+              - generic [ref=f7e581]: 74 个类
+            - paragraph [ref=f7e596]: 暂无类数据
+          - generic [ref=f7e598]:
+            - generic [ref=f7e599]:
+              - heading "扫描历史" [level=4] [ref=f7e600]
+              - button "scan 触发扫描" [ref=f7e601] [cursor=pointer]:
+                - img "scan" [ref=f7e602]
+                - generic [ref=f7e605]: 触发扫描
+            - generic [ref=f7e608]:
+              - table [ref=f7e612]:
+                - rowgroup [ref=f7e619]:
+                  - row [ref=f7e620]:
+                    - columnheader "状态" [ref=f7e621]
+                    - columnheader "类数" [ref=f7e622]
+                    - columnheader "行数" [ref=f7e623]
+                    - columnheader "违规" [ref=f7e624]
+                    - columnheader "耗时" [ref=f7e625]
+                    - columnheader "时间" [ref=f7e626]
+                - rowgroup [ref=f7e627]:
+                  - row [ref=f7e628]:
+                    - cell [ref=f7e629]
+                    - cell "74" [ref=f7e632]
+                    - cell "4406" [ref=f7e633]
+                    - cell "2" [ref=f7e634]
+                    - cell "1970" [ref=f7e635]
+                    - cell "7月23日 23:14" [ref=f7e636]
+              - list [ref=f7e637]:
+                - listitem "Previous Page" [ref=f7e638]:
+                  - button [disabled] [ref=f7e639]:
+                    - img "left" [ref=f7e640]
+                - listitem "1" [ref=f7e643] [cursor=pointer]
+                - listitem "Next Page" [ref=f7e645]:
+                  - button [disabled] [ref=f7e646]:
+                    - img "right" [ref=f7e647]
+    - generic [ref=f7e448]:
+      - text: CodeAtlas © 2026 — AI 驱动的代码地图与架构叙事平台
+      - link [ref=f7e449] [cursor=pointer]:
+        - /url: https://github.com/zferrys/codeatlas
+        - img "github" [ref=f7e450]
+        - text: GitHub

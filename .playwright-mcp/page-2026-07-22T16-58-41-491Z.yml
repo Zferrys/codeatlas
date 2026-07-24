@@ -1,0 +1,23 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e40]:
+    - generic [ref=e41]:
+      - heading "CodeAtlas" [level=2] [ref=e43]
+      - generic [ref=e44]:
+        - generic [ref=e45]: zferrys
+        - button "退出" [ref=e46] [cursor=pointer]
+    - main [ref=e48]:
+      - generic [ref=e49]:
+        - generic [ref=e50]:
+          - heading "我的项目" [level=1] [ref=e51]
+          - button "+ 新建项目" [ref=e52] [cursor=pointer]
+        - generic [ref=e56] [cursor=pointer]:
+          - generic [ref=e57]: CodeAtlas Self Scan
+          - generic [ref=e60]:
+            - paragraph [ref=e61]: Scan the codeatlas project itself
+            - generic [ref=e62]:
+              - generic [ref=e63]: Java
+              - generic [ref=e64]: 55 类
+              - generic [ref=e65]: 健康度 60
+  - generic [ref=e67]:
+    - img "check-circle" [ref=e68]
+    - text: 登录成功

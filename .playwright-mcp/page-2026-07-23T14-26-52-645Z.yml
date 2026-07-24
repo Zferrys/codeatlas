@@ -1,0 +1,87 @@
+- generic [ref=f3e3]:
+  - complementary [ref=f3e4]:
+    - generic [ref=f3e5]:
+      - link "CodeAtlas" [ref=f3e7] [cursor=pointer]:
+        - /url: "#/dashboard"
+      - menu [ref=f3e14]:
+        - menuitem "dashboard 工作台" [ref=f3e15] [cursor=pointer]:
+          - img "dashboard" [ref=f3e16]
+          - generic [ref=f3e19]: 工作台
+      - generic [ref=f3e60]: v0.1.0
+  - generic [ref=f3e61]:
+    - generic [ref=f3e62]:
+      - generic [ref=f3e63]:
+        - img "menu-fold" [ref=f3e64] [cursor=pointer]
+        - navigation [ref=f3e67]:
+          - list [ref=f3e68]:
+            - listitem [ref=f3e69]:
+              - generic [ref=f3e70]: 工作台
+      - generic [ref=f3e76]:
+        - button "search Ctrl+K" [ref=f3e77] [cursor=pointer]:
+          - img "search" [ref=f3e78]
+          - generic [ref=f3e81]: Ctrl+K
+        - button [ref=f3e82] [cursor=pointer]:
+          - img "bulb" [ref=f3e83]
+        - generic [ref=f3e86]:
+          - button [ref=f3e87] [cursor=pointer]:
+            - img "bell" [ref=f3e88]
+          - superscript [ref=f3e91]
+        - generic [ref=f3e92] [cursor=pointer]: T
+        - generic [ref=f3e94]: tester
+    - main [ref=f3e95]:
+      - generic [ref=f3e200]:
+        - generic [ref=f3e201]:
+          - generic [ref=f3e203]:
+            - img "project" [ref=f3e205]
+            - generic [ref=f3e208]:
+              - generic [ref=f3e209]: "1"
+              - generic [ref=f3e210]: 项目总数
+          - generic [ref=f3e212]:
+            - img "file-text" [ref=f3e214]
+            - generic [ref=f3e217]:
+              - generic [ref=f3e218]: "0"
+              - generic [ref=f3e219]: 总类数
+          - generic [ref=f3e221]:
+            - img "scan" [ref=f3e223]
+            - generic [ref=f3e226]:
+              - generic [ref=f3e227]: "0"
+              - generic [ref=f3e228]: 活跃扫描
+          - generic [ref=f3e230]:
+            - img "bulb" [ref=f3e232]
+            - generic [ref=f3e235]:
+              - generic [ref=f3e236]: "0"
+              - generic [ref=f3e237]: AI 洞察
+        - generic [ref=f3e238]:
+          - heading "我的项目" [level=2] [ref=f3e239]
+          - generic [ref=f3e240]:
+            - generic [ref=f3e242]:
+              - textbox "搜索项目..." [ref=f3e243]
+              - button [ref=f3e245] [cursor=pointer]:
+                - img "search" [ref=f3e246]
+            - button "plus 新建项目" [ref=f3e249] [cursor=pointer]:
+              - img "plus" [ref=f3e250]
+              - generic [ref=f3e254]: 新建项目
+        - generic [ref=f3e258] [cursor=pointer]:
+          - generic [ref=f3e259]:
+            - generic [ref=f3e260]: B
+            - generic [ref=f3e261]:
+              - heading "BrowserTest" [level=3] [ref=f3e262]
+              - generic [ref=f3e263]: Java
+          - paragraph [ref=f3e264]: Browser testing project
+          - generic [ref=f3e265]:
+            - generic [ref=f3e266]:
+              - img "file-text" [ref=f3e267]
+              - generic [ref=f3e270]: 0 类
+            - generic [ref=f3e271]:
+              - img "clock-circle" [ref=f3e272]
+              - generic [ref=f3e276]: 未扫描
+          - generic [ref=f3e277]:
+            - progressbar [ref=f3e278]:
+              - generic "0%" [ref=f3e284]
+            - generic [ref=f3e285]: 健康度
+    - generic [ref=f3e195]:
+      - text: CodeAtlas © 2026 — AI 驱动的代码地图与架构叙事平台
+      - link [ref=f3e196] [cursor=pointer]:
+        - /url: https://github.com/zferrys/codeatlas
+        - img "github" [ref=f3e197]
+        - text: GitHub
