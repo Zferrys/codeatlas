@@ -120,6 +120,10 @@ codeatlas:
     rate-limit:
       enabled: true
       default-rps: 10
+  workspace:
+    dir: ./codeatlas-workspace
+    retention-hours: 24
+    cleanup-interval-ms: 3600000
 
 # ---- Resilience4j 熔断 + 重试 + 隔离 ----
 resilience4j:

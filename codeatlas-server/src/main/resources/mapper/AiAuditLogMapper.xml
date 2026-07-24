@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.codeatlas.server.mapper.AiAuditLogMapper">
+
+    <select id="monthlySummary" resultType="java.util.HashMap">
+        SELECT DATE_FORMAT(created_at, '%Y-%m')   AS month,
+               model,
+               COUNT(*)                            AS call_count,
+               SUM(total_tokens)                   AS total_tokens,
+               SUM(cost)                           AS total_cost
+        FROM ai_audit_log
+        GROUP BY month, model
+        ORDER BY month DESC, model
+    </select>
+
+</mapper>

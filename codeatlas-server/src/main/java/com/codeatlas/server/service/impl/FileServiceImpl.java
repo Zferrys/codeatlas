@@ -4,6 +4,7 @@ import com.codeatlas.common.constant.ErrorCode;
 import com.codeatlas.common.exception.BusinessException;
 import com.codeatlas.server.dto.request.CreateProjectRequest;
 import com.codeatlas.server.dto.response.ProjectVO;
+import com.codeatlas.server.config.WorkspaceConfig;
 import com.codeatlas.server.service.FileService;
 import com.codeatlas.server.service.ProjectService;
 import com.codeatlas.server.service.ScanService;
@@ -28,10 +29,13 @@ public class FileServiceImpl implements FileService {
 
     private final ProjectService projectService;
     private final ScanService scanService;
+    private final WorkspaceConfig workspaceConfig;
 
-    public FileServiceImpl(ProjectService projectService, ScanService scanService) {
+    public FileServiceImpl(ProjectService projectService, ScanService scanService,
+                           WorkspaceConfig workspaceConfig) {
         this.projectService = projectService;
         this.scanService = scanService;
+        this.workspaceConfig = workspaceConfig;
     }
 
     @Override
@@ -82,7 +86,9 @@ public class FileServiceImpl implements FileService {
 
         Path tempDir = null;
         try {
-            tempDir = Files.createTempDirectory("codeatlas-upload-");
+            String dirName = "upload-" + System.currentTimeMillis();
+            tempDir = workspaceConfig.getUploadsDir().resolve(dirName);
+            Files.createDirectories(tempDir);
 
             if (lowerName.endsWith(".zip")) {
                 extractZip(file, tempDir);

@@ -3,13 +3,13 @@ package com.codeatlas.server.service;
 import com.codeatlas.engine.ai.AiClient;
 import com.codeatlas.engine.ai.AiRequest;
 import com.codeatlas.engine.ai.AiResponse;
-import com.codeatlas.engine.ai.ClaudeClient;
-import com.codeatlas.engine.ai.DeepSeekClient;
 import com.codeatlas.engine.ai.PromptTemplate;
+import com.codeatlas.server.entity.AiAuditLogEntity;
 import com.codeatlas.server.entity.ClassSummaryEntity;
 import com.codeatlas.server.entity.InsightEntity;
 import com.codeatlas.server.entity.Project;
 import com.codeatlas.server.entity.ScanRecord;
+import com.codeatlas.server.mapper.AiAuditLogMapper;
 import com.codeatlas.server.mapper.ClassSummaryMapper;
 import com.codeatlas.server.mapper.ProjectMapper;
 import com.codeatlas.server.mapper.ScanMapper;
@@ -41,30 +41,29 @@ public class AiAnalysisService {
     private final ClassSummaryMapper classSummaryMapper;
     private final InsightService insightService;
     private final AiClient aiClient;
+    private final AiAuditLogMapper aiAuditLogMapper;
+    private final HallucinationChecker hallucinationChecker;
 
     @Lazy
     @Autowired
     private AiAnalysisService self;
 
     public AiAnalysisService(ProjectMapper projectMapper, ScanMapper scanMapper,
-                              ClassSummaryMapper classSummaryMapper, InsightService insightService) {
+                              ClassSummaryMapper classSummaryMapper, InsightService insightService,
+                              AiAuditLogMapper aiAuditLogMapper,
+                              HallucinationChecker hallucinationChecker,
+                              @Autowired(required = false) AiClient aiClient) {
         this.projectMapper = projectMapper;
         this.scanMapper = scanMapper;
         this.classSummaryMapper = classSummaryMapper;
         this.insightService = insightService;
-
-        String deepseekKey = System.getenv("DEEPSEEK_API_KEY");
-        String claudeKey = System.getenv("ANTHROPIC_API_KEY");
-
-        if (deepseekKey != null && !deepseekKey.isEmpty()) {
-            this.aiClient = new DeepSeekClient(deepseekKey);
-            log.info("AiAnalysisService initialized with DeepSeek client (model: {})", aiClient.getModelName());
-        } else if (claudeKey != null && !claudeKey.isEmpty()) {
-            this.aiClient = new ClaudeClient(claudeKey);
-            log.info("AiAnalysisService initialized with Claude client (model: {})", aiClient.getModelName());
+        this.aiAuditLogMapper = aiAuditLogMapper;
+        this.hallucinationChecker = hallucinationChecker;
+        this.aiClient = aiClient;
+        if (aiClient != null) {
+            log.info("AiAnalysisService initialized with AI client: {}", aiClient.getModelName());
         } else {
-            this.aiClient = null;
-            log.warn("No AI API key found (DEEPSEEK_API_KEY or ANTHROPIC_API_KEY) — AI analysis will be skipped");
+            log.warn("No AI client available — AI analysis will be skipped");
         }
     }
 
@@ -119,10 +118,34 @@ public class AiAnalysisService {
         AiResponse response = self.callAiWithResilience(request);
         if (response == null) {
             log.warn("AI analysis failed after retries for projectId={}, scanId={}", projectId, scanId);
+            self.saveAiAuditLog(aiClient.getModelName(), "ARCHITECTURE_STORY", projectId, null,
+                    0, 0, 0, 0, "All AI models exhausted or circuit breaker open", false);
             return null;
         }
         log.info("AI analysis completed: projectId={}, tokens={}, latency={}ms",
                 projectId, response.getTokensUsed(), response.getLatencyMs());
+        self.saveAiAuditLog(aiClient.getModelName(), "ARCHITECTURE_STORY", projectId, null,
+                response.getTokensUsed(), 0, response.getLatencyMs(), 0, null, true);
+
+        // 幻觉检测
+        HallucinationChecker.HallucinationResult hResult =
+                hallucinationChecker.check(response.getContent(), classes);
+        if (hResult.hasHallucination()) {
+            HallucinationChecker.Action action = hallucinationChecker.suggestAction(hResult);
+            log.warn("Hallucination check: result={}, fakeClasses={}, action={}",
+                    hResult.hasHallucination(), hResult.getFakeClasses().size(), action);
+            if (action == HallucinationChecker.Action.RETRY) {
+                // 低温重试一次
+                request.setTemperature(0.1);
+                AiResponse retryResponse = self.callAiWithResilience(request);
+                if (retryResponse != null && !hallucinationChecker.check(retryResponse.getContent(), classes).hasHallucination()) {
+                    response = retryResponse;
+                    log.info("Hallucination retry successful for projectId={}", projectId);
+                } else {
+                    log.warn("Hallucination retry failed for projectId={}, using degraded result", projectId);
+                }
+            }
+        }
 
         // 保存 insight
         InsightEntity insight = new InsightEntity();
@@ -306,6 +329,37 @@ public class AiAnalysisService {
             return OBJECT_MAPPER.writeValueAsString(meta);
         } catch (JsonProcessingException e) {
             return "{}";
+        }
+    }
+
+    /**
+     * 异步写入 AI 审计日志，不阻塞主流程。
+     */
+    @Async("auditExecutor")
+    public void saveAiAuditLog(String model, String stage, Long projectId, Long userId,
+                                long totalTokens, long completionTokens, long latencyMs,
+                                long estimatedTokens, String errorMessage, boolean success) {
+        try {
+            AiAuditLogEntity logEntity = new AiAuditLogEntity();
+            logEntity.setModel(model);
+            logEntity.setStage(stage);
+            logEntity.setProjectId(projectId);
+            logEntity.setUserId(userId);
+            logEntity.setTotalTokens((int) totalTokens);
+            logEntity.setCompletionTokens((int) completionTokens);
+            logEntity.setLatencyMs((int) latencyMs);
+            logEntity.setSuccess(success);
+            logEntity.setErrorMessage(errorMessage);
+
+            // 费用估算: Claude ≈ $15/MTok 输出 $3/MTok 输入, 简化按 $8/MTok 估
+            if (totalTokens > 0) {
+                double cost = totalTokens / 1_000_000.0 * 8.0;
+                logEntity.setCost(java.math.BigDecimal.valueOf(Math.round(cost * 100000.0) / 100000.0));
+            }
+
+            aiAuditLogMapper.insert(logEntity);
+        } catch (Exception e) {
+            log.warn("Failed to write AI audit log: {}", e.getMessage());
         }
     }
 }

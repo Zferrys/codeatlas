@@ -21,6 +21,7 @@ import com.codeatlas.common.dto.PageResult;
 import com.codeatlas.engine.rule.RuleDefinition;
 import com.codeatlas.engine.rule.RuleEngine;
 import com.codeatlas.engine.rule.ViolationResult;
+import com.codeatlas.server.config.WorkspaceConfig;
 import com.codeatlas.server.service.AiAnalysisService;
 import com.codeatlas.server.service.ConstitutionRuleService;
 import com.codeatlas.server.service.Neo4jGraphService;
@@ -64,6 +65,7 @@ public class ScanServiceImpl implements ScanService {
     private final JavaParserService javaParserService;
     private final ApplicationEventPublisher eventPublisher;
     private final Executor scanExecutor;
+    private final WorkspaceConfig workspaceConfig;
 
     public ScanServiceImpl(ScanMapper scanMapper, ProjectMapper projectMapper,
                            ClassSummaryMapper classSummaryMapper,
@@ -74,7 +76,8 @@ public class ScanServiceImpl implements ScanService {
                            GitService gitService,
                            JavaParserService javaParserService,
                            ApplicationEventPublisher eventPublisher,
-                           @Qualifier("scanExecutor") Executor scanExecutor) {
+                           @Qualifier("scanExecutor") Executor scanExecutor,
+                           WorkspaceConfig workspaceConfig) {
         this.scanMapper = scanMapper;
         this.projectMapper = projectMapper;
         this.classSummaryMapper = classSummaryMapper;
@@ -86,6 +89,7 @@ public class ScanServiceImpl implements ScanService {
         this.javaParserService = javaParserService;
         this.eventPublisher = eventPublisher;
         this.scanExecutor = scanExecutor;
+        this.workspaceConfig = workspaceConfig;
     }
 
     @Override
@@ -160,7 +164,7 @@ public class ScanServiceImpl implements ScanService {
         try {
             emitProgress(projectId, scan.getId(), "CLONING", 10, "开始克隆仓库...");
             if ("GIT_URL".equals(project.getSourceType()) && project.getSourceUrl() != null) {
-                workDir = Files.createTempDirectory("codeatlas-scan-");
+                workDir = workspaceConfig.getScansDir().resolve(projectId + "-" + scan.getId());
                 cleanupWorkDir = true;
                 GitResult gitResult = gitService.cloneRepository(
                         project.getSourceUrl(),

@@ -6,6 +6,11 @@
 </p>
 
 <p align="center">
+  <a href="README_ZH.md">中文文档</a> |
+  <a href="docs/REQUIREMENTS.md">Full Docs</a>
+</p>
+
+<p align="center">
   <img src="https://img.shields.io/badge/java-17-orange" alt="Java 17">
   <img src="https://img.shields.io/badge/spring--boot-3.3-brightgreen" alt="Spring Boot 3.3">
   <img src="https://img.shields.io/badge/vue-3.x-green" alt="Vue 3">
@@ -29,12 +34,13 @@ Upload your code → AI generates an interactive **3D code topology map**. Explo
 
 ## Features
 
-- **Interactive 2D/3D Code Map** — Force-directed topology graph with zoom and pan
-- **AI Architecture Storyteller** — Generates comprehensive architecture documentation via Claude/DeepSeek
+- **Interactive 3D Code Map** — Three.js force-directed topology graph with CSS2D labels, heatmap, and edge highlighting
+- **AI Architecture Storyteller** — Multi-model pipeline (Claude → DeepSeek fallback) with hallucination detection
 - **Constitution Rule Engine** — Configurable architecture governance rules with violation detection
-- **SSE Real-time Progress** — Live scan progress streaming
-- **RBAC Access Control** — Role-based permissions (ADMIN/ARCHITECT/DEVELOPER/VIEWER)
-- **Report Export** — PDF and HTML report generation
+- **Change Impact Simulator** — BFS-based ripple effect analysis with AI-powered insights
+- **SSE Real-time Progress** — Live scan progress streaming with clone heartbeat
+- **RBAC Access Control** — 4-tier permissions (ADMIN/ARCHITECT/DEVELOPER/VIEWER)
+- **i18n Support** — Chinese and English language switching
 - **Dark/Light Theme** — Full theme support across all views
 
 ## Quick Start
