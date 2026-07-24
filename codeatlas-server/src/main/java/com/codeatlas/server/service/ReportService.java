@@ -8,12 +8,17 @@ import com.codeatlas.server.entity.ViolationEntity;
 import com.codeatlas.server.entity.InsightEntity;
 import com.codeatlas.server.entity.ClassSummaryEntity;
 import com.codeatlas.server.mapper.*;
+import com.itextpdf.kernel.font.PdfFont;
+import com.itextpdf.kernel.font.PdfFontFactory;
 import com.itextpdf.kernel.pdf.PdfDocument;
 import com.itextpdf.kernel.pdf.PdfWriter;
+import com.itextpdf.io.font.PdfEncodings;
 import com.itextpdf.layout.Document;
+import com.itextpdf.layout.element.Cell;
 import com.itextpdf.layout.element.Paragraph;
 import com.itextpdf.layout.element.Table;
 import com.itextpdf.layout.properties.TextAlignment;
+import com.itextpdf.layout.properties.UnitValue;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -58,61 +63,135 @@ public class ReportService {
             PdfDocument pdf = new PdfDocument(writer);
             Document document = new Document(pdf);
 
+            PdfFont cnFont = loadChineseFont();
+            float docWidth = pdf.getDefaultPageSize().getWidth() - 72; // A4 减去左右margin
+
             // 标题
             document.add(new Paragraph("CodeAtlas — 架构分析报告")
-                    .setFontSize(20).setBold().setTextAlignment(TextAlignment.CENTER));
-            document.add(new Paragraph("项目: " + (project != null ? project.getName() : "N/A"))
-                    .setFontSize(14));
+                    .setFontSize(20).setBold().setTextAlignment(TextAlignment.CENTER)
+                    .setFont(cnFont));
+            document.add(new Paragraph("项目：" + (project != null ? project.getName() : "N/A"))
+                    .setFontSize(14).setFont(cnFont));
+            document.add(new Paragraph("生成时间：" + java.time.LocalDateTime.now().toString().replace("T", " "))
+                    .setFontSize(10).setFont(cnFont).setOpacity(0.6f));
             document.add(new Paragraph(""));
 
             // 健康度
             BigDecimal health = project != null ? project.getHealthScore() : BigDecimal.ZERO;
-            document.add(new Paragraph("健康度评分: " + health + "/100").setFontSize(12).setBold());
+            document.add(new Paragraph("健康度评分：" + health + "/100")
+                    .setFontSize(14).setBold().setFont(cnFont));
             document.add(new Paragraph(""));
 
             // 扫描统计
             if (scan != null) {
-                document.add(new Paragraph("扫描统计").setFontSize(14).setBold());
-                Table statsTable = new Table(2);
-                statsTable.addCell("总类数");
-                statsTable.addCell(String.valueOf(scan.getTotalClasses() != null ? scan.getTotalClasses() : 0));
-                statsTable.addCell("总行数");
-                statsTable.addCell(String.valueOf(scan.getTotalLines() != null ? scan.getTotalLines() : 0));
-                statsTable.addCell("违规数");
-                statsTable.addCell(String.valueOf(scan.getTotalViolations() != null ? scan.getTotalViolations() : 0));
-                statsTable.addCell("扫描耗时");
-                statsTable.addCell((scan.getDurationMs() != null ? scan.getDurationMs() / 1000.0 : 0) + "秒");
+                document.add(new Paragraph("扫描统计").setFontSize(14).setBold().setFont(cnFont));
+                Table statsTable = new Table(UnitValue.createPercentArray(new float[]{30, 70}))
+                        .setWidth(UnitValue.createPercentValue(100));
+                addCell(statsTable, "总类数", cnFont, true);
+                addCell(statsTable, String.valueOf(scan.getTotalClasses() != null ? scan.getTotalClasses() : 0), cnFont, false);
+                addCell(statsTable, "总行数", cnFont, true);
+                addCell(statsTable, String.valueOf(scan.getTotalLines() != null ? scan.getTotalLines() : 0), cnFont, false);
+                addCell(statsTable, "违规数", cnFont, true);
+                addCell(statsTable, String.valueOf(scan.getTotalViolations() != null ? scan.getTotalViolations() : 0), cnFont, false);
+                addCell(statsTable, "扫描耗时", cnFont, true);
+                addCell(statsTable, String.format("%.1f 秒", scan.getDurationMs() != null ? scan.getDurationMs() / 1000.0 : 0), cnFont, false);
                 document.add(statsTable);
                 document.add(new Paragraph(""));
             }
 
             // 违规列表
-            document.add(new Paragraph("违规列表 (" + violations.size() + " 项)").setFontSize(14).setBold());
+            document.add(new Paragraph("违规列表（共 " + violations.size() + " 项）")
+                    .setFontSize(14).setBold().setFont(cnFont));
             if (!violations.isEmpty()) {
-                Table vTable = new Table(3);
-                vTable.addCell("严重性");
-                vTable.addCell("类");
-                vTable.addCell("描述");
+                Table vTable = new Table(UnitValue.createPercentArray(new float[]{10, 30, 60}))
+                        .setWidth(UnitValue.createPercentValue(100));
+                addHeaderCell(vTable, "严重性", cnFont);
+                addHeaderCell(vTable, "类", cnFont);
+                addHeaderCell(vTable, "描述", cnFont);
                 for (ViolationEntity v : violations) {
-                    vTable.addCell(v.getSeverity() != null ? v.getSeverity() : "-");
-                    vTable.addCell(v.getClassFqn() != null ? shorten(v.getClassFqn()) : "-");
-                    vTable.addCell(v.getMessage() != null ? v.getMessage() : "-");
+                    addCell(vTable, toChineseSeverity(v.getSeverity()), cnFont, false);
+                    addCell(vTable, v.getClassFqn() != null ? shorten(v.getClassFqn()) : "-", cnFont, false);
+                    addCell(vTable, v.getMessage() != null ? v.getMessage() : "-", cnFont, false);
                 }
                 document.add(vTable);
+                document.add(new Paragraph(""));
+            } else {
+                document.add(new Paragraph("恭喜！未发现违规项。").setFont(cnFont));
                 document.add(new Paragraph(""));
             }
 
             // 架构叙事
             if (archStory != null && archStory.getContent() != null) {
-                document.add(new Paragraph("架构叙事").setFontSize(14).setBold());
-                document.add(new Paragraph(archStory.getContent()).setFontSize(10));
+                document.add(new Paragraph("架构叙事").setFontSize(14).setBold().setFont(cnFont));
+                // 截断过长的叙事内容，避免撑爆 PDF
+                String story = archStory.getContent();
+                if (story.length() > 6000) {
+                    story = story.substring(0, 6000) + "\n\n...（内容过长，已截断，完整叙事请查看 HTML 报告）";
+                }
+                document.add(new Paragraph(story).setFontSize(10).setFont(cnFont));
             }
 
             document.close();
             return baos.toByteArray();
         } catch (Exception e) {
             log.error("PDF generation failed: {}", e.getMessage(), e);
-            throw new RuntimeException("PDF 生成失败: " + e.getMessage());
+            throw new RuntimeException("PDF 生成失败：" + e.getMessage());
+        }
+    }
+
+    private PdfFont loadChineseFont() {
+        String[] fontPaths = {
+            "C:/Windows/Fonts/msyh.ttc",
+            "C:/Windows/Fonts/simsun.ttc",
+            "C:/Windows/Fonts/simhei.ttf",
+            "/System/Library/Fonts/PingFang.ttc",
+            "/System/Library/Fonts/STHeiti Light.ttc",
+            "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc"
+        };
+        for (String path : fontPaths) {
+            try {
+                return PdfFontFactory.createFont(path, PdfEncodings.IDENTITY_H,
+                        PdfFontFactory.EmbeddingStrategy.PREFER_EMBEDDED);
+            } catch (Exception ignored) {
+                // try next
+            }
+        }
+        log.warn("未找到中文字体文件，PDF 中文内容可能无法正常显示");
+        // fallback: try Helvetica (doesn't support CJK but at least renders ASCII)
+        try {
+            return PdfFontFactory.createFont();
+        } catch (Exception e) {
+            throw new RuntimeException("无法创建 PDF 字体", e);
+        }
+    }
+
+    private void addCell(Table table, String text, PdfFont font, boolean isLabel) {
+        Cell cell = new Cell().add(new Paragraph(text).setFont(font).setFontSize(10));
+        if (isLabel) {
+            cell.setBackgroundColor(new com.itextpdf.kernel.colors.DeviceRgb(245, 245, 255));
+        }
+        cell.setPadding(6);
+        table.addCell(cell);
+    }
+
+    private void addHeaderCell(Table table, String text, PdfFont font) {
+        Cell cell = new Cell().add(new Paragraph(text).setFont(font).setFontSize(10).setBold());
+        cell.setBackgroundColor(new com.itextpdf.kernel.colors.DeviceRgb(102, 126, 234));
+        cell.setFontColor(new com.itextpdf.kernel.colors.DeviceRgb(255, 255, 255));
+        cell.setPadding(6);
+        table.addCell(cell);
+    }
+
+    private String toChineseSeverity(String severity) {
+        if (severity == null) return "-";
+        switch (severity.toUpperCase()) {
+            case "BLOCKER": return "阻断";
+            case "ERROR": return "错误";
+            case "WARN": return "警告";
+            case "INFO": return "建议";
+            default: return severity;
         }
     }
 

@@ -62,7 +62,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute } from 'vue-router'
 import { message } from 'ant-design-vue'
 import api from '../api'
@@ -73,12 +73,22 @@ const projectId = computed(() => route.params.id)
 const loading = ref(false)
 const error = ref(null)
 const violations = ref([])
+let sseAbortController = null
 
 const blockerCount = computed(() => violations.value.filter(v => v.severity === 'BLOCKER').length)
 const errorCount = computed(() => violations.value.filter(v => v.severity === 'ERROR').length)
 const warnCount = computed(() => violations.value.filter(v => v.severity === 'WARN').length)
 
-onMounted(() => fetchViolations())
+onMounted(() => {
+  fetchViolations()
+  subscribeScanProgress()
+})
+onBeforeUnmount(() => {
+  if (sseAbortController) {
+    sseAbortController.abort()
+    sseAbortController = null
+  }
+})
 
 async function fetchViolations() {
   loading.value = true; error.value = null
@@ -117,6 +127,47 @@ function shortName(fqn) {
   if (!fqn) return ''
   const idx = fqn.lastIndexOf('.')
   return idx > 0 ? fqn.substring(idx + 1) : fqn
+}
+
+async function subscribeScanProgress() {
+  const token = localStorage.getItem('codeatlas_token')
+  sseAbortController = new AbortController()
+  try {
+    const response = await fetch(`/api/v1/projects/${projectId.value}/scans/progress`, {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: sseAbortController.signal
+    })
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() || ''
+      for (const line of lines) {
+        if (line.startsWith('event:')) continue
+        if (line.startsWith('data:')) {
+          try {
+            const data = JSON.parse(line.substring(5).trim())
+            if (data.stage === 'COMPLETED' || data.stage === 'FAILED') {
+              reader.cancel()
+              if (data.stage === 'COMPLETED') {
+                setTimeout(() => fetchViolations(), 500)
+              }
+              return
+            }
+          } catch (e) {}
+        }
+      }
+    }
+  } catch (e) {
+    if (e.name !== 'AbortError') {
+      // SSE connection failed silently - non-critical
+    }
+  }
 }
 </script>
 
