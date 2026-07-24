@@ -3,6 +3,8 @@ package com.codeatlas.server.config;
 import com.codeatlas.common.constant.ErrorCode;
 import com.codeatlas.common.dto.ApiResponse;
 import com.codeatlas.common.exception.BusinessException;
+import java.io.IOException;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
@@ -13,6 +15,7 @@ import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.context.request.async.AsyncRequestNotUsableException;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
@@ -53,6 +56,11 @@ public class GlobalExceptionHandler {
         ApiResponse<Void> response = ApiResponse.error(ErrorCode.BAD_REQUEST.getCode(), "不支持的请求方法: " + e.getMethod());
         response.setTraceId(MDC.get("traceId"));
         return ResponseEntity.status(HttpStatus.METHOD_NOT_ALLOWED).body(response);
+    }
+
+    @ExceptionHandler({IOException.class, AsyncRequestNotUsableException.class})
+    public void handleIoException(Exception e) {
+        log.debug("SSE/stream connection broken: {}", e.getMessage());
     }
 
     @ExceptionHandler(Exception.class)

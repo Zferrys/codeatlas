@@ -115,6 +115,16 @@ public class ScanServiceImpl implements ScanService {
             throw new BusinessException(ErrorCode.SCAN_ALREADY_RUNNING, "已有扫描正在运行");
         }
 
+        // GitHub 仓库预检：先查大小再决定能不能扫，避免网络传输太久
+        if ("GIT_URL".equals(project.getSourceType()) && project.getSourceUrl() != null) {
+            long estimatedBytes = gitService.estimateRepoSize(project.getSourceUrl());
+            if (estimatedBytes > 100L * 1024 * 1024) {
+                throw new BusinessException(ErrorCode.FILE_TOO_LARGE,
+                        "仓库预估过大: ~" + (estimatedBytes / (1024 * 1024)) +
+                        " MB (网络克隆上限 100 MB)。请先 git clone 到本地，再使用本地路径扫描");
+            }
+        }
+
         // 创建扫描记录并立即返回，实际扫描在后台线程执行
         ScanRecord scan = new ScanRecord();
         scan.setProjectId(projectId);
@@ -155,7 +165,8 @@ public class ScanServiceImpl implements ScanService {
                 GitResult gitResult = gitService.cloneRepository(
                         project.getSourceUrl(),
                         project.getDefaultBranch(),
-                        workDir);
+                        workDir,
+                        msg -> emitProgress(projectId, scan.getId(), "CLONING", 15, msg));
                 if (!gitResult.isSuccess()) {
                     throw new RuntimeException("Git clone failed: " + gitResult.getMessage());
                 }
