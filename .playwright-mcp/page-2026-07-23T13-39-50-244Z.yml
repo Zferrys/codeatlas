@@ -1,8 +1,0 @@
-- generic [ref=e140]:
-  - heading "页面出现了异常" [level=2] [ref=e145]
-  - paragraph [ref=e146]: 很抱歉，页面渲染过程中遇到了错误。请尝试刷新页面，或返回首页。
-  - generic [ref=e147]:
-    - button "刷新页面" [ref=e148] [cursor=pointer]
-    - button "返回首页" [ref=e150] [cursor=pointer]
-  - group [ref=e152] [cursor=pointer]:
-    - generic "错误详情" [ref=e153]

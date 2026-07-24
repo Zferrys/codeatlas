@@ -36,6 +36,10 @@ application-local.yml
 plugins/*.jar
 !plugins/.gitkeep
 
+# Playwright / browser automation artifacts
+.playwright-mcp/
+*.png
+
 # Temp
 temp/
 tmp/
