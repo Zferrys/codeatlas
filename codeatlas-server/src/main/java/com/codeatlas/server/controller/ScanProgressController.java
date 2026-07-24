@@ -22,7 +22,11 @@ import java.util.concurrent.CopyOnWriteArrayList;
 public class ScanProgressController {
 
     private static final Logger log = LoggerFactory.getLogger(ScanProgressController.class);
-    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+    private final ObjectMapper objectMapper;
+
+    public ScanProgressController(ObjectMapper objectMapper) {
+        this.objectMapper = objectMapper;
+    }
 
     /** projectId → 该项目的 SseEmitter 列表 */
     private final Map<Long, CopyOnWriteArrayList<SseEmitter>> emitters = new ConcurrentHashMap<>();
@@ -56,7 +60,7 @@ public class ScanProgressController {
         if (list == null || list.isEmpty()) return;
 
         try {
-            String json = OBJECT_MAPPER.writeValueAsString(event);
+            String json = objectMapper.writeValueAsString(event);
             for (SseEmitter emitter : list) {
                 try {
                     emitter.send(SseEmitter.event()
