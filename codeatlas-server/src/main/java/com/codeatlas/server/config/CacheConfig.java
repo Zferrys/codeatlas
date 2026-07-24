@@ -21,6 +21,10 @@ public class CacheConfig {
     public CacheConfig() {
         ObjectMapper mapper = new ObjectMapper();
         mapper.registerModule(new JavaTimeModule());
+        // 必须启用 Default Typing，否则缓存反序列化时类型丢失，Entity 会变成 LinkedHashMap
+        mapper.activateDefaultTyping(
+                mapper.getPolymorphicTypeValidator(),
+                ObjectMapper.DefaultTyping.NON_FINAL);
         this.serializer = new GenericJackson2JsonRedisSerializer(mapper);
     }
 
