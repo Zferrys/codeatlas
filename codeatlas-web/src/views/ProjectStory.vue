@@ -26,6 +26,12 @@
               置信度 {{ (story.confidence * 100).toFixed(0) }}%
             </a-tag>
           </template>
+          <template #extra>
+            <a-button type="primary" size="small" @click="regenerateStory" :loading="generating">
+              <template #icon><ReloadOutlined /></template>
+              {{ generating ? 'AI 分析中...' : '重新生成' }}
+            </a-button>
+          </template>
         </a-page-header>
         <div class="markdown-body" v-html="renderMarkdown(story.content || '')"></div>
       </div>
@@ -36,6 +42,8 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
+import { message } from 'ant-design-vue'
+import { ReloadOutlined } from '@ant-design/icons-vue'
 import { marked } from 'marked'
 import { markedHighlight } from 'marked-highlight'
 import hljs from 'highlight.js'
@@ -58,6 +66,7 @@ const projectId = computed(() => route.params.id)
 const loading = ref(false)
 const error = ref(null)
 const story = ref(null)
+const generating = ref(false)
 
 onMounted(() => fetchStory())
 
@@ -78,6 +87,19 @@ async function fetchStory() {
 function renderMarkdown(content) {
   if (!content) return ''
   return marked(content)
+}
+
+async function regenerateStory() {
+  generating.value = true
+  try {
+    const res = await api.post(`/projects/${projectId.value}/ai/story`)
+    message.success('架构叙事生成完成')
+    await fetchStory()
+  } catch (e) {
+    message.error('生成失败: ' + (e.response?.data?.message || 'AI 服务不可用'))
+  } finally {
+    generating.value = false
+  }
 }
 
 function formatDate(date) {

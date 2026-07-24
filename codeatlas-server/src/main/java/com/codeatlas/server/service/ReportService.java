@@ -20,7 +20,7 @@ import org.springframework.stereotype.Service;
 
 import java.io.ByteArrayOutputStream;
 import java.math.BigDecimal;
-import java.util.List;
+import java.util.*;
 
 @Service
 public class ReportService {
@@ -130,7 +130,7 @@ public class ReportService {
         sb.append(".severity-BLOCKER{color:red;}.severity-ERROR{color:orange;}</style></head><body>");
 
         sb.append("<h1>CodeAtlas — 架构分析报告</h1>");
-        sb.append("<h2>项目: ").append(project != null ? project.getName() : "N/A").append("</h2>");
+        sb.append("<h2>项目: ").append(escapeHtml(project != null ? project.getName() : "N/A")).append("</h2>");
 
         BigDecimal health = project != null ? project.getHealthScore() : BigDecimal.ZERO;
         sb.append("<p><strong>健康度评分: ").append(health).append("/100</strong></p>");
@@ -149,11 +149,11 @@ public class ReportService {
         if (!violations.isEmpty()) {
             sb.append("<table><tr><th>严重性</th><th>类</th><th>描述</th></tr>");
             for (ViolationEntity v : violations) {
-                String sevClass = v.getSeverity() != null ? "severity-" + v.getSeverity() : "";
+                String sevClass = v.getSeverity() != null ? "severity-" + escapeHtml(v.getSeverity()) : "";
                 sb.append("<tr class='").append(sevClass).append("'>");
-                sb.append("<td>").append(v.getSeverity()).append("</td>");
-                sb.append("<td>").append(v.getClassFqn() != null ? shorten(v.getClassFqn()) : "-").append("</td>");
-                sb.append("<td>").append(v.getMessage()).append("</td>");
+                sb.append("<td>").append(escapeHtml(v.getSeverity())).append("</td>");
+                sb.append("<td>").append(v.getClassFqn() != null ? escapeHtml(shorten(v.getClassFqn())) : "-").append("</td>");
+                sb.append("<td>").append(escapeHtml(v.getMessage())).append("</td>");
                 sb.append("</tr>");
             }
             sb.append("</table>");
@@ -161,11 +161,20 @@ public class ReportService {
 
         if (archStory != null && archStory.getContent() != null) {
             sb.append("<h3>架构叙事</h3>");
-            sb.append("<pre style='white-space:pre-wrap;'>").append(archStory.getContent()).append("</pre>");
+            sb.append("<pre style='white-space:pre-wrap;'>").append(escapeHtml(archStory.getContent())).append("</pre>");
         }
 
         sb.append("</body></html>");
         return sb.toString();
+    }
+
+    private String escapeHtml(String text) {
+        if (text == null) return "";
+        return text.replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+                .replace("\"", "&quot;")
+                .replace("'", "&#39;");
     }
 
     private void checkProjectAccess(Project project, Long projectId, Long userId) {
@@ -181,6 +190,25 @@ public class ReportService {
             return;
         }
         throw new BusinessException(ErrorCode.NOT_FOUND, "项目不存在");
+    }
+
+    public List<Map<String, Object>> getReportHistory(Long projectId, Long userId) {
+        Project project = projectMapper.findById(projectId);
+        checkProjectAccess(project, projectId, userId);
+
+        List<ScanRecord> scans = scanMapper.findByProjectId(projectId);
+        List<Map<String, Object>> history = new ArrayList<>();
+        for (ScanRecord scan : scans) {
+            Map<String, Object> entry = new HashMap<>();
+            entry.put("scanId", scan.getId());
+            entry.put("totalClasses", scan.getTotalClasses());
+            entry.put("totalViolations", scan.getTotalViolations());
+            entry.put("durationMs", scan.getDurationMs());
+            entry.put("status", scan.getStatus());
+            entry.put("completedAt", scan.getCompletedAt() != null ? scan.getCompletedAt().toString() : null);
+            history.add(entry);
+        }
+        return history;
     }
 
     private String shorten(String fqn) {

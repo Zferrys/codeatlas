@@ -39,7 +39,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.stream.Collectors;
@@ -87,6 +89,19 @@ public class ScanServiceImpl implements ScanService {
     @Override
     @Timed(value = "scan.duration", description = "Code scan duration")
     public ScanVO triggerScan(Long projectId, Long userId) {
+        return doTriggerScan(projectId, userId, false);
+    }
+
+    @Override
+    public ScanVO triggerIncrementalScan(Long projectId, Long userId) {
+        ScanRecord previous = scanMapper.findLatestByProjectId(projectId);
+        if (previous == null || !"COMPLETED".equals(previous.getStatus())) {
+            throw new BusinessException(ErrorCode.SCAN_NOT_FOUND, "没有已完成的扫描，请先执行全量扫描");
+        }
+        return doTriggerScan(projectId, userId, true);
+    }
+
+    private ScanVO doTriggerScan(Long projectId, Long userId, boolean incremental) {
         Project project = projectMapper.findById(projectId);
         if (project == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND, "项目不存在");
@@ -106,7 +121,8 @@ public class ScanServiceImpl implements ScanService {
         scanMapper.insert(scan);
 
         // 异步执行扫描，让 POST 立即返回，前端通过 SSE 获取实时进度
-        CompletableFuture.runAsync(() -> executeScan(project, scan, userId), scanExecutor)
+        final boolean isIncremental = incremental;
+        CompletableFuture.runAsync(() -> executeScan(project, scan, userId, isIncremental), scanExecutor)
                 .exceptionally(ex -> {
                     log.error("Unhandled scan error for projectId={}: {}", projectId, ex.getMessage(), ex);
                     return null;
@@ -119,7 +135,7 @@ public class ScanServiceImpl implements ScanService {
      * 后台执行完整扫描流程：克隆 → 解析 → 规则检查 → AI 分析。
      * 通过 ApplicationEventPublisher 推送进度事件给 SSE 订阅者。
      */
-    private void executeScan(Project project, ScanRecord scan, Long userId) {
+    private void executeScan(Project project, ScanRecord scan, Long userId, boolean incremental) {
         long startTime = System.currentTimeMillis();
         Long projectId = project.getId();
         int totalClasses = 0;
@@ -155,29 +171,62 @@ public class ScanServiceImpl implements ScanService {
                 totalClasses = classes.size();
                 totalLines = classes.stream().mapToInt(ClassSummaryResult::getLineCount).sum();
 
-                List<ClassSummaryEntity> batch = new ArrayList<>();
-                for (ClassSummaryResult cls : classes) {
-                    ClassSummaryEntity entity = new ClassSummaryEntity();
-                    entity.setScanId(scan.getId());
-                    entity.setProjectId(projectId);
-                    entity.setFqn(cls.getFqn());
-                    entity.setSimpleName(cls.getSimpleName());
-                    entity.setPackageName(cls.getPackageName());
-                    entity.setClassType(cls.getClassType());
-                    entity.setLayer(cls.getLayer());
-                    entity.setPublicMethods(cls.getPublicMethods());
-                    entity.setTotalMethods(cls.getTotalMethods());
-                    entity.setLineCount(cls.getLineCount());
-                    entity.setAnnotations(toJson(cls.getAnnotations()));
-                    entity.setDependencies(toJson(cls.getDependencies()));
-                    batch.add(entity);
-                    if (batch.size() >= 100) {
-                        classSummaryMapper.insertBatch(batch);
-                        batch.clear();
+                int insertedCount = 0;
+                int updatedCount = 0;
+                int deletedCount = 0;
+
+                if (incremental) {
+                    // 加载上一次扫描的类列表，计算增量差异
+                    ScanRecord prevScan = scanMapper.findLatestCompletedBefore(projectId, scan.getId());
+                    Set<String> prevFqns = new java.util.HashSet<>();
+                    if (prevScan != null) {
+                        List<ClassSummaryEntity> prevClasses = classSummaryMapper.findByScanId(prevScan.getId());
+                        for (ClassSummaryEntity pc : prevClasses) {
+                            prevFqns.add(pc.getFqn());
+                        }
                     }
-                }
-                if (!batch.isEmpty()) {
-                    classSummaryMapper.insertBatch(batch);
+
+                    Set<String> newFqns = classes.stream().map(ClassSummaryResult::getFqn).collect(Collectors.toSet());
+
+                    // 删除已移除的类
+                    Set<String> removedFqns = new java.util.HashSet<>(prevFqns);
+                    removedFqns.removeAll(newFqns);
+                    if (!removedFqns.isEmpty()) {
+                        deletedCount = classSummaryMapper.deleteByFqns(projectId, new ArrayList<>(removedFqns));
+                        log.info("Incremental scan: deleted {} removed classes for projectId={}", deletedCount, projectId);
+                    }
+
+                    // 插入新增和变更的类（replace via delete + insert）
+                    List<ClassSummaryEntity> batch = new ArrayList<>();
+                    for (ClassSummaryResult cls : classes) {
+                        ClassSummaryEntity entity = toEntity(cls, scan.getId(), projectId);
+                        batch.add(entity);
+                        if (batch.size() >= 100) {
+                            classSummaryMapper.insertBatch(batch);
+                            batch.clear();
+                        }
+                    }
+                    if (!batch.isEmpty()) {
+                        classSummaryMapper.insertBatch(batch);
+                    }
+                    insertedCount = classes.size();
+
+                    emitProgress(projectId, scan.getId(), "PARSING", 40,
+                            String.format("增量分析: 新增/更新 %d 类, 删除 %d 类", insertedCount, deletedCount));
+                } else {
+                    // 全量扫描：直接插入
+                    List<ClassSummaryEntity> batch = new ArrayList<>();
+                    for (ClassSummaryResult cls : classes) {
+                        batch.add(toEntity(cls, scan.getId(), projectId));
+                        if (batch.size() >= 100) {
+                            classSummaryMapper.insertBatch(batch);
+                            batch.clear();
+                        }
+                    }
+                    if (!batch.isEmpty()) {
+                        classSummaryMapper.insertBatch(batch);
+                    }
+                    insertedCount = classes.size();
                 }
 
                 try {
@@ -186,7 +235,8 @@ public class ScanServiceImpl implements ScanService {
                     log.warn("Neo4j graph import failed for projectId={}: {}", projectId, e.getMessage());
                 }
 
-                log.info("Scan completed: projectId={}, classes={}, lines={}", projectId, totalClasses, totalLines);
+                log.info("Scan completed: projectId={}, classes={}, lines={}, incremental={}, inserted={}, updated={}, deleted={}",
+                        projectId, totalClasses, totalLines, incremental, insertedCount, updatedCount, deletedCount);
 
                 emitProgress(projectId, scan.getId(), "RULES", 60, "运行架构规则检查...");
                 List<ConstitutionRuleEntity> rules = constitutionRuleService.getRules(projectId);
@@ -290,6 +340,23 @@ public class ScanServiceImpl implements ScanService {
     public ScanVO getLatestScan(Long projectId, Long userId) {
         ScanRecord scan = scanMapper.findLatestByProjectId(projectId);
         return scan != null ? toVO(scan) : null;
+    }
+
+    private ClassSummaryEntity toEntity(ClassSummaryResult cls, Long scanId, Long projectId) {
+        ClassSummaryEntity entity = new ClassSummaryEntity();
+        entity.setScanId(scanId);
+        entity.setProjectId(projectId);
+        entity.setFqn(cls.getFqn());
+        entity.setSimpleName(cls.getSimpleName());
+        entity.setPackageName(cls.getPackageName());
+        entity.setClassType(cls.getClassType());
+        entity.setLayer(cls.getLayer());
+        entity.setPublicMethods(cls.getPublicMethods());
+        entity.setTotalMethods(cls.getTotalMethods());
+        entity.setLineCount(cls.getLineCount());
+        entity.setAnnotations(toJson(cls.getAnnotations()));
+        entity.setDependencies(toJson(cls.getDependencies()));
+        return entity;
     }
 
     private String toJson(List<String> list) {

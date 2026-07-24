@@ -32,6 +32,8 @@ const props = defineProps({
   projectId: { type: [Number, String], required: true }
 })
 
+const emit = defineEmits(['node-click'])
+
 const graphContainer = ref(null)
 const loading = ref(false)
 const error = ref(null)
@@ -190,9 +192,19 @@ function renderGraph(data) {
     tooltipEl.style.display = 'none'
   })
 
-  // click to highlight neighbors
+  // click to highlight neighbors + emit detail event
   graph.on('node:click', (e) => {
     const node = e.item
+    const model = node.getModel()
+    emit('node-click', {
+      id: model.id,
+      label: model.label,
+      layer: model.layer,
+      methods: model.methods || 0,
+      lineCount: model.lineCount || 0,
+      group: model.group || 'unknown'
+    })
+
     const neighbors = new Set()
     node.getEdges().forEach(edge => {
       const src = edge.getSource()

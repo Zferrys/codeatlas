@@ -80,4 +80,9 @@ public interface ClassSummaryMapper {
 
     @Select("SELECT layer, COUNT(*) as cnt FROM class_summary WHERE scan_id = #{scanId} GROUP BY layer")
     List<Map<String, Object>> countLayerByScanId(Long scanId);
+
+    @Delete("<script>DELETE FROM class_summary WHERE project_id = #{projectId} AND fqn IN "
+            + "<foreach collection='fqns' item='fqn' open='(' separator=',' close=')'>#{fqn}</foreach>"
+            + "</script>")
+    int deleteByFqns(@Param("projectId") Long projectId, @Param("fqns") List<String> fqns);
 }

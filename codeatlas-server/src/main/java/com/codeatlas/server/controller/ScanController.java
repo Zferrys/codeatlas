@@ -50,4 +50,13 @@ public class ScanController {
                                               @AuthenticationPrincipal CodeAtlasUserDetails principal) {
         return ApiResponse.success(scanService.getLatestScan(projectId, principal.getUserId()));
     }
+
+    @PostMapping("/increment")
+    @Operation(summary = "增量扫描（复用已有仓库，只分析变更文件）")
+    @PreAuthorize("hasAnyRole('ADMIN','ARCHITECT','DEVELOPER')")
+    @AuditLog(action = "RUN_INCREMENTAL_SCAN", targetType = "SCAN", detail = "触发增量扫描")
+    public ApiResponse<ScanVO> triggerIncrementalScan(@PathVariable Long projectId,
+                                                       @AuthenticationPrincipal CodeAtlasUserDetails principal) {
+        return ApiResponse.success(scanService.triggerIncrementalScan(projectId, principal.getUserId()));
+    }
 }

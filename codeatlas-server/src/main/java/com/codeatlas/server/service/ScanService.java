@@ -7,6 +7,8 @@ public interface ScanService {
 
     ScanVO triggerScan(Long projectId, Long userId);
 
+    ScanVO triggerIncrementalScan(Long projectId, Long userId);
+
     PageResult<ScanVO> getScanHistory(Long projectId, Long userId, int page, int size);
 
     ScanVO getLatestScan(Long projectId, Long userId);

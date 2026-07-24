@@ -26,6 +26,9 @@ public interface ScanMapper {
     @Select("SELECT * FROM scan WHERE project_id = #{projectId} ORDER BY created_at DESC LIMIT 1")
     ScanRecord findLatestByProjectId(Long projectId);
 
+    @Select("SELECT * FROM scan WHERE project_id = #{projectId} AND id < #{excludeId} AND status = 'COMPLETED' ORDER BY created_at DESC LIMIT 1")
+    ScanRecord findLatestCompletedBefore(@Param("projectId") Long projectId, @Param("excludeId") Long excludeId);
+
     @Insert("INSERT INTO scan (project_id, commit_hash, branch, status, total_classes, total_lines, "
             + "total_violations, duration_ms, error_message, started_at, completed_at, created_at) "
             + "VALUES (#{projectId}, #{commitHash}, #{branch}, #{status}, #{totalClasses}, #{totalLines}, "

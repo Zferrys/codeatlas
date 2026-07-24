@@ -116,10 +116,32 @@
           <div class="section-card">
             <div class="section-card-header">
               <h4 class="card-label">扫描历史</h4>
-              <a-button size="small" type="primary" @click="triggerScan" :loading="scanning" :disabled="scanning">
-                <template #icon><ScanOutlined /></template>
-                {{ scanning ? '扫描中...' : '触发扫描' }}
-              </a-button>
+              <a-space>
+                <a-button size="small" @click="triggerIncrementalScan" :loading="scanning" :disabled="scanning">
+                  <template #icon><SyncOutlined /></template>
+                  增量扫描
+                </a-button>
+                <a-button size="small" type="primary" @click="triggerScan" :loading="scanning" :disabled="scanning">
+                  <template #icon><ScanOutlined /></template>
+                  {{ scanning ? '扫描中...' : '触发扫描' }}
+                </a-button>
+                <a-dropdown>
+                  <a-button size="small">
+                    <template #icon><DownloadOutlined /></template>
+                    导出报告
+                  </a-button>
+                  <template #overlay>
+                    <a-menu @click="handleExportReport">
+                      <a-menu-item key="pdf">
+                        <FilePdfOutlined /> PDF 格式
+                      </a-menu-item>
+                      <a-menu-item key="html">
+                        <FileTextOutlined /> HTML 格式
+                      </a-menu-item>
+                    </a-menu>
+                  </template>
+                </a-dropdown>
+              </a-space>
             </div>
 
             <!-- 扫描进度卡片 -->
@@ -170,7 +192,8 @@ import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute } from 'vue-router'
 import { message } from 'ant-design-vue'
 import {
-  SafetyOutlined, CodeOutlined, BugOutlined, ApartmentOutlined, ScanOutlined
+  SafetyOutlined, CodeOutlined, BugOutlined, ApartmentOutlined, ScanOutlined,
+  DownloadOutlined, FilePdfOutlined, FileTextOutlined, SyncOutlined
 } from '@ant-design/icons-vue'
 import api from '../api'
 
@@ -198,13 +221,13 @@ const columns = [
 const dimensions = computed(() => {
   const score = healthScore.value || 0
   return [
-    { key: 'arch', label: '架构合规', score: Math.min(100, score + Math.floor(Math.random() * 6)),
+    { key: 'arch', label: '架构合规', score: Math.min(100, Math.max(0, score - 5)),
       icon: ApartmentOutlined, bg: '#f0e6ff', color: '#722ed1' },
-    { key: 'structure', label: '代码结构', score: Math.min(100, score - 5 + Math.floor(Math.random() * 10)),
+    { key: 'structure', label: '代码结构', score: Math.min(100, Math.max(0, score)),
       icon: CodeOutlined, bg: '#e8f4ff', color: '#1890ff' },
-    { key: 'quality', label: '代码质量', score: Math.min(100, score + Math.floor(Math.random() * 8) - 4),
+    { key: 'quality', label: '代码质量', score: Math.min(100, Math.max(0, score - 3)),
       icon: BugOutlined, bg: '#e6f7e9', color: '#52c41a' },
-    { key: 'deps', label: '依赖健康', score: Math.min(100, score - 10 + Math.floor(Math.random() * 12)),
+    { key: 'deps', label: '依赖健康', score: Math.min(100, Math.max(0, score - 8)),
       icon: SafetyOutlined, bg: '#fff7e6', color: '#fa8c16' }
   ]
 })
@@ -320,15 +343,18 @@ async function triggerScan() {
   scanProgress.stage = ''
   scanProgress.progress = 0
   scanProgress.message = ''
-
   try {
-    // 1. 触发扫描
     await api.post(`/projects/${projectId}/scans`)
+    subscribeScanProgress(projectId)
+  } catch (e) {
+    scanning.value = false
+  }
+}
 
-    // 2. 订阅 SSE 进度
-    const token = localStorage.getItem('codeatlas_token')
-    sseAbortController = new AbortController()
-
+async function subscribeScanProgress(projectId) {
+  const token = localStorage.getItem('codeatlas_token')
+  sseAbortController = new AbortController()
+  try {
     const response = await fetch(`/api/v1/projects/${projectId}/scans/progress`, {
       headers: { Authorization: `Bearer ${token}` },
       signal: sseAbortController.signal
@@ -363,7 +389,6 @@ async function triggerScan() {
               } else {
                 message.error('扫描失败: ' + (data.message || '未知错误'))
               }
-              // 留一点时间让用户看到完成状态，再刷新数据
               setTimeout(async () => {
                 scanning.value = false
                 sseAbortController = null
@@ -371,14 +396,10 @@ async function triggerScan() {
               }, 800)
               return
             }
-          } catch (e) {
-            // skip unparseable SSE data
-          }
+          } catch (e) {}
         }
       }
     }
-
-    // SSE 流意外结束（无 COMPLETED/FAILED 事件）
     scanning.value = false
     sseAbortController = null
     await loadData()
@@ -389,6 +410,49 @@ async function triggerScan() {
     scanning.value = false
     sseAbortController = null
     await loadData()
+  }
+}
+
+async function triggerIncrementalScan() {
+  const projectId = route.params.id
+  if (!projectId) return
+  scanning.value = true
+  scanProgress.stage = ''
+  scanProgress.progress = 0
+  scanProgress.message = ''
+  try {
+    await api.post(`/projects/${projectId}/scans/increment`)
+    subscribeScanProgress(projectId)
+  } catch (e) {
+    scanning.value = false
+    message.error('增量扫描触发失败')
+  }
+}
+
+async function handleExportReport({ key }) {
+  const projectId = route.params.id
+  if (!projectId) return
+  try {
+    const token = localStorage.getItem('codeatlas_token')
+    const response = await fetch(`/api/v1/projects/${projectId}/reports/download?format=${key}`, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+    if (!response.ok) {
+      message.error('导出失败')
+      return
+    }
+    const blob = await response.blob()
+    const url = window.URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `codeatlas-report.${key}`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    window.URL.revokeObjectURL(url)
+    message.success('报告已下载')
+  } catch (e) {
+    message.error('导出失败: ' + (e.message || '网络错误'))
   }
 }
 
