@@ -70,6 +70,7 @@ public class GitService {
                             .setDirectory(targetDir.toFile())
                             .setCloneSubmodules(false)
                             .setCloneAllBranches(false)
+                            .setDepth(50)
                             .call();
 
                     try (Repository repo = git.getRepository()) {
