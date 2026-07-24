@@ -40,6 +40,9 @@ plugins/*.jar
 .playwright-mcp/
 *.png
 
+# Claude Code config (local dev tool, user-specific)
+.claude/
+
 # Temp
 temp/
 tmp/
