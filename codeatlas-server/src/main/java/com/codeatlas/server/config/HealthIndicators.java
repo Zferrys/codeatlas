@@ -70,7 +70,7 @@ public class HealthIndicators {
      * 非响应式 Neo4j 健康检查。
      * 替代默认的 reactive health indicator，避免启动时 WARN 噪音。
      */
-    @Component("neo4jDriver")
+    @Component("neo4jHealth")
     public class Neo4jHealthIndicator implements HealthIndicator {
         @Override
         public Health health() {
