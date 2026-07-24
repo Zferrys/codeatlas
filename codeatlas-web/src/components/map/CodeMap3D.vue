@@ -74,6 +74,8 @@ const props = defineProps({
   projectId: { type: [Number, String], required: true }
 })
 
+const emit = defineEmits(['node-click'])
+
 const wrapperRef = ref(null)
 const canvasRef = ref(null)
 const loading = ref(false)
@@ -326,6 +328,7 @@ function onCanvasClick(event) {
     const obj = intersects[0].object
     highlightNode(obj)
     selectedNode.value = obj.userData
+    emit('node-click', obj.userData)
   } else {
     resetHighlight()
     selectedNode.value = null
@@ -380,6 +383,7 @@ function onSearchSelect(val) {
   controls.update()
   highlightNode(mesh)
   selectedNode.value = mesh.userData
+  emit('node-click', mesh.userData)
 }
 
 function toggleHeatmap(checked) {

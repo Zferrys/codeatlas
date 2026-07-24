@@ -342,6 +342,20 @@ public class ScanServiceImpl implements ScanService {
         return scan != null ? toVO(scan) : null;
     }
 
+    @Override
+    public ScanRecord getLatestScanEntity(Long projectId) {
+        return scanMapper.findLatestByProjectId(projectId);
+    }
+
+    @Override
+    public List<ClassSummaryEntity> getClassSummaries(Long projectId) {
+        ScanRecord scan = scanMapper.findLatestByProjectId(projectId);
+        if (scan == null) {
+            return java.util.Collections.emptyList();
+        }
+        return classSummaryMapper.findByScanId(scan.getId());
+    }
+
     private ClassSummaryEntity toEntity(ClassSummaryResult cls, Long scanId, Long projectId) {
         ClassSummaryEntity entity = new ClassSummaryEntity();
         entity.setScanId(scanId);

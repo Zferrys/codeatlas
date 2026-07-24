@@ -7,11 +7,10 @@ import com.codeatlas.server.entity.ClassSummaryEntity;
 import com.codeatlas.server.entity.InsightEntity;
 import com.codeatlas.server.entity.Project;
 import com.codeatlas.server.entity.ScanRecord;
-import com.codeatlas.server.mapper.ClassSummaryMapper;
-import com.codeatlas.server.mapper.ProjectMapper;
-import com.codeatlas.server.mapper.ScanMapper;
 import com.codeatlas.server.security.CodeAtlasUserDetails;
 import com.codeatlas.server.service.InsightService;
+import com.codeatlas.server.service.ProjectService;
+import com.codeatlas.server.service.ScanService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -27,16 +26,14 @@ import java.util.stream.Collectors;
 public class InsightController {
 
     private final InsightService insightService;
-    private final ProjectMapper projectMapper;
-    private final ScanMapper scanMapper;
-    private final ClassSummaryMapper classSummaryMapper;
+    private final ProjectService projectService;
+    private final ScanService scanService;
 
-    public InsightController(InsightService insightService, ProjectMapper projectMapper,
-                             ScanMapper scanMapper, ClassSummaryMapper classSummaryMapper) {
+    public InsightController(InsightService insightService, ProjectService projectService,
+                             ScanService scanService) {
         this.insightService = insightService;
-        this.projectMapper = projectMapper;
-        this.scanMapper = scanMapper;
-        this.classSummaryMapper = classSummaryMapper;
+        this.projectService = projectService;
+        this.scanService = scanService;
     }
 
     @GetMapping("/insights")
@@ -64,7 +61,7 @@ public class InsightController {
     @Operation(summary = "获取架构健康度评分")
     public ApiResponse<Map<String, Object>> getHealthScore(@PathVariable Long projectId,
                                                             @AuthenticationPrincipal CodeAtlasUserDetails principal) {
-        Project project = projectMapper.findById(projectId);
+        Project project = projectService.getProjectEntity(projectId);
         if (project == null) {
             return ApiResponse.error(404, "项目不存在");
         }
@@ -74,7 +71,7 @@ public class InsightController {
         result.put("healthScore", project.getHealthScore());
 
         // 从实际扫描数据计算四维度分解
-        ScanRecord latestScan = scanMapper.findLatestByProjectId(projectId);
+        ScanRecord latestScan = scanService.getLatestScanEntity(projectId);
         Map<String, Object> dims = new HashMap<>();
 
         if (latestScan != null && latestScan.getTotalClasses() != null && latestScan.getTotalClasses() > 0) {
@@ -86,7 +83,7 @@ public class InsightController {
             dims.put("architectureCompliance", Math.round(100.0 - violationRate));
 
             // 代码结构 (30%): 基于分层覆盖率
-            List<ClassSummaryEntity> classes = classSummaryMapper.findByScanId(latestScan.getId());
+            List<ClassSummaryEntity> classes = scanService.getClassSummaries(projectId);
             long layeredClasses = classes.stream()
                     .filter(c -> c.getLayer() != null && !"UNKNOWN".equals(c.getLayer()))
                     .count();

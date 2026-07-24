@@ -140,6 +140,11 @@ public class ProjectServiceImpl implements ProjectService {
     }
 
     @Override
+    public Project getProjectEntity(Long projectId) {
+        return projectMapper.findById(projectId);
+    }
+
+    @Override
     @Transactional
     public void deleteProject(Long projectId, Long userId) {
         Project project = projectMapper.findById(projectId);

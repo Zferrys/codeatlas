@@ -9,12 +9,11 @@ import com.codeatlas.server.entity.ClassSummaryEntity;
 import com.codeatlas.server.entity.InsightEntity;
 import com.codeatlas.server.entity.Project;
 import com.codeatlas.server.entity.ScanRecord;
-import com.codeatlas.server.mapper.ClassSummaryMapper;
-import com.codeatlas.server.mapper.ProjectMapper;
-import com.codeatlas.server.mapper.ScanMapper;
 import com.codeatlas.server.security.CodeAtlasUserDetails;
 import com.codeatlas.server.service.AiAnalysisService;
 import com.codeatlas.server.service.InsightService;
+import com.codeatlas.server.service.ProjectService;
+import com.codeatlas.server.service.ScanService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.slf4j.Logger;
@@ -35,18 +34,15 @@ public class AiController {
 
     private final AiAnalysisService aiAnalysisService;
     private final InsightService insightService;
-    private final ProjectMapper projectMapper;
-    private final ScanMapper scanMapper;
-    private final ClassSummaryMapper classSummaryMapper;
+    private final ProjectService projectService;
+    private final ScanService scanService;
 
     public AiController(AiAnalysisService aiAnalysisService, InsightService insightService,
-                        ProjectMapper projectMapper, ScanMapper scanMapper,
-                        ClassSummaryMapper classSummaryMapper) {
+                        ProjectService projectService, ScanService scanService) {
         this.aiAnalysisService = aiAnalysisService;
         this.insightService = insightService;
-        this.projectMapper = projectMapper;
-        this.scanMapper = scanMapper;
-        this.classSummaryMapper = classSummaryMapper;
+        this.projectService = projectService;
+        this.scanService = scanService;
     }
 
     @GetMapping("/story")
@@ -72,11 +68,11 @@ public class AiController {
     @PreAuthorize("hasAnyRole('ADMIN','ARCHITECT','DEVELOPER')")
     public ApiResponse<Map<String, Object>> generateStory(@PathVariable Long projectId,
                                                           @AuthenticationPrincipal CodeAtlasUserDetails principal) {
-        Project project = projectMapper.findById(projectId);
+        Project project = projectService.getProjectEntity(projectId);
         if (project == null) {
             return ApiResponse.error(404, "项目不存在");
         }
-        ScanRecord scan = scanMapper.findLatestByProjectId(projectId);
+        ScanRecord scan = scanService.getLatestScanEntity(projectId);
         if (scan == null) {
             return ApiResponse.error(400, "请先触发一次扫描");
         }
@@ -106,17 +102,17 @@ public class AiController {
             return ApiResponse.error(400, "targetClass 不能为空");
         }
 
-        Project project = projectMapper.findById(projectId);
+        Project project = projectService.getProjectEntity(projectId);
         if (project == null) {
             return ApiResponse.error(404, "项目不存在");
         }
 
-        ScanRecord scan = scanMapper.findLatestByProjectId(projectId);
+        ScanRecord scan = scanService.getLatestScanEntity(projectId);
         if (scan == null) {
             return ApiResponse.error(400, "请先触发一次扫描");
         }
 
-        List<ClassSummaryEntity> classes = classSummaryMapper.findByScanId(scan.getId());
+        List<ClassSummaryEntity> classes = scanService.getClassSummaries(projectId);
         ClassSummaryEntity target = classes.stream()
                 .filter(c -> c.getFqn().equals(targetClass) || c.getSimpleName().equals(targetClass))
                 .findFirst().orElse(null);
@@ -173,13 +169,12 @@ public class AiController {
         // Prompt 注入防护: 限长 + 过滤已知注入模式
         question = sanitizeUserInput(question);
 
-        Project project = projectMapper.findById(projectId);
+        Project project = projectService.getProjectEntity(projectId);
         if (project == null) {
             return ApiResponse.error(404, "项目不存在");
         }
 
-        ScanRecord scan = scanMapper.findLatestByProjectId(projectId);
-        List<ClassSummaryEntity> classes = scan != null ? classSummaryMapper.findByScanId(scan.getId()) : Collections.emptyList();
+        List<ClassSummaryEntity> classes = scanService.getClassSummaries(projectId);
 
         // Build context: if classFqn specified, include it and its neighbors
         StringBuilder context = new StringBuilder();

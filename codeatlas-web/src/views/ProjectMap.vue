@@ -35,7 +35,7 @@
     <!-- 地图画布 -->
     <div class="map-canvas-area">
       <CodeMap v-if="renderMode === '2d'" ref="codeMap2dRef" :projectId="projectId" @node-click="onNodeClick" />
-      <CodeMap3D v-else :projectId="projectId" />
+      <CodeMap3D v-else :projectId="projectId" @node-click="onNodeClick" />
     </div>
 
     <!-- 节点详情抽屉 -->

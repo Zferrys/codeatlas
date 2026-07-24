@@ -1,13 +1,12 @@
 package com.codeatlas.engine.parser;
 
+import com.github.javaparser.JavaParser;
+import com.github.javaparser.ParseResult;
 import com.github.javaparser.ParserConfiguration;
-import com.github.javaparser.StaticJavaParser;
 import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
-import com.github.javaparser.ast.body.FieldDeclaration;
 import com.github.javaparser.ast.body.MethodDeclaration;
 import com.github.javaparser.ast.body.TypeDeclaration;
-import com.github.javaparser.ast.type.ClassOrInterfaceType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -25,10 +24,12 @@ public class JavaParserService {
 
     private static final Logger log = LoggerFactory.getLogger(JavaParserService.class);
 
-    static {
+    private final JavaParser javaParser;
+
+    public JavaParserService() {
         ParserConfiguration config = new ParserConfiguration();
         config.setLanguageLevel(ParserConfiguration.LanguageLevel.JAVA_17);
-        StaticJavaParser.setConfiguration(config);
+        this.javaParser = new JavaParser(config);
     }
 
     public List<ClassSummaryResult> analyzeDirectory(Path directory) throws IOException {
@@ -67,7 +68,11 @@ public class JavaParserService {
     }
 
     private ClassSummaryResult analyzeFile(Path file, Set<String> knownFqns) throws IOException {
-        CompilationUnit cu = StaticJavaParser.parse(file);
+        ParseResult<CompilationUnit> parseResult = javaParser.parse(file);
+        if (!parseResult.isSuccessful() || parseResult.getResult().isEmpty()) {
+            throw new IOException("Failed to parse " + file.getFileName() + ": " + parseResult.getProblems());
+        }
+        CompilationUnit cu = parseResult.getResult().get();
 
         String packageName = cu.getPackageDeclaration()
                 .map(pd -> pd.getName().asString())
