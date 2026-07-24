@@ -1,43 +1,43 @@
-# Security Policy
+# 安全策略
 
-## Reporting a Vulnerability
+## 报告漏洞
 
-If you discover a security vulnerability in CodeAtlas, please **do not** open a public issue. Instead, report it privately:
+如果您在 CodeAtlas 中发现安全漏洞，请**不要**公开提交 Issue。请通过以下方式私下报告：
 
-1. Email: [maintainer contact]
-2. Include detailed steps to reproduce
-3. We aim to acknowledge within 48 hours and provide a fix within 7 days
+1. 邮箱：[维护者联系方式]
+2. 请附上详细的复现步骤
+3. 我们将在 48 小时内确认收到，并在 7 天内提供修复方案
 
-## Supported Versions
+## 支持的版本
 
-| Version | Supported          |
-| ------- | ------------------ |
-| 0.2.x   | ✅ Active support  |
-| 0.1.x   | ❌ End of life     |
+| 版本   | 状态               |
+| ------ | ------------------ |
+| 0.2.x  | ✅ 活跃支持        |
+| 0.1.x  | ❌ 已停止维护      |
 
-## Security Practices
+## 安全实践
 
-### Authentication
-- Passwords hashed with BCrypt (never stored in plain text)
-- JWT-based stateless authentication with configurable expiration
-- Rate limiting on login endpoints (10 req/min)
+### 身份认证
+- 密码使用 BCrypt 哈希存储（绝不存储明文）
+- 基于 JWT 的无状态认证，过期时间可配置
+- 登录接口限流（10 次/分钟）
 
-### Data Protection
-- All SQL queries use parameterized statements (MyBatis `#{}`) — no string concatenation
-- File uploads validated via type whitelist and size limits
-- Sensitive configuration via environment variables, never in code
+### 数据保护
+- 所有 SQL 查询使用参数化语句（MyBatis `#{}`）—— 绝不拼接字符串
+- 文件上传通过类型白名单和大小限制校验
+- 敏感配置通过环境变量注入，绝不出现在代码中
 
-### API Security
-- CORS origins configurable via `CORS_ORIGINS` environment variable
-- CSRF protection not required (stateless JWT API, no cookies)
-- RBAC enforcement at method level via `@PreAuthorize`
+### API 安全
+- CORS 来源通过 `CORS_ORIGINS` 环境变量配置
+- 无需 CSRF 保护（无状态 JWT API，不使用 Cookie）
+- 方法级 RBAC 权限控制（`@PreAuthorize`）
 
-### Dependency Management
-- OWASP Dependency Check plugin in CI pipeline
-- CVSS ≥ 7 vulnerabilities block the build
-- Regular dependency updates
+### 依赖管理
+- CI 流水线集成 OWASP Dependency Check 插件
+- CVSS ≥ 7 的漏洞将阻止构建
+- 定期更新依赖版本
 
-### Production Hardening
-- Graceful shutdown with in-flight request completion
-- Health check endpoints restricted to internal networks via Nginx
-- JWT tokens masked in log output
+### 生产加固
+- 优雅关闭，等待进行中请求完成
+- 健康检查端点通过 Nginx 限制仅内网访问
+- JWT Token 在日志输出中脱敏处理
