@@ -120,6 +120,8 @@ codeatlas:
     rate-limit:
       enabled: true
       default-rps: 10
+  alert:
+    webhook-url: "${CODEATLAS_ALERT_WEBHOOK_URL:}"
   workspace:
     dir: ./codeatlas-workspace
     retention-hours: 24

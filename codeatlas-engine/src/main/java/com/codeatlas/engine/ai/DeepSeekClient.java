@@ -194,14 +194,20 @@ public class DeepSeekClient implements AiClient {
         }
 
         int tokensUsed = 0;
+        int promptTokens = 0;
+        int completionTokens = 0;
         JsonNode usage = root.path("usage");
         if (!usage.isMissingNode()) {
+            promptTokens = usage.path("prompt_tokens").asInt(0);
+            completionTokens = usage.path("completion_tokens").asInt(0);
             tokensUsed = usage.path("total_tokens").asInt(0);
         }
 
         AiResponse response = new AiResponse();
         response.setContent(content);
         response.setTokensUsed(tokensUsed);
+        response.setPromptTokens(promptTokens);
+        response.setCompletionTokens(completionTokens);
         response.setLatencyMs(latencyMs);
         response.setSources(Collections.emptyList());
         return response;

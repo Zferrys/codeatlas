@@ -36,6 +36,11 @@ public class AiAnalysisService {
     private static final Logger log = LoggerFactory.getLogger(AiAnalysisService.class);
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
+    // Max classes per AI analysis chunk before splitting
+    private static final int MAX_CLASSES_PER_CHUNK = 200;
+    // Max concurrent chunk analyses
+    private static final int MAX_CHUNK_CONCURRENCY = 3;
+
     private final ProjectMapper projectMapper;
     private final ScanMapper scanMapper;
     private final ClassSummaryMapper classSummaryMapper;
@@ -43,6 +48,7 @@ public class AiAnalysisService {
     private final AiClient aiClient;
     private final AiAuditLogMapper aiAuditLogMapper;
     private final HallucinationChecker hallucinationChecker;
+    private final AlertService alertService;
 
     @Lazy
     @Autowired
@@ -52,6 +58,7 @@ public class AiAnalysisService {
                               ClassSummaryMapper classSummaryMapper, InsightService insightService,
                               AiAuditLogMapper aiAuditLogMapper,
                               HallucinationChecker hallucinationChecker,
+                              AlertService alertService,
                               @Autowired(required = false) AiClient aiClient) {
         this.projectMapper = projectMapper;
         this.scanMapper = scanMapper;
@@ -59,6 +66,7 @@ public class AiAnalysisService {
         this.insightService = insightService;
         this.aiAuditLogMapper = aiAuditLogMapper;
         this.hallucinationChecker = hallucinationChecker;
+        this.alertService = alertService;
         this.aiClient = aiClient;
         if (aiClient != null) {
             log.info("AiAnalysisService initialized with AI client: {}", aiClient.getModelName());
@@ -98,48 +106,71 @@ public class AiAnalysisService {
             return null;
         }
 
-        // 构建 prompt
-        Map<String, String> vars = buildPromptVariables(project, scan, classes);
-        PromptTemplate template = new PromptTemplate("prompts/architecture-story.md");
-        String prompt = template.render(vars);
+        String finalContent;
+        int totalTokens = 0;
+        long totalLatency = 0;
 
-        if (prompt.isEmpty()) {
-            log.warn("AI analysis skipped: empty prompt for projectId={}", projectId);
-            return null;
-        }
+        if (classes.size() > MAX_CLASSES_PER_CHUNK) {
+            // 大项目分片：按包/模块拆分为多个子任务分别分析，再汇总
+            log.info("Large project detected: {} classes > {}, triggering chunked analysis for projectId={}",
+                    classes.size(), MAX_CLASSES_PER_CHUNK, projectId);
+            finalContent = analyzeWithChunking(project, scan, classes);
+            if (finalContent == null) {
+                log.warn("Chunked AI analysis failed for projectId={}", projectId);
+                return null;
+            }
+        } else {
+            // 常规单次分析
+            Map<String, String> vars = buildPromptVariables(project, scan, classes);
+            PromptTemplate template = new PromptTemplate("prompts/architecture-story.md");
+            String prompt = template.render(vars);
 
-        // 调用 AI（带重试 + 降级）
-        AiRequest request = new AiRequest();
-        request.setPrompt(prompt);
-        request.setSystemPrompt("你是一位资深软件架构师。请分析代码库并用中文生成深入、准确的架构叙事报告。所有结论必须引用具体的类和包。专业术语保留英文，类名/包名保留原文。");
-        request.setTemperature(0.3);
-        request.setMaxTokens(4096);
+            if (prompt.isEmpty()) {
+                log.warn("AI analysis skipped: empty prompt for projectId={}", projectId);
+                return null;
+            }
 
-        AiResponse response = self.callAiWithResilience(request);
-        if (response == null) {
-            log.warn("AI analysis failed after retries for projectId={}, scanId={}", projectId, scanId);
+            AiRequest request = new AiRequest();
+            request.setPrompt(prompt);
+            request.setSystemPrompt("你是一位资深软件架构师。请分析代码库并用中文生成深入、准确的架构叙事报告。所有结论必须引用具体的类和包。专业术语保留英文，类名/包名保留原文。");
+            request.setTemperature(0.3);
+            request.setMaxTokens(4096);
+
+            AiResponse response = self.callAiWithResilience(request);
+            if (response == null) {
+                log.warn("AI analysis failed after retries for projectId={}, scanId={}", projectId, scanId);
+                self.saveAiAuditLog(aiClient.getModelName(), "ARCHITECTURE_STORY", projectId, null,
+                        0, 0, 0, 0, "All AI models exhausted or circuit breaker open", false);
+                return null;
+            }
+            log.info("AI analysis completed: projectId={}, tokens={}, latency={}ms",
+                    projectId, response.getTokensUsed(), response.getLatencyMs());
             self.saveAiAuditLog(aiClient.getModelName(), "ARCHITECTURE_STORY", projectId, null,
-                    0, 0, 0, 0, "All AI models exhausted or circuit breaker open", false);
-            return null;
+                    response.getPromptTokens(), response.getCompletionTokens(),
+                    response.getTokensUsed(), response.getLatencyMs(), null, true);
+            finalContent = response.getContent();
+            totalTokens = response.getTokensUsed();
+            totalLatency = response.getLatencyMs();
         }
-        log.info("AI analysis completed: projectId={}, tokens={}, latency={}ms",
-                projectId, response.getTokensUsed(), response.getLatencyMs());
-        self.saveAiAuditLog(aiClient.getModelName(), "ARCHITECTURE_STORY", projectId, null,
-                response.getTokensUsed(), 0, response.getLatencyMs(), 0, null, true);
 
         // 幻觉检测
         HallucinationChecker.HallucinationResult hResult =
-                hallucinationChecker.check(response.getContent(), classes);
+                hallucinationChecker.check(finalContent, classes);
         if (hResult.hasHallucination()) {
             HallucinationChecker.Action action = hallucinationChecker.suggestAction(hResult);
             log.warn("Hallucination check: result={}, fakeClasses={}, action={}",
                     hResult.hasHallucination(), hResult.getFakeClasses().size(), action);
-            if (action == HallucinationChecker.Action.RETRY) {
-                // 低温重试一次
-                request.setTemperature(0.1);
-                AiResponse retryResponse = self.callAiWithResilience(request);
+            if (action == HallucinationChecker.Action.RETRY && classes.size() <= MAX_CLASSES_PER_CHUNK) {
+                // 低温重试一次（仅对非分片项目，分片项目已较复杂）
+                AiRequest retryReq = new AiRequest();
+                retryReq.setPrompt(finalContent);
+                retryReq.setSystemPrompt("你是一位资深软件架构师。请分析代码库并用中文生成深入、准确的架构叙事报告。");
+                retryReq.setTemperature(0.1);
+                retryReq.setMaxTokens(4096);
+                AiResponse retryResponse = self.callAiWithResilience(retryReq);
                 if (retryResponse != null && !hallucinationChecker.check(retryResponse.getContent(), classes).hasHallucination()) {
-                    response = retryResponse;
+                    finalContent = retryResponse.getContent();
+                    totalTokens += retryResponse.getTokensUsed();
                     log.info("Hallucination retry successful for projectId={}", projectId);
                 } else {
                     log.warn("Hallucination retry failed for projectId={}, using degraded result", projectId);
@@ -152,11 +183,12 @@ public class AiAnalysisService {
         insight.setScanId(scanId);
         insight.setProjectId(projectId);
         insight.setType("ARCH_STORY");
-        insight.setTitle("架构叙事 — " + project.getName());
-        insight.setContent(response.getContent());
-        insight.setConfidence(calculateConfidence(project, classes, response));
+        insight.setTitle("架构叙事 — " + project.getName()
+                + (classes.size() > MAX_CLASSES_PER_CHUNK ? " [分片分析]" : ""));
+        insight.setContent(finalContent);
+        insight.setConfidence(calculateConfidenceSimple(finalContent, classes));
         insight.setSources(toJson(Collections.emptyList()));
-        insight.setMetadata(buildMetadata(project, scan, classes, response));
+        insight.setMetadata(buildMetadataSimple(project, scan, classes, totalTokens, totalLatency));
         insightService.saveInsight(insight);
 
         log.info("AI insight saved: id={}, projectId={}", insight.getId(), projectId);
@@ -184,6 +216,8 @@ public class AiAnalysisService {
      */
     public AiResponse aiFallback(AiRequest request, Exception e) {
         log.warn("AI call fallback: circuit breaker open or retries exhausted: {}", e.getMessage());
+        alertService.sendAlert("AI 模型全部不可用",
+                "所有 AI 模型（Claude/DeepSeek）均已熔断或重试耗尽，后续分析请求将全部失败。\n错误: " + e.getMessage());
         return null;
     }
 
@@ -333,20 +367,144 @@ public class AiAnalysisService {
     }
 
     /**
+     * 大项目分片分析：按包分组拆分为多个子任务，并发分析后汇总。
+     */
+    private String analyzeWithChunking(Project project, ScanRecord scan, List<ClassSummaryEntity> classes) {
+        // 按顶层包分组
+        Map<String, List<ClassSummaryEntity>> groups = new LinkedHashMap<>();
+        for (ClassSummaryEntity cls : classes) {
+            String pkg = cls.getPackageName();
+            String topPkg = pkg != null && pkg.contains(".") ? pkg.substring(0, pkg.indexOf('.')) : (pkg != null ? pkg : "default");
+            groups.computeIfAbsent(topPkg, k -> new ArrayList<>()).add(cls);
+        }
+
+        log.info("Chunking: {} classes split into {} groups for projectId={}",
+                classes.size(), groups.size(), project.getId());
+
+        // Phase 1: 每个分组独立分析
+        List<String> chunkResults = new ArrayList<>();
+        String systemPrompt = "你是一位资深软件架构师。请分析以下代码模块，用中文输出该模块的：1) 职责描述 2) 关键类 3) 对外依赖。简明扼要，不超过500字。";
+
+        for (Map.Entry<String, List<ClassSummaryEntity>> entry : groups.entrySet()) {
+            if (chunkResults.size() >= MAX_CHUNK_CONCURRENCY * 3) {
+                log.warn("Too many chunks, stopping at {} for projectId={}", chunkResults.size(), project.getId());
+                break;
+            }
+            String groupName = entry.getKey();
+            List<ClassSummaryEntity> groupClasses = entry.getValue();
+
+            StringBuilder classList = new StringBuilder();
+            for (ClassSummaryEntity cls : groupClasses) {
+                classList.append(String.format("- %s (%s, %d methods, %d lines)\n",
+                        cls.getFqn(), cls.getLayer(), cls.getTotalMethods() != null ? cls.getTotalMethods() : 0,
+                        cls.getLineCount() != null ? cls.getLineCount() : 0));
+            }
+
+            String prompt = "模块: " + groupName + "\n项目: " + project.getName() + "\n\n类列表:\n" + classList;
+
+            AiRequest req = new AiRequest();
+            req.setPrompt(prompt);
+            req.setSystemPrompt(systemPrompt);
+            req.setTemperature(0.3);
+            req.setMaxTokens(1024);
+
+            AiResponse resp = self.callAiWithResilience(req);
+            if (resp != null) {
+                chunkResults.add("## " + groupName + "\n\n" + resp.getContent());
+                log.info("Chunk analysis done: group={}, tokens={}", groupName, resp.getTokensUsed());
+            } else {
+                log.warn("Chunk analysis failed for group={}, skipping", groupName);
+            }
+        }
+
+        if (chunkResults.isEmpty()) {
+            return null;
+        }
+
+        // Phase 2: 全局汇总
+        StringBuilder combinedChunks = new StringBuilder();
+        for (int i = 0; i < chunkResults.size(); i++) {
+            combinedChunks.append(chunkResults.get(i)).append("\n\n");
+        }
+
+        String summaryPrompt = "以下是项目 **" + project.getName() + "** 的 " + chunkResults.size()
+                + " 个模块分析结果。请将这些分片结果合并为一份完整的架构叙事报告，包含：\n"
+                + "1. 项目整体概述\n2. 分层架构与各层职责\n3. 核心链路\n4. 问题与改进建议\n\n---\n\n"
+                + combinedChunks;
+
+        AiRequest summaryReq = new AiRequest();
+        summaryReq.setPrompt(summaryPrompt);
+        summaryReq.setSystemPrompt("你是一位资深软件架构师。请整合以下模块分析结果，生成一份专业的架构叙事报告。使用中文。");
+        summaryReq.setTemperature(0.3);
+        summaryReq.setMaxTokens(4096);
+
+        AiResponse summaryResp = self.callAiWithResilience(summaryReq);
+        if (summaryResp != null) {
+            log.info("Chunking summary completed: groups={}, tokens={}", chunkResults.size(), summaryResp.getTokensUsed());
+            return summaryResp.getContent();
+        }
+        // 汇总失败则返回分片结果的直接拼接
+        log.warn("Chunking summary failed, returning raw merged chunks");
+        return combinedChunks.toString();
+    }
+
+    private String buildMetadataSimple(Project project, ScanRecord scan, List<ClassSummaryEntity> classes,
+                                        long totalTokens, long totalLatency) {
+        Map<String, Object> meta = new HashMap<>();
+        meta.put("tokensUsed", totalTokens);
+        meta.put("latencyMs", totalLatency);
+        meta.put("classCount", classes.size());
+        meta.put("totalLines", scan.getTotalLines());
+        meta.put("chunked", classes.size() > MAX_CLASSES_PER_CHUNK);
+        try {
+            return OBJECT_MAPPER.writeValueAsString(meta);
+        } catch (JsonProcessingException e) {
+            return "{}";
+        }
+    }
+
+    private BigDecimal calculateConfidenceSimple(String content, List<ClassSummaryEntity> classes) {
+        if (content == null || content.isEmpty()) {
+            return BigDecimal.valueOf(0.50);
+        }
+        double score = 0.55;
+        Set<String> projectClassNames = classes.stream()
+                .map(ClassSummaryEntity::getSimpleName)
+                .collect(Collectors.toSet());
+        long matchedClasses = projectClassNames.stream().filter(name -> content.contains(name)).count();
+        if (matchedClasses >= 8) score += 0.20;
+        else if (matchedClasses >= 4) score += 0.14;
+        else if (matchedClasses >= 1) score += 0.08;
+        if (content.length() > 1500) score += 0.12;
+        else if (content.length() > 600) score += 0.06;
+        String lower = content.toLowerCase();
+        if (lower.contains("不确定") || lower.contains("无法确定") || lower.contains("unsure")
+                || lower.contains("cannot determine") || lower.contains("可能"))
+            score -= 0.10;
+        if (lower.contains("分层") || lower.contains("依赖") || lower.contains("耦合")
+                || lower.contains("设计模式") || lower.contains("架构"))
+            score += 0.05;
+        double clamped = Math.max(0.50, Math.min(0.95, score));
+        return BigDecimal.valueOf(Math.round(clamped * 100.0) / 100.0);
+    }
+
+    /**
      * 异步写入 AI 审计日志，不阻塞主流程。
      */
     @Async("auditExecutor")
     public void saveAiAuditLog(String model, String stage, Long projectId, Long userId,
-                                long totalTokens, long completionTokens, long latencyMs,
-                                long estimatedTokens, String errorMessage, boolean success) {
+                                long promptTokens, long completionTokens,
+                                long totalTokens, long latencyMs,
+                                String errorMessage, boolean success) {
         try {
             AiAuditLogEntity logEntity = new AiAuditLogEntity();
             logEntity.setModel(model);
             logEntity.setStage(stage);
             logEntity.setProjectId(projectId);
             logEntity.setUserId(userId);
-            logEntity.setTotalTokens((int) totalTokens);
+            logEntity.setPromptTokens((int) promptTokens);
             logEntity.setCompletionTokens((int) completionTokens);
+            logEntity.setTotalTokens((int) totalTokens);
             logEntity.setLatencyMs((int) latencyMs);
             logEntity.setSuccess(success);
             logEntity.setErrorMessage(errorMessage);

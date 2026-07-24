@@ -11,6 +11,7 @@ import com.codeatlas.server.service.MapService;
 import com.codeatlas.server.service.Neo4jGraphService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 
 import java.util.Collections;
@@ -32,6 +33,7 @@ public class MapServiceImpl implements MapService {
     }
 
     @Override
+    @Cacheable(value = "mapData", key = "#projectId", unless = "#result == null")
     public GraphVO getProjectMap(Long projectId, Long userId) {
         Project project = projectMapper.findById(projectId);
         if (project == null) {
@@ -60,6 +62,34 @@ public class MapServiceImpl implements MapService {
         empty.setNodes(Collections.emptyList());
         empty.setEdges(Collections.emptyList());
         return empty;
+    }
+
+    @Override
+    public GraphVO getProjectMapPaged(Long projectId, String level, int page, int size, Long userId) {
+        Project project = projectMapper.findById(projectId);
+        if (project == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND, "项目不存在");
+        }
+
+        ScanRecord latestScan = scanMapper.findLatestByProjectId(projectId);
+        if (latestScan == null || !"COMPLETED".equals(latestScan.getStatus())) {
+            GraphVO empty = new GraphVO();
+            empty.setNodes(Collections.emptyList());
+            empty.setEdges(Collections.emptyList());
+            return empty;
+        }
+
+        int actualPage = Math.max(1, page);
+        int actualSize = Math.max(10, Math.min(size, 500));
+        try {
+            return neo4jGraphService.queryFullGraphPaged(projectId, level, actualPage, actualSize);
+        } catch (Exception e) {
+            log.warn("Neo4j paged graph query failed: {}", e.getMessage());
+            GraphVO empty = new GraphVO();
+            empty.setNodes(Collections.emptyList());
+            empty.setEdges(Collections.emptyList());
+            return empty;
+        }
     }
 
     @Override

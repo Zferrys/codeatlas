@@ -11,6 +11,11 @@
       <a-empty description="暂无图谱数据，请先触发扫描" />
     </div>
 
+    <!-- 布局计算进度 -->
+    <div v-if="layoutComputing" class="map3d-overlay">
+      <a-spin size="large" :tip="`计算力导向布局... ${layoutProgress}%`" />
+    </div>
+
     <!-- Three.js 画布 -->
     <div v-show="ready" ref="canvasRef" class="map3d-canvas"></div>
 
@@ -86,9 +91,11 @@ const ready = ref(false)
 const searchText = ref('')
 const selectedNode = ref(null)
 const heatmapMode = ref(false)
+const layoutComputing = ref(false)
+const layoutProgress = ref(0)
 
 let scene, camera, renderer, labelRenderer, controls, raycaster
-let nodeMeshes = [], edgeLines = [], nodeLabels = []
+let nodeMeshes = [], edgeLines = [], nodeLabels = [], nodeMeshMap = {}
 let animFrameId = null
 let resizeObserver = null
 
@@ -123,8 +130,29 @@ function getLayerColor(layer) {
   return LAYER_HEX[layer?.toLowerCase()] || LAYER_HEX['unknown']
 }
 
-// ---- 力导向布局 ----
-function forceLayout(nodes, edges, iterations = 80) {
+// ---- 力导向布局 (Web Worker) ----
+function forceLayoutAsync(nodes, edges, iterations = 80) {
+  return new Promise((resolve, reject) => {
+    const worker = new Worker('/workers/force-layout.worker.js')
+    worker.onmessage = (e) => {
+      const { type, positions, iteration, total } = e.data
+      if (type === 'progress') {
+        layoutProgress.value = Math.round((iteration / total) * 100)
+      } else if (type === 'complete') {
+        worker.terminate()
+        resolve(positions)
+      }
+    }
+    worker.onerror = (err) => {
+      worker.terminate()
+      reject(err)
+    }
+    worker.postMessage({ nodes, edges, iterations })
+  })
+}
+
+// Sync fallback for small graphs or when worker fails
+function forceLayoutSync(nodes, edges, iterations = 80) {
   const positions = nodes.map(() => ({
     x: (Math.random() - 0.5) * 20,
     y: (Math.random() - 0.5) * 20,
@@ -132,11 +160,9 @@ function forceLayout(nodes, edges, iterations = 80) {
   }))
   const nodeIdx = {}
   nodes.forEach((n, i) => { nodeIdx[n.id] = i })
-
   const repulsion = 50, springLen = 8, springK = 0.06, damping = 0.85
   for (let iter = 0; iter < iterations; iter++) {
     const forces = positions.map(() => ({ x: 0, y: 0, z: 0 }))
-    // Repulsion between all pairs
     for (let i = 0; i < nodes.length; i++) {
       for (let j = i + 1; j < nodes.length; j++) {
         const dx = positions[i].x - positions[j].x
@@ -149,7 +175,6 @@ function forceLayout(nodes, edges, iterations = 80) {
         forces[j].x -= fx; forces[j].y -= fy; forces[j].z -= fz
       }
     }
-    // Spring attraction along edges
     for (const e of edges) {
       const si = nodeIdx[e.source], ti = nodeIdx[e.target]
       if (si == null || ti == null) continue
@@ -162,7 +187,6 @@ function forceLayout(nodes, edges, iterations = 80) {
       forces[si].x += fx; forces[si].y += fy; forces[si].z += fz
       forces[ti].x -= fx; forces[ti].y -= fy; forces[ti].z -= fz
     }
-    // Apply forces with damping
     for (let i = 0; i < nodes.length; i++) {
       positions[i].x += forces[i].x * damping
       positions[i].y += forces[i].y * damping
@@ -234,15 +258,29 @@ function initScene(container) {
   window.addEventListener('keydown', onKeyDown)
 }
 
-function renderGraph(mapData) {
+async function renderGraph(mapData) {
   clearScene()
 
   const nodes = mapData.nodes || []
   const edges = mapData.edges || []
   if (nodes.length === 0) return
 
-  // Compute layout
-  const layoutPositions = forceLayout(nodes, edges, 80)
+  // Compute layout via Web Worker (fallback to sync for <50 nodes)
+  let layoutPositions
+  try {
+    if (nodes.length >= 50) {
+      layoutComputing.value = true
+      layoutProgress.value = 0
+      layoutPositions = await forceLayoutAsync(nodes, edges, 80)
+    } else {
+      layoutPositions = forceLayoutSync(nodes, edges, 80)
+    }
+  } catch (e) {
+    console.warn('Web Worker layout failed, using sync fallback:', e)
+    layoutPositions = forceLayoutSync(nodes, edges, 40)
+  } finally {
+    layoutComputing.value = false
+  }
 
   // Build dep count lookup
   const depCount = {}
@@ -300,7 +338,8 @@ function renderGraph(mapData) {
 
   // Create edges
   const nodeMap = {}
-  nodeMeshes.forEach(m => { nodeMap[m.userData.id] = m })
+  nodeMeshMap = {}
+  nodeMeshes.forEach(m => { nodeMap[m.userData.id] = m; nodeMeshMap[m.userData.id] = m })
 
   edgeLines = edges.map(e => {
     const src = nodeMap[e.source], tgt = nodeMap[e.target]
@@ -315,10 +354,33 @@ function renderGraph(mapData) {
     return line
   }).filter(Boolean)
 
-  // Animate
+  // Frustum for LOD culling
+  const frustum = new THREE.Frustum()
+  const projScreenMatrix = new THREE.Matrix4()
+
+  // Animate with frustum culling for large graphs
   function animate() {
     animFrameId = requestAnimationFrame(animate)
     controls.update()
+
+    // Frustum culling: only render nodes in the camera view (500+ nodes)
+    if (nodeMeshes.length >= 500) {
+      camera.updateMatrixWorld()
+      projScreenMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse)
+      frustum.setFromProjectionMatrix(projScreenMatrix)
+
+      for (const mesh of nodeMeshes) {
+        mesh.visible = frustum.containsPoint(mesh.position)
+      }
+      // Hide edges connected to invisible nodes
+      for (const line of edgeLines) {
+        if (!line) continue
+        const src = nodeMeshMap[line.userData.source]
+        const tgt = nodeMeshMap[line.userData.target]
+        line.visible = (!src || src.visible) && (!tgt || tgt.visible)
+      }
+    }
+
     renderer.render(scene, camera)
     labelRenderer.render(scene, camera)
   }
@@ -335,7 +397,7 @@ function clearScene() {
   nodeLabels.forEach(l => { if (l.element) l.element.remove() })
   nodeMeshes.forEach(m => scene.remove(m))
   edgeLines.forEach(l => scene.remove(l))
-  nodeMeshes = []; edgeLines = []; nodeLabels = []
+  nodeMeshes = []; edgeLines = []; nodeLabels = []; nodeMeshMap = {}
 }
 
 // ---- 交互 ----

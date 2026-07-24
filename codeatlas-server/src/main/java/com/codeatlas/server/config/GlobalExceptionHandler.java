@@ -3,6 +3,7 @@ package com.codeatlas.server.config;
 import com.codeatlas.common.constant.ErrorCode;
 import com.codeatlas.common.dto.ApiResponse;
 import com.codeatlas.common.exception.BusinessException;
+import com.codeatlas.common.exception.AiException;
 import java.io.IOException;
 
 import org.slf4j.Logger;
@@ -56,6 +57,16 @@ public class GlobalExceptionHandler {
         ApiResponse<Void> response = ApiResponse.error(ErrorCode.BAD_REQUEST.getCode(), "不支持的请求方法: " + e.getMethod());
         response.setTraceId(MDC.get("traceId"));
         return ResponseEntity.status(HttpStatus.METHOD_NOT_ALLOWED).body(response);
+    }
+
+    @ExceptionHandler(AiException.class)
+    public ResponseEntity<ApiResponse<Void>> handleAiException(AiException e) {
+        log.warn("AI exception: code={}, degraded={}, message={}", e.getCode(), e.isDegraded(), e.getMessage());
+        ApiResponse<Void> response = ApiResponse.error(e.getCode(), e.getMessage());
+        response.setTraceId(MDC.get("traceId"));
+        // 降级模式下仍返回 200，表示部分功能不可用但核心功能正常
+        HttpStatus status = e.isDegraded() ? HttpStatus.OK : mapHttpStatus(e.getCode());
+        return ResponseEntity.status(status).body(response);
     }
 
     @ExceptionHandler({IOException.class, AsyncRequestNotUsableException.class})

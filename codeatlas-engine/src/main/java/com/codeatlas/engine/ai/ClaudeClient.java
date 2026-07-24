@@ -202,14 +202,20 @@ public class ClaudeClient implements AiClient {
         }
 
         // usage
+        int promptTokens = 0;
+        int completionTokens = 0;
         JsonNode usage = root.path("usage");
         if (!usage.isMissingNode()) {
-            tokensUsed = usage.path("input_tokens").asInt(0) + usage.path("output_tokens").asInt(0);
+            promptTokens = usage.path("input_tokens").asInt(0);
+            completionTokens = usage.path("output_tokens").asInt(0);
+            tokensUsed = promptTokens + completionTokens;
         }
 
         AiResponse response = new AiResponse();
         response.setContent(content);
         response.setTokensUsed(tokensUsed);
+        response.setPromptTokens(promptTokens);
+        response.setCompletionTokens(completionTokens);
         response.setLatencyMs(latencyMs);
         response.setSources(Collections.emptyList());
         return response;

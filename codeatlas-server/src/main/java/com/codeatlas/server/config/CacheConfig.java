@@ -53,6 +53,12 @@ public class CacheConfig {
                             .serializeValuesWith(RedisSerializationContext.SerializationPair
                                     .fromSerializer(serializer))
                             .entryTtl(Duration.ofMinutes(1)));
+
+            builder.withCacheConfiguration("mapData",
+                    RedisCacheConfiguration.defaultCacheConfig()
+                            .serializeValuesWith(RedisSerializationContext.SerializationPair
+                                    .fromSerializer(serializer))
+                            .entryTtl(Duration.ofMinutes(30)));
         };
     }
 }

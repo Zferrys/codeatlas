@@ -8,6 +8,8 @@ public class AiResponse {
 
     private String content;
     private int tokensUsed;
+    private int promptTokens;
+    private int completionTokens;
     private long latencyMs;
     private List<AiSource> sources;
     private String modelUsed;
@@ -22,6 +24,12 @@ public class AiResponse {
 
     public int getTokensUsed() { return tokensUsed; }
     public void setTokensUsed(int tokensUsed) { this.tokensUsed = tokensUsed; }
+
+    public int getPromptTokens() { return promptTokens; }
+    public void setPromptTokens(int promptTokens) { this.promptTokens = promptTokens; }
+
+    public int getCompletionTokens() { return completionTokens; }
+    public void setCompletionTokens(int completionTokens) { this.completionTokens = completionTokens; }
 
     public long getLatencyMs() { return latencyMs; }
     public void setLatencyMs(long latencyMs) { this.latencyMs = latencyMs; }

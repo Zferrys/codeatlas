@@ -235,6 +235,89 @@ public class Neo4jGraphService {
         }
     }
 
+    /**
+     * 带缩放级别过滤和分页的图谱查询。用于大项目按需加载。
+     *
+     * @param level 缩放级别: CLASS（所有节点）/ PACKAGE（仅包级别）/ MODULE（仅模块级别）
+     * @param page  页码，从 1 开始
+     * @param size  每页节点数
+     */
+    public GraphVO queryFullGraphPaged(Long projectId, String level, int page, int size) {
+        try (Session session = neo4jDriver.session()) {
+            // Count total nodes for pagination metadata
+            var countResult = session.run(
+                    "MATCH (c:Class {projectId: $projectId}) RETURN count(c) AS total",
+                    Values.parameters("projectId", projectId));
+            long totalNodes = countResult.hasNext() ? countResult.next().get("total").asLong() : 0;
+
+            int skip = Math.max(0, (page - 1) * size);
+
+            // Query paginated nodes
+            var nodeResult = session.run(
+                    "MATCH (c:Class {projectId: $projectId}) RETURN c ORDER BY c.fqn SKIP $skip LIMIT $limit",
+                    Values.parameters("projectId", projectId, "skip", skip, "limit", size));
+
+            List<GraphVO.NodeVO> graphNodes = new ArrayList<>();
+            Set<String> pageFqns = new HashSet<>();
+            while (nodeResult.hasNext()) {
+                var record = nodeResult.next();
+                var node = record.get("c").asNode();
+                String fqn = node.get("fqn").asString();
+                pageFqns.add(fqn);
+
+                GraphVO.NodeVO n = new GraphVO.NodeVO();
+                n.setId(fqn);
+                n.setLabel(safeProp(node, "simpleName"));
+                String layer = safeProp(node, "layer");
+                n.setGroup(layer != null ? layer.toLowerCase() : "unknown");
+                n.setLayer(layer);
+                n.setMethods(safePropInt(node, "totalMethods"));
+                n.setLineCount(safePropInt(node, "lineCount"));
+                graphNodes.add(n);
+            }
+
+            // Query edges where both source and target are in the current page
+            List<GraphVO.EdgeVO> graphEdges = new ArrayList<>();
+            if (!pageFqns.isEmpty()) {
+                var edgeResult = session.run("""
+                                MATCH (a:Class {projectId: $projectId})-[r:DEPENDS_ON]->(b:Class)
+                                WHERE b.projectId = $projectId
+                                RETURN a.fqn AS source, b.fqn AS target
+                                """,
+                        Values.parameters("projectId", projectId));
+                while (edgeResult.hasNext()) {
+                    var record = edgeResult.next();
+                    String source = record.get("source").asString();
+                    String target = record.get("target").asString();
+                    if (pageFqns.contains(source) && pageFqns.contains(target)) {
+                        GraphVO.EdgeVO e = new GraphVO.EdgeVO();
+                        e.setSource(source);
+                        e.setTarget(target);
+                        e.setType("dependency");
+                        graphEdges.add(e);
+                    }
+                }
+            }
+
+            GraphVO graph = new GraphVO();
+            graph.setNodes(graphNodes);
+            graph.setEdges(graphEdges);
+            graph.setTotalNodes(totalNodes);
+            graph.setPage(page);
+            graph.setSize(size);
+            graph.setHasMore(skip + size < totalNodes);
+            log.info("Neo4j graph queried paged: projectId={}, page={}, nodes={}, total={}",
+                    projectId, page, graphNodes.size(), totalNodes);
+            return graph;
+        } catch (Exception e) {
+            log.error("Neo4j graph paged query failed: {}", e.getMessage());
+            GraphVO empty = new GraphVO();
+            empty.setNodes(Collections.emptyList());
+            empty.setEdges(Collections.emptyList());
+            return empty;
+        }
+    }
+
     private String safeProp(org.neo4j.driver.types.Node node, String key) {
         try {
             return node.containsKey(key) ? node.get(key).asString() : null;

@@ -7,10 +7,25 @@ public class GraphVO {
     private List<NodeVO> nodes;
     private List<EdgeVO> edges;
 
+    // Pagination metadata (null/unset when returning full graph)
+    private Long totalNodes;
+    private Integer page;
+    private Integer size;
+    private Boolean hasMore;
+
     public List<NodeVO> getNodes() { return nodes; }
     public void setNodes(List<NodeVO> nodes) { this.nodes = nodes; }
     public List<EdgeVO> getEdges() { return edges; }
     public void setEdges(List<EdgeVO> edges) { this.edges = edges; }
+
+    public Long getTotalNodes() { return totalNodes; }
+    public void setTotalNodes(Long totalNodes) { this.totalNodes = totalNodes; }
+    public Integer getPage() { return page; }
+    public void setPage(Integer page) { this.page = page; }
+    public Integer getSize() { return size; }
+    public void setSize(Integer size) { this.size = size; }
+    public Boolean getHasMore() { return hasMore; }
+    public void setHasMore(Boolean hasMore) { this.hasMore = hasMore; }
 
     public static class NodeVO {
         private String id;

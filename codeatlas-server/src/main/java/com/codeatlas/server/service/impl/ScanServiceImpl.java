@@ -23,6 +23,7 @@ import com.codeatlas.engine.rule.RuleEngine;
 import com.codeatlas.engine.rule.ViolationResult;
 import com.codeatlas.server.config.WorkspaceConfig;
 import com.codeatlas.server.service.AiAnalysisService;
+import com.codeatlas.server.service.AlertService;
 import com.codeatlas.server.service.ConstitutionRuleService;
 import com.codeatlas.server.service.Neo4jGraphService;
 import com.codeatlas.server.service.ScanService;
@@ -32,6 +33,7 @@ import io.micrometer.core.annotation.Timed;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.cache.CacheManager;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 
@@ -42,6 +44,7 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
@@ -66,6 +69,8 @@ public class ScanServiceImpl implements ScanService {
     private final ApplicationEventPublisher eventPublisher;
     private final Executor scanExecutor;
     private final WorkspaceConfig workspaceConfig;
+    private final CacheManager cacheManager;
+    private final AlertService alertService;
 
     public ScanServiceImpl(ScanMapper scanMapper, ProjectMapper projectMapper,
                            ClassSummaryMapper classSummaryMapper,
@@ -77,7 +82,9 @@ public class ScanServiceImpl implements ScanService {
                            JavaParserService javaParserService,
                            ApplicationEventPublisher eventPublisher,
                            @Qualifier("scanExecutor") Executor scanExecutor,
-                           WorkspaceConfig workspaceConfig) {
+                           WorkspaceConfig workspaceConfig,
+                           CacheManager cacheManager,
+                           AlertService alertService) {
         this.scanMapper = scanMapper;
         this.projectMapper = projectMapper;
         this.classSummaryMapper = classSummaryMapper;
@@ -90,6 +97,8 @@ public class ScanServiceImpl implements ScanService {
         this.eventPublisher = eventPublisher;
         this.scanExecutor = scanExecutor;
         this.workspaceConfig = workspaceConfig;
+        this.cacheManager = cacheManager;
+        this.alertService = alertService;
     }
 
     @Override
@@ -298,6 +307,8 @@ public class ScanServiceImpl implements ScanService {
         } catch (Exception e) {
             log.error("Scan failed for projectId={}: {}", projectId, e.getMessage());
             errorMessage = e.getMessage();
+            alertService.sendAlert("扫描失败 — " + project.getName(),
+                    "项目 **" + project.getName() + "** (id=" + projectId + ") 扫描失败。\n错误: " + e.getMessage());
             scan.setStatus("FAILED");
             scan.setErrorMessage(errorMessage);
         } finally {
@@ -317,6 +328,13 @@ public class ScanServiceImpl implements ScanService {
         scan.setDurationMs(duration);
         scan.setCompletedAt(LocalDateTime.now());
         scanMapper.updateStats(scan);
+
+        // 驱逐地图缓存，确保下次查询加载最新数据
+        try {
+            Objects.requireNonNull(cacheManager.getCache("mapData")).evict(projectId);
+        } catch (Exception e) {
+            log.debug("Failed to evict mapData cache for projectId={}: {}", projectId, e.getMessage());
+        }
 
         project.setTotalClasses(totalClasses);
         project.setTotalModules(1);

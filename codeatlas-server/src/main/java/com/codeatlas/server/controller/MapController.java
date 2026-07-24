@@ -29,6 +29,17 @@ public class MapController {
         return ApiResponse.success(mapService.getProjectMap(projectId, principal.getUserId()));
     }
 
+    @GetMapping("/paged")
+    @PreAuthorize("isAuthenticated()")
+    @Operation(summary = "获取项目依赖图谱（分页，适合大项目）")
+    public ApiResponse<GraphVO> getProjectMapPaged(@PathVariable Long projectId,
+                                                    @RequestParam(defaultValue = "CLASS") String level,
+                                                    @RequestParam(defaultValue = "1") int page,
+                                                    @RequestParam(defaultValue = "200") int size,
+                                                    @AuthenticationPrincipal CodeAtlasUserDetails principal) {
+        return ApiResponse.success(mapService.getProjectMapPaged(projectId, level, page, size, principal.getUserId()));
+    }
+
     @GetMapping("/graph")
     @PreAuthorize("isAuthenticated()")
     @Operation(summary = "查询类依赖子图（Neo4j 遍历）")
