@@ -14,8 +14,8 @@
   --color-text-tertiary: #999999;
   --color-text-placeholder: #bbbbbb;
 
-  --color-primary: #667eea;
-  --color-primary-hover: #5a6fd6;
+  --color-primary: #1677ff;
+  --color-primary-hover: #0958d9;
   --color-shadow: rgba(0, 0, 0, 0.04);
   --color-shadow-hover: rgba(0, 0, 0, 0.08);
 
@@ -42,8 +42,8 @@
   --color-text-tertiary: #777777;
   --color-text-placeholder: #555555;
 
-  --color-primary: #8899f0;
-  --color-primary-hover: #a0aef5;
+  --color-primary: #4096ff;
+  --color-primary-hover: #69b1ff;
   --color-shadow: rgba(0, 0, 0, 0.3);
   --color-shadow-hover: rgba(0, 0, 0, 0.5);
 
@@ -252,7 +252,7 @@ body {
 
 /* ProjectViolations — 类名标记 */
 [data-theme="dark"] .class-fqn {
-  background: #2a2a4a !important;
+  background: #1a2a40 !important;
   color: var(--color-primary) !important;
 }
 

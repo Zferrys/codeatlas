@@ -198,8 +198,8 @@ async function subscribeScanProgress() {
 
 .class-fqn {
   font-size: 13px;
-  color: #667eea;
-  background: #f5f5ff;
+  color: #1677ff;
+  background: #f0f5ff;
   padding: 1px 6px;
   border-radius: 3px;
 }

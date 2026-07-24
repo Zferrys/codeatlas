@@ -68,6 +68,7 @@
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
+import { CSS2DRenderer, CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js'
 import api from '../../api'
 
 const props = defineProps({
@@ -86,8 +87,8 @@ const searchText = ref('')
 const selectedNode = ref(null)
 const heatmapMode = ref(false)
 
-let scene, camera, renderer, controls, raycaster
-let nodeMeshes = [], edgeLines = []
+let scene, camera, renderer, labelRenderer, controls, raycaster
+let nodeMeshes = [], edgeLines = [], nodeLabels = []
 let animFrameId = null
 let resizeObserver = null
 
@@ -189,6 +190,13 @@ function initScene(container) {
   renderer.shadowMap.enabled = true
   container.appendChild(renderer.domElement)
 
+  labelRenderer = new CSS2DRenderer()
+  labelRenderer.setSize(w, h)
+  labelRenderer.domElement.style.position = 'absolute'
+  labelRenderer.domElement.style.top = '0'
+  labelRenderer.domElement.style.pointerEvents = 'none'
+  container.appendChild(labelRenderer.domElement)
+
   controls = new OrbitControls(camera, renderer.domElement)
   controls.enableDamping = true
   controls.dampingFactor = 0.08
@@ -204,7 +212,7 @@ function initScene(container) {
   const dirLight = new THREE.DirectionalLight(0xffffff, 0.8)
   dirLight.position.set(10, 20, 15)
   scene.add(dirLight)
-  const dirLight2 = new THREE.DirectionalLight(0x667eea, 0.3)
+  const dirLight2 = new THREE.DirectionalLight(0x1677ff, 0.3)
   dirLight2.position.set(-10, -5, -10)
   scene.add(dirLight2)
 
@@ -273,6 +281,20 @@ function renderGraph(mapData) {
     const ring = new THREE.Mesh(ringGeo, ringMat)
     mesh.add(ring)
 
+    // CSS2D label
+    const shortName = (n.label || '').split('.').pop() || n.label
+    const labelDiv = document.createElement('div')
+    labelDiv.textContent = shortName
+    labelDiv.style.color = 'rgba(255,255,255,0.75)'
+    labelDiv.style.fontSize = '10px'
+    labelDiv.style.fontFamily = 'monospace'
+    labelDiv.style.textShadow = '0 0 4px rgba(0,0,0,0.6)'
+    labelDiv.style.whiteSpace = 'nowrap'
+    const label = new CSS2DObject(labelDiv)
+    label.position.set(0, 1.3 * importance, 0)
+    mesh.add(label)
+    nodeLabels.push(label)
+
     return mesh
   })
 
@@ -298,6 +320,7 @@ function renderGraph(mapData) {
     animFrameId = requestAnimationFrame(animate)
     controls.update()
     renderer.render(scene, camera)
+    labelRenderer.render(scene, camera)
   }
   animate()
 }
@@ -309,9 +332,10 @@ function clearScene() {
     m.geometry && m.geometry.dispose(); m.material && m.material.dispose()
   })
   edgeLines.forEach(l => { l.geometry.dispose(); l.material.dispose() })
+  nodeLabels.forEach(l => { if (l.element) l.element.remove() })
   nodeMeshes.forEach(m => scene.remove(m))
   edgeLines.forEach(l => scene.remove(l))
-  nodeMeshes = []; edgeLines = []
+  nodeMeshes = []; edgeLines = []; nodeLabels = []
 }
 
 // ---- 交互 ----
@@ -347,10 +371,13 @@ function highlightNode(mesh) {
     m.material.opacity = isNeighbor ? 1 : 0.12
     m.material.transparent = true
     m.material.emissiveIntensity = isNeighbor ? 0.6 : 0
+    // Thicken related nodes' glow rings
+    m.children.forEach(c => { if (c.isMesh && c.geometry.type === 'TorusGeometry') c.material.opacity = isNeighbor ? 0.7 : 0.08 })
   })
   edgeLines.forEach(l => {
     const connected = l.userData.source === mesh.userData.id || l.userData.target === mesh.userData.id
-    l.material.opacity = connected ? 0.9 : 0.03
+    l.material.color.set(connected ? 0x00e5ff : 0x334466)
+    l.material.opacity = connected ? 1.0 : 0.03
   })
 }
 
@@ -358,10 +385,11 @@ function resetHighlight() {
   nodeMeshes.forEach(m => {
     m.material.opacity = 1
     m.material.transparent = false
-    m.material.emissiveIntensity = 0.2
-    m.material.color.set(m.userData.originalColor)
+    m.material.emissiveIntensity = heatmapMode.value ? 0.2 + (m.userData.lineCount / Math.max(1, ...nodeMeshes.map(n => n.userData.lineCount))) * 0.4 : 0.2
+    if (!heatmapMode.value) m.material.color.set(m.userData.originalColor)
+    m.children.forEach(c => { if (c.isMesh && c.geometry.type === 'TorusGeometry') c.material.opacity = 0.35 })
   })
-  edgeLines.forEach(l => { l.material.opacity = 0.4 })
+  edgeLines.forEach(l => { l.material.color.set(0x334466); l.material.opacity = 0.4 })
 }
 
 function onKeyDown(e) {
@@ -389,17 +417,31 @@ function onSearchSelect(val) {
 function toggleHeatmap(checked) {
   if (checked) {
     const maxLines = Math.max(1, ...nodeMeshes.map(m => m.userData.lineCount))
+    const baseImportance = new Map()
+    nodeMeshes.forEach(m => {
+      baseImportance.set(m.userData.id, m.scale.x)
+    })
     nodeMeshes.forEach(m => {
       const ratio = m.userData.lineCount / maxLines
       const r = ratio < 0.5 ? ratio * 2 : 1
       const g = ratio < 0.5 ? 1 : 2 - ratio * 2
       m.material.color.setRGB(r, g, 0.15)
-      m.material.emissive.setRGB(r * 0.3, g * 0.3, 0.05)
+      m.material.emissive.setRGB(r * 0.4, g * 0.4, 0.08)
+      m.material.emissiveIntensity = 0.2 + ratio * 0.5
+      const heatScale = 0.3 + ratio * 1.7
+      m.scale.setScalar(heatScale)
     })
   } else {
     nodeMeshes.forEach(m => {
       m.material.color.set(m.userData.originalColor)
       m.material.emissive.set(m.userData.originalColor)
+      m.material.emissiveIntensity = 0.2
+    })
+    // Restore original importance-based scale (recalculated from userData)
+    const maxImportance = Math.max(1, ...nodeMeshes.map(m => (m.userData.methods || 1) + (m.userData.depCount || 0) * 1.5))
+    nodeMeshes.forEach(m => {
+      const imp = Math.max(0.4, Math.min(1.8, ((m.userData.methods || 1) + (m.userData.depCount || 0) * 1.5) / 20))
+      m.scale.setScalar(imp)
     })
   }
 }
@@ -430,6 +472,7 @@ onMounted(() => {
     if (!renderer || !canvasRef.value) return
     const w = canvasRef.value.clientWidth, h = canvasRef.value.clientHeight
     renderer.setSize(w, h)
+    if (labelRenderer) labelRenderer.setSize(w, h)
     camera.aspect = w / h
     camera.updateProjectionMatrix()
   })
@@ -445,6 +488,7 @@ watch(() => props.projectId, () => {
 onBeforeUnmount(() => {
   clearScene()
   if (renderer) { renderer.dispose(); renderer = null }
+  if (labelRenderer) { labelRenderer.domElement.remove(); labelRenderer = null }
   if (resizeObserver) { resizeObserver.disconnect(); resizeObserver = null }
   window.removeEventListener('keydown', onKeyDown)
   scene = null; camera = null; controls = null
@@ -508,7 +552,7 @@ onBeforeUnmount(() => {
 .panel-header h4 { color: #fff; margin: 0; font-size: 14px; }
 .info-row { display: flex; justify-content: space-between; align-items: center; margin: 6px 0; font-size: 12px; }
 .info-row span { color: #999; }
-.info-row code { font-size: 10px; color: #667eea; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.info-row code { font-size: 10px; color: #1677ff; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .map3d-hint {
   position: absolute;
   bottom: 16px;

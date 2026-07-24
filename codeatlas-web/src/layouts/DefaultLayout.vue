@@ -1,6 +1,5 @@
 <template>
   <a-layout class="app-layout">
-    <!-- 左侧深色侧边栏 -->
     <a-layout-sider
       v-model:collapsed="collapsed"
       :trigger="null"
@@ -32,48 +31,48 @@
       >
         <a-menu-item key="dashboard">
           <template #icon><DashboardOutlined /></template>
-          <span>工作台</span>
+          <span>{{ $t('nav.workspace') }}</span>
         </a-menu-item>
 
-        <a-menu-item-group v-if="authStore.user?.role === 'ADMIN'" title="管理后台">
+        <a-menu-item-group v-if="authStore.user?.role === 'ADMIN'" :title="$t('nav.admin')">
           <a-menu-item key="admin-users">
             <template #icon><TeamOutlined /></template>
-            <span>用户管理</span>
+            <span>{{ $t('nav.userManagement') }}</span>
           </a-menu-item>
           <a-menu-item key="admin-audit-log">
             <template #icon><AuditOutlined /></template>
-            <span>审计日志</span>
+            <span>{{ $t('nav.auditLog') }}</span>
           </a-menu-item>
         </a-menu-item-group>
 
-        <a-menu-item-group v-if="currentProjectId" title="当前项目">
+        <a-menu-item-group v-if="currentProjectId" :title="$t('nav.currentProject')">
           <a-menu-item key="overview">
             <template #icon><AppstoreOutlined /></template>
-            <span>项目概览</span>
+            <span>{{ $t('nav.overview') }}</span>
           </a-menu-item>
           <a-menu-item key="map">
             <template #icon><AimOutlined /></template>
-            <span>代码地图</span>
+            <span>{{ $t('nav.codeMap') }}</span>
           </a-menu-item>
           <a-menu-item key="story">
             <template #icon><ReadOutlined /></template>
-            <span>架构叙事</span>
+            <span>{{ $t('nav.archStory') }}</span>
           </a-menu-item>
           <a-menu-item key="rules">
             <template #icon><SafetyOutlined /></template>
-            <span>宪法规则</span>
+            <span>{{ $t('nav.rules') }}</span>
           </a-menu-item>
           <a-menu-item key="violations">
             <template #icon><WarningOutlined /></template>
-            <span>违规列表</span>
+            <span>{{ $t('nav.violations') }}</span>
           </a-menu-item>
           <a-menu-item key="insights">
             <template #icon><BulbOutlined /></template>
-            <span>AI 洞察</span>
+            <span>{{ $t('nav.insights') }}</span>
           </a-menu-item>
           <a-menu-item key="settings">
             <template #icon><SettingOutlined /></template>
-            <span>项目设置</span>
+            <span>{{ $t('nav.settings') }}</span>
           </a-menu-item>
         </a-menu-item-group>
       </a-menu>
@@ -83,9 +82,7 @@
       </div>
     </a-layout-sider>
 
-    <!-- 右侧主体 -->
     <a-layout class="app-main">
-      <!-- 顶部栏 -->
       <a-layout-header class="app-header">
         <div class="header-left">
           <MenuFoldOutlined
@@ -107,24 +104,21 @@
         </div>
 
         <div class="header-right">
-          <!-- 全局搜索 -->
-          <a-tooltip title="全局搜索 (Ctrl+K)">
+          <a-tooltip :title="$t('nav.globalSearch')">
             <a-button type="text" class="header-btn search-trigger" @click="showSearch = true">
               <SearchOutlined />
               <span class="search-shortcut">Ctrl+K</span>
             </a-button>
           </a-tooltip>
 
-          <!-- 主题切换 -->
-          <a-tooltip :title="isDark ? '切换亮色主题' : '切换暗色主题'">
+          <a-tooltip :title="isDark ? $t('nav.switchLight') : $t('nav.switchDark')">
             <a-button type="text" class="header-btn" @click="toggleTheme">
               <BulbOutlined />
             </a-button>
           </a-tooltip>
 
-          <!-- 通知 -->
           <a-dropdown :trigger="['click']">
-            <a-tooltip title="通知">
+            <a-tooltip :title="$t('nav.notifications')">
               <a-badge :count="0" :dot="false">
                 <a-button type="text" class="header-btn">
                   <BellOutlined />
@@ -134,28 +128,27 @@
             <template #overlay>
               <a-menu style="width:280px">
                 <div style="padding:12px 16px;border-bottom:1px solid var(--color-border-light)">
-                  <span style="font-weight:600;font-size:14px;color:var(--color-text-primary)">通知</span>
+                  <span style="font-weight:600;font-size:14px;color:var(--color-text-primary)">{{ $t('nav.notifications') }}</span>
                 </div>
                 <div style="padding:24px 16px;text-align:center">
-                  <a-empty description="暂无通知" :image-style="{ height: '40px' }" />
+                  <a-empty :description="$t('nav.noNotifications')" :image-style="{ height: '40px' }" />
                 </div>
               </a-menu>
             </template>
           </a-dropdown>
 
-          <!-- 用户下拉 -->
           <a-dropdown :trigger="['click']">
-            <a-avatar style="background:#667eea;cursor:pointer;margin-left:8px" :size="32">
+            <a-avatar style="background:#1677ff;cursor:pointer;margin-left:8px" :size="32">
               {{ userInitial }}
             </a-avatar>
             <template #overlay>
               <a-menu @click="onUserMenuClick">
                 <a-menu-item key="profile">
-                  <UserOutlined /> 个人信息
+                  <UserOutlined /> {{ $t('nav.profile') }}
                 </a-menu-item>
                 <a-menu-divider />
                 <a-menu-item key="logout" danger>
-                  <LogoutOutlined /> 退出登录
+                  <LogoutOutlined /> {{ $t('nav.logout') }}
                 </a-menu-item>
               </a-menu>
             </template>
@@ -164,12 +157,10 @@
         </div>
       </a-layout-header>
 
-      <!-- 内容区 -->
       <a-layout-content class="app-content">
         <slot />
       </a-layout-content>
 
-      <!-- 全局搜索弹窗 -->
       <a-modal
         v-model:open="showSearch"
         :footer="null"
@@ -183,28 +174,26 @@
             ref="searchInputRef"
             v-model:value="searchQuery"
             size="large"
-            placeholder="搜索项目或类名..."
+            :placeholder="$t('search.placeholder')"
             allow-clear
             @input="onSearchInput"
             @keydown.esc="closeSearch"
           >
             <template #prefix><SearchOutlined /></template>
             <template #suffix>
-              <a-tag color="processing" v-if="searching">搜索中...</a-tag>
+              <a-tag color="processing" v-if="searching">{{ $t('search.searching') }}</a-tag>
             </template>
           </a-input>
 
           <div class="search-results" v-if="searchQuery.trim().length > 0">
-            <!-- 无结果 -->
             <a-empty
               v-if="!searching && searchResults.projects.length === 0 && searchResults.classes.length === 0"
-              description="未找到匹配结果"
+              :description="$t('search.noResults')"
               :image-style="{ height: '40px' }"
             />
 
-            <!-- 项目结果 -->
             <div class="search-group" v-if="searchResults.projects.length > 0">
-              <div class="search-group-title">项目</div>
+              <div class="search-group-title">{{ $t('search.projectGroup') }}</div>
               <div
                 class="search-item"
                 v-for="item in searchResults.projects"
@@ -219,9 +208,8 @@
               </div>
             </div>
 
-            <!-- 类结果 -->
             <div class="search-group" v-if="searchResults.classes.length > 0">
-              <div class="search-group-title">类</div>
+              <div class="search-group-title">{{ $t('search.classGroup') }}</div>
               <div
                 class="search-item"
                 v-for="item in searchResults.classes"
@@ -240,10 +228,9 @@
         </div>
       </a-modal>
 
-      <!-- 全局页脚 -->
       <a-layout-footer class="app-footer">
-        <span>CodeAtlas © 2026 — AI 驱动的代码地图与架构叙事平台</span>
-        <a href="https://github.com/zferrys/codeatlas" target="_blank" style="color:#667eea;margin-left:12px">
+        <span>{{ $t('brand.footer') }}</span>
+        <a href="https://github.com/zferrys/codeatlas" target="_blank" style="color:#1677ff;margin-left:12px">
           <GithubOutlined /> GitHub
         </a>
       </a-layout-footer>
@@ -254,6 +241,7 @@
 <script setup>
 import { ref, reactive, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '../stores/auth'
 import {
   DashboardOutlined, AppstoreOutlined, AimOutlined, ReadOutlined,
@@ -267,12 +255,12 @@ import api from '../api'
 const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
+const { t } = useI18n()
 
 const collapsed = ref(false)
 const isMobile = ref(false)
 const isDark = ref(false)
 
-// 从 localStorage 恢复主题
 function initTheme() {
   const saved = localStorage.getItem('codeatlas_theme')
   if (saved === 'dark') {
@@ -298,33 +286,32 @@ const breadcrumbs = computed(() => {
   const pathParts = route.path.split('/').filter(Boolean)
 
   if (pathParts[0] === 'dashboard') {
-    items.push({ label: '工作台' })
+    items.push({ label: t('nav.workspace') })
   } else if (pathParts[0] === 'admin') {
-    items.push({ label: '工作台', path: '/dashboard' })
-    items.push({ label: '管理后台' })
-    const adminTabMap = { users: '用户管理', 'audit-log': '审计日志' }
+    items.push({ label: t('nav.workspace'), path: '/dashboard' })
+    items.push({ label: t('nav.admin') })
+    const adminTabMap = { users: t('nav.userManagement'), 'audit-log': t('nav.auditLog') }
     if (pathParts.length >= 2) {
       items.push({ label: adminTabMap[pathParts[1]] || pathParts[1] })
     }
   } else if (pathParts[0] === 'project') {
-    items.push({ label: '工作台', path: '/dashboard' })
+    items.push({ label: t('nav.workspace'), path: '/dashboard' })
     if (pathParts.length >= 2) {
-      items.push({ label: `项目 #${pathParts[1]}` })
+      items.push({ label: `Project #${pathParts[1]}` })
     }
     if (pathParts.length >= 3) {
       const tabMap = {
-        overview: '概览', map: '代码地图', story: '架构叙事',
-        rules: '宪法规则', violations: '违规列表', insights: 'AI洞察',
-        settings: '设置'
+        overview: t('nav.overview'), map: t('nav.codeMap'), story: t('nav.archStory'),
+        rules: t('nav.rules'), violations: t('nav.violations'), insights: t('nav.insights'),
+        settings: t('nav.settings')
       }
       items.push({ label: tabMap[pathParts[2]] || pathParts[2] })
     }
   }
 
-  return items.length ? items : [{ label: '工作台' }]
+  return items.length ? items : [{ label: t('nav.workspace') }]
 })
 
-// 同步侧边栏选中项
 watch(() => route.name, (name) => {
   if (!name) return
   if (name === 'Dashboard') {
@@ -372,7 +359,7 @@ function onBreakpoint(broken) {
   if (broken) collapsed.value = true
 }
 
-// ---- 全局搜索 ----
+// ---- Global search ----
 const showSearch = ref(false)
 const searchQuery = ref('')
 const searching = ref(false)
@@ -447,7 +434,6 @@ onBeforeUnmount(() => {
 <style scoped>
 .app-layout { min-height: 100vh; }
 
-/* ---- 侧边栏 ---- */
 .app-sider {
   background: #001529 !important;
   box-shadow: 2px 0 8px rgba(0,0,0,0.15);
@@ -467,7 +453,7 @@ onBeforeUnmount(() => {
   color: #fff;
   text-decoration: none;
 }
-.logo-icon { color: #667eea; display: flex; align-items: center; }
+.logo-icon { color: #1677ff; display: flex; align-items: center; }
 .logo-text { font-size: 18px; font-weight: 700; white-space: nowrap; letter-spacing: 0.5px; }
 .sider-menu { border-right: none; margin-top: 8px; }
 .sider-footer {
@@ -478,7 +464,6 @@ onBeforeUnmount(() => {
 }
 .version-tag { color: rgba(255,255,255,0.3); font-size: 12px; }
 
-/* ---- 顶部栏 ---- */
 .app-main { background: var(--color-bg-body); }
 .app-header {
   background: var(--color-bg-component);
@@ -500,13 +485,11 @@ onBeforeUnmount(() => {
 .header-btn:hover { color: var(--color-primary); }
 .user-name { color: var(--color-text-primary); font-size: 13px; margin-left: 8px; }
 
-/* ---- 内容区 ---- */
 .app-content {
   padding: 20px 24px;
   min-height: calc(100vh - 56px - 48px);
 }
 
-/* ---- 页脚 ---- */
 .app-footer {
   text-align: center;
   height: 48px;
@@ -518,7 +501,6 @@ onBeforeUnmount(() => {
   border-top: 1px solid var(--color-border-light);
 }
 
-/* ---- 全局搜索 ---- */
 .search-trigger {
   display: flex;
   align-items: center;
@@ -612,7 +594,6 @@ onBeforeUnmount(() => {
   text-overflow: ellipsis;
 }
 
-/* ---- 响应式 ---- */
 @media (max-width: 768px) {
   .app-content { padding: 12px; }
   .user-name { display: none; }

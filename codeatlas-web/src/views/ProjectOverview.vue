@@ -61,7 +61,7 @@
                 <polyline
                   :points="trendLinePoints"
                   fill="none"
-                  stroke="#667eea"
+                  stroke="#1677ff"
                   stroke-width="2"
                   stroke-linecap="round"
                   stroke-linejoin="round"
@@ -72,7 +72,7 @@
                   :cx="pt.x"
                   :cy="pt.y"
                   r="3"
-                  fill="#667eea"
+                  fill="#1677ff"
                 />
               </svg>
               <div class="trend-labels">
@@ -287,7 +287,7 @@ function stageStatus(stage) {
 const progressColor = computed(() => {
   if (scanProgress.stage === 'FAILED') return '#ff4d4f'
   if (scanProgress.stage === 'COMPLETED') return '#52c41a'
-  return '#667eea'
+  return '#1677ff'
 })
 
 function statusBadge(status) {
@@ -674,7 +674,7 @@ onBeforeUnmount(cleanupSSE)
 .progress-pct {
   font-size: 18px;
   font-weight: 700;
-  color: #667eea;
+  color: #1677ff;
 }
 
 .progress-msg {

@@ -1,7 +1,6 @@
 <template>
   <div class="profile-page">
     <a-row :gutter="24">
-      <!-- 左侧：用户信息卡片 -->
       <a-col :xs="24" :lg="8">
         <a-card class="profile-card" :bordered="false">
           <div class="profile-avatar-section">
@@ -17,58 +16,57 @@
           <div class="profile-info-list">
             <div class="info-item">
               <MailOutlined class="info-icon" />
-              <span class="info-label">邮箱</span>
-              <span class="info-value">{{ userInfo.email || '未设置' }}</span>
+              <span class="info-label">{{ $t('profile.email') }}</span>
+              <span class="info-value">{{ userInfo.email || $t('profile.notSet') }}</span>
             </div>
             <div class="info-item">
               <IdcardOutlined class="info-icon" />
-              <span class="info-label">用户ID</span>
+              <span class="info-label">{{ $t('profile.userId') }}</span>
               <span class="info-value">#{{ userInfo.id }}</span>
             </div>
             <div class="info-item">
               <CalendarOutlined class="info-icon" />
-              <span class="info-label">注册时间</span>
+              <span class="info-label">{{ $t('profile.registerTime') }}</span>
               <span class="info-value">{{ formatDate(userInfo.createdAt) }}</span>
             </div>
             <div class="info-item">
               <CheckCircleOutlined :class="['info-icon', userInfo.status === 1 ? 'status-active' : 'status-inactive']" />
-              <span class="info-label">状态</span>
+              <span class="info-label">{{ $t('profile.status') }}</span>
               <a-tag :color="userInfo.status === 1 ? 'green' : 'red'" size="small">
-                {{ userInfo.status === 1 ? '正常' : '禁用' }}
+                {{ userInfo.status === 1 ? $t('profile.active') : $t('profile.disabled') }}
               </a-tag>
             </div>
           </div>
         </a-card>
       </a-col>
 
-      <!-- 右侧：操作区 -->
       <a-col :xs="24" :lg="16">
-        <a-card title="账户安全" :bordered="false" class="section-card">
+        <a-card :title="$t('profile.accountSecurity')" :bordered="false" class="section-card">
           <a-list :split="false">
             <a-list-item>
-              <a-list-item-meta title="登录密码" description="定期更换密码保障账户安全" />
-              <a-button @click="showPasswordModal = true">修改密码</a-button>
+              <a-list-item-meta :title="$t('profile.loginPassword')" :description="$t('profile.passwordDesc')" />
+              <a-button @click="showPasswordModal = true">{{ $t('profile.changePassword') }}</a-button>
             </a-list-item>
             <a-list-item>
-              <a-list-item-meta title="邮箱绑定" :description="userInfo.email || '未绑定邮箱'" />
-              <a-button @click="onChangeEmail">更换邮箱</a-button>
+              <a-list-item-meta :title="$t('profile.emailBinding')" :description="userInfo.email || $t('profile.notBound')" />
+              <a-button @click="onChangeEmail">{{ $t('profile.changeEmail') }}</a-button>
             </a-list-item>
           </a-list>
         </a-card>
 
-        <a-card title="偏好设置" :bordered="false" class="section-card" style="margin-top:20px">
+        <a-card :title="$t('profile.preferences')" :bordered="false" class="section-card" style="margin-top:20px">
           <a-list :split="false">
             <a-list-item>
-              <a-list-item-meta title="界面主题" description="切换亮色/暗色模式" />
+              <a-list-item-meta :title="$t('profile.theme')" :description="$t('profile.themeDesc')" />
               <a-switch
                 :checked="isDark"
-                checked-children="暗"
-                un-checked-children="亮"
+                :checked-children="$t('profile.dark')"
+                :un-checked-children="$t('profile.light')"
                 @change="onThemeToggle"
               />
             </a-list-item>
             <a-list-item>
-              <a-list-item-meta title="语言" description="界面显示语言" />
+              <a-list-item-meta :title="$t('profile.language')" :description="$t('profile.languageDesc')" />
               <a-select :value="locale" style="width:120px" @change="onLocaleChange">
                 <a-select-option value="zh-CN">简体中文</a-select-option>
                 <a-select-option value="en-US">English</a-select-option>
@@ -77,29 +75,28 @@
           </a-list>
         </a-card>
 
-        <a-card title="操作日志" :bordered="false" class="section-card" style="margin-top:20px">
-          <a-empty description="暂无操作日志" :image-style="{ height: '60px' }" />
+        <a-card :title="$t('profile.operationLog')" :bordered="false" class="section-card" style="margin-top:20px">
+          <a-empty :description="$t('profile.noOperationLog')" :image-style="{ height: '60px' }" />
         </a-card>
       </a-col>
     </a-row>
 
-    <!-- 修改密码弹窗 -->
     <a-modal
       v-model:open="showPasswordModal"
-      title="修改密码"
+      :title="$t('profile.changePasswordTitle')"
       @ok="handlePasswordChange"
       @cancel="showPasswordModal = false"
       :confirm-loading="passwordLoading"
     >
       <a-form :model="passwordForm" layout="vertical">
-        <a-form-item label="当前密码" required>
-          <a-input-password v-model:value="passwordForm.oldPassword" placeholder="输入当前密码" />
+        <a-form-item :label="$t('profile.oldPassword')" required>
+          <a-input-password v-model:value="passwordForm.oldPassword" :placeholder="$t('profile.passwordPlaceholder')" />
         </a-form-item>
-        <a-form-item label="新密码" required>
-          <a-input-password v-model:value="passwordForm.newPassword" placeholder="至少6位" />
+        <a-form-item :label="$t('profile.newPassword')" required>
+          <a-input-password v-model:value="passwordForm.newPassword" :placeholder="$t('profile.newPasswordPlaceholder')" />
         </a-form-item>
-        <a-form-item label="确认新密码" required>
-          <a-input-password v-model:value="passwordForm.confirmPassword" placeholder="再次输入新密码" />
+        <a-form-item :label="$t('profile.confirmPassword')" required>
+          <a-input-password v-model:value="passwordForm.confirmPassword" :placeholder="$t('profile.confirmPasswordPlaceholder')" />
         </a-form-item>
       </a-form>
     </a-modal>
@@ -108,11 +105,14 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { message } from 'ant-design-vue'
 import {
   MailOutlined, IdcardOutlined, CalendarOutlined, CheckCircleOutlined
 } from '@ant-design/icons-vue'
 import api from '../api'
+
+const { t, locale: i18nLocale } = useI18n()
 
 const userInfo = ref({
   id: 0, username: '', email: '', role: '', avatarUrl: '', createdAt: null, status: 1
@@ -139,8 +139,11 @@ const roleColor = computed(() => {
 })
 
 const roleLabel = computed(() => {
-  const map = { ADMIN: '管理员', ARCHITECT: '架构师', DEVELOPER: '开发者', VIEWER: '观察者' }
-  return map[userInfo.value.role] || userInfo.value.role
+  const role = userInfo.value.role
+  if (!role) return role
+  const key = 'profile.role_' + role.toLowerCase()
+  const translated = t(key)
+  return translated !== key ? translated : role
 })
 
 function formatDate(dateStr) {
@@ -157,13 +160,13 @@ function onThemeToggle(checked) {
 }
 
 function onChangeEmail() {
-  message.info('邮箱修改功能将在后续版本上线')
+  message.info(t('profile.emailComingSoon'))
 }
 
 function onLocaleChange(val) {
   locale.value = val
+  i18nLocale.value = val
   localStorage.setItem('codeatlas_locale', val)
-  message.info('语言切换功能将在后续版本上线')
 }
 
 async function fetchUserInfo() {
@@ -177,15 +180,15 @@ async function fetchUserInfo() {
 
 async function handlePasswordChange() {
   if (!passwordForm.oldPassword || !passwordForm.newPassword) {
-    message.warning('请填写完整信息')
+    message.warning(t('profile.fillAllFields'))
     return
   }
   if (passwordForm.newPassword !== passwordForm.confirmPassword) {
-    message.error('两次输入的新密码不一致')
+    message.error(t('profile.passwordMismatch'))
     return
   }
   if (passwordForm.newPassword.length < 6) {
-    message.warning('新密码至少6位')
+    message.warning(t('profile.passwordTooShort'))
     return
   }
   passwordLoading.value = true
@@ -194,7 +197,7 @@ async function handlePasswordChange() {
       oldPassword: passwordForm.oldPassword,
       newPassword: passwordForm.newPassword
     })
-    message.success('密码修改成功，请重新登录')
+    message.success(t('profile.passwordSuccess'))
     showPasswordModal.value = false
     passwordForm.oldPassword = ''
     passwordForm.newPassword = ''
@@ -229,14 +232,14 @@ onMounted(() => {
 }
 
 .profile-avatar {
-  background: linear-gradient(135deg, #667eea, #764ba2);
+  background: linear-gradient(135deg, #1677ff, #0050b3);
 }
 
 .profile-username {
   margin: 0;
   font-size: 22px;
   font-weight: 600;
-  color: #1a1a2e;
+  color: var(--color-text-primary);
 }
 
 .profile-role-tag {
@@ -267,13 +270,13 @@ onMounted(() => {
 .info-label {
   font-size: 13px;
   color: #999;
-  width: 60px;
+  width: 70px;
   flex-shrink: 0;
 }
 
 .info-value {
   font-size: 14px;
-  color: #333;
+  color: var(--color-text-primary);
   flex: 1;
   text-align: right;
 }

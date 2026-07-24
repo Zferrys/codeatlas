@@ -1,6 +1,5 @@
 <template>
   <div class="auth-layout">
-    <!-- 左侧品牌展示区 -->
     <div class="auth-brand">
       <div class="brand-bg">
         <div class="particle particle-1"></div>
@@ -21,32 +20,31 @@
             <circle cx="12" cy="12" r="1.5" fill="currentColor"/>
           </svg>
         </div>
-        <h1 class="brand-title">CodeAtlas</h1>
-        <p class="brand-desc">AI 驱动的代码地图与架构叙事平台</p>
+        <h1 class="brand-title">{{ $t('brand.title') }}</h1>
+        <p class="brand-desc">{{ $t('brand.desc') }}</p>
         <div class="brand-features">
           <div class="feature-item">
             <span class="feature-dot"></span>
-            <span>3D 代码拓扑可视化</span>
+            <span>{{ $t('brand.feature1') }}</span>
           </div>
           <div class="feature-item">
             <span class="feature-dot"></span>
-            <span>架构宪法自动检查</span>
+            <span>{{ $t('brand.feature2') }}</span>
           </div>
           <div class="feature-item">
             <span class="feature-dot"></span>
-            <span>AI 智能架构洞察</span>
+            <span>{{ $t('brand.feature3') }}</span>
           </div>
         </div>
       </div>
     </div>
 
-    <!-- 右侧表单区 -->
     <div class="auth-form-wrapper">
       <div class="auth-form-card">
         <slot />
       </div>
       <div class="auth-footer">
-        <span>CodeAtlas © 2026</span>
+        <span>{{ $t('brand.copyright') }}</span>
         <a href="https://github.com/zferrys/codeatlas" target="_blank" class="auth-footer-link">GitHub</a>
       </div>
     </div>
@@ -54,7 +52,6 @@
 </template>
 
 <script setup>
-// Pure layout shell — child routes render via <router-view />
 </script>
 
 <style scoped>
@@ -64,10 +61,9 @@
   overflow: hidden;
 }
 
-/* ===== 左侧品牌区 ===== */
 .auth-brand {
   flex: 0 0 480px;
-  background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
+  background: linear-gradient(135deg, #0a1628, #0d2137, #0f2b45);
   position: relative;
   display: flex;
   align-items: center;
@@ -83,17 +79,17 @@
 .particle {
   position: absolute;
   border-radius: 50%;
-  background: rgba(102, 126, 234, 0.3);
+  background: rgba(22, 119, 255, 0.3);
   animation: float 6s ease-in-out infinite;
 }
 .particle-1 { width: 80px; height: 80px; top: 10%; left: 10%; animation-delay: 0s; }
-.particle-2 { width: 40px; height: 40px; top: 20%; right: 15%; animation-delay: 1s; background: rgba(118, 75, 162, 0.3); }
-.particle-3 { width: 60px; height: 60px; bottom: 15%; left: 20%; animation-delay: 2s; background: rgba(102, 126, 234, 0.2); }
+.particle-2 { width: 40px; height: 40px; top: 20%; right: 15%; animation-delay: 1s; background: rgba(0, 80, 179, 0.3); }
+.particle-3 { width: 60px; height: 60px; bottom: 15%; left: 20%; animation-delay: 2s; background: rgba(22, 119, 255, 0.2); }
 .particle-4 { width: 30px; height: 30px; top: 60%; right: 25%; animation-delay: 0.5s; }
-.particle-5 { width: 50px; height: 50px; top: 40%; left: 30%; animation-delay: 1.5s; background: rgba(118, 75, 162, 0.25); }
+.particle-5 { width: 50px; height: 50px; top: 40%; left: 30%; animation-delay: 1.5s; background: rgba(0, 80, 179, 0.25); }
 .particle-6 { width: 20px; height: 20px; bottom: 30%; right: 40%; animation-delay: 2.5s; }
-.particle-7 { width: 70px; height: 70px; top: 70%; left: 50%; animation-delay: 3s; background: rgba(102, 126, 234, 0.15); }
-.particle-8 { width: 35px; height: 35px; top: 15%; left: 60%; animation-delay: 3.5s; background: rgba(118, 75, 162, 0.3); }
+.particle-7 { width: 70px; height: 70px; top: 70%; left: 50%; animation-delay: 3s; background: rgba(22, 119, 255, 0.15); }
+.particle-8 { width: 35px; height: 35px; top: 15%; left: 60%; animation-delay: 3.5s; background: rgba(0, 80, 179, 0.3); }
 
 @keyframes float {
   0%, 100% { transform: translateY(0) scale(1); opacity: 0.6; }
@@ -109,7 +105,7 @@
 }
 
 .brand-logo {
-  color: #667eea;
+  color: #1677ff;
   margin-bottom: 24px;
   display: flex;
   justify-content: center;
@@ -120,7 +116,7 @@
   font-weight: 800;
   letter-spacing: 2px;
   margin: 0 0 12px;
-  background: linear-gradient(135deg, #667eea, #a78bfa);
+  background: linear-gradient(135deg, #1677ff, #69b1ff);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -152,11 +148,10 @@
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #667eea;
+  background: #1677ff;
   flex-shrink: 0;
 }
 
-/* ===== 右侧表单区 ===== */
 .auth-form-wrapper {
   flex: 1;
   display: flex;
@@ -184,11 +179,10 @@
 }
 
 .auth-footer-link {
-  color: #667eea;
+  color: #1677ff;
   text-decoration: none;
 }
 
-/* ===== 响应式 ===== */
 @media (max-width: 900px) {
   .auth-brand {
     display: none;

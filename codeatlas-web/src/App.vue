@@ -1,5 +1,5 @@
 <template>
-  <a-config-provider :theme="antTheme">
+  <a-config-provider :theme="antTheme" :locale="antLocale">
     <ErrorBoundary>
       <AuthLayout v-if="isGuestRoute">
         <router-view />
@@ -15,13 +15,17 @@
 <script setup>
 import { computed, ref, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import DefaultLayout from './layouts/DefaultLayout.vue'
 import AuthLayout from './layouts/AuthLayout.vue'
 import ErrorBoundary from './components/common/ErrorBoundary.vue'
 import defaultAlgorithm from 'ant-design-vue/es/theme/themes/default'
 import darkAlgorithm from 'ant-design-vue/es/theme/themes/dark'
+import antZhCN from 'ant-design-vue/es/locale/zh_CN'
+import antEnUS from 'ant-design-vue/es/locale/en_US'
 
 const route = useRoute()
+const { locale } = useI18n()
 
 const isDark = ref(false)
 let observer = null
@@ -46,6 +50,10 @@ const isAuthRoute = computed(() => route.meta.requiresAuth)
 const antTheme = computed(() => ({
   algorithm: isDark.value ? darkAlgorithm : defaultAlgorithm
 }))
+
+const antLocale = computed(() => {
+  return locale.value === 'en-US' ? antEnUS : antZhCN
+})
 </script>
 
 <style>

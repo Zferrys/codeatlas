@@ -123,7 +123,7 @@
         <div class="impact-paths" v-if="impactResult.impactPaths && impactResult.impactPaths.length > 0">
           <a-tag v-for="(p, i) in impactResult.impactPaths.slice(0, 20)" :key="i" style="margin:2px">
             {{ p.source }} → {{ p.target }}
-            <a-badge :count="p.depth" :number-style="{ backgroundColor: '#667eea' }" style="margin-left:4px" />
+            <a-badge :count="p.depth" :number-style="{ backgroundColor: '#1677ff' }" style="margin-left:4px" />
           </a-tag>
         </div>
         <a-empty v-else description="未发现影响链路" :image-style="{ height: '40px' }" />
@@ -319,7 +319,7 @@ function renderSimpleMd(content) {
 .ai-analysis-box h4 {
   margin: 0 0 8px;
   font-size: 14px;
-  color: #667eea;
+  color: #1677ff;
 }
 .qa-class-info {
   padding: 8px 12px;

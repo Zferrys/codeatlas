@@ -363,7 +363,7 @@ function formatDate(date) {
   padding: 1px 6px;
   border-radius: 3px;
   font-size: 12px;
-  color: #667eea;
+  color: #1677ff;
 }
 
 .insight-content {
@@ -379,7 +379,7 @@ function formatDate(date) {
 .markdown-body :deep(ul), .markdown-body :deep(ol) { padding-left: 20px; }
 .markdown-body :deep(li) { margin: 4px 0; }
 .markdown-body :deep(blockquote) {
-  border-left: 3px solid #667eea;
+  border-left: 3px solid #1677ff;
   padding: 4px 16px;
   margin: 12px 0;
   background: #f8f9ff;
@@ -420,7 +420,7 @@ function formatDate(date) {
   font-weight: 600;
 }
 .markdown-body :deep(a) {
-  color: #667eea;
+  color: #1677ff;
 }
 .markdown-body :deep(img) {
   max-width: 100%;

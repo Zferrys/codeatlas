@@ -157,7 +157,7 @@
             accept=".zip,.tar.gz,.tgz"
           >
             <p class="upload-icon">
-              <InboxOutlined style="font-size:36px;color:#667eea" />
+              <InboxOutlined style="font-size:36px;color:#1677ff" />
             </p>
             <p class="upload-text" v-if="!uploadFile">点击或拖拽 ZIP / TAR.GZ 文件到此处</p>
             <p class="upload-text" v-else style="color:#52c41a">已选择: {{ uploadFile.name }}</p>
@@ -386,7 +386,7 @@ function langColor(lang) {
     Go: 'linear-gradient(135deg, #43e97b, #38f9d7)',
     TypeScript: 'linear-gradient(135deg, #3178c6, #235a97)'
   }
-  return map[lang] || 'linear-gradient(135deg, #667eea, #764ba2)'
+  return map[lang] || 'linear-gradient(135deg, #1677ff, #0050b3)'
 }
 
 function healthColor(score) {
