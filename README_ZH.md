@@ -19,13 +19,13 @@
 
 ## 什么是 CodeAtlas？
 
-上传你的代码（Git URL 或 ZIP 文件）→ CodeAtlas 解析代码、构建依赖图，AI 生成交互式 **3D 代码拓扑图**。像谷歌地球一样探索你的架构，AI 导览为你讲述架构故事。
+上传代码（Git URL 或 ZIP）后，CodeAtlas 自动解析源码、构建依赖图，并通过 AI 生成交互式 **3D 代码拓扑图**。像浏览地图一样探索架构，AI 导览为你讲述架构故事。
 
 ## 为什么选择 CodeAtlas？
 
-| 痛点 | CodeAtlas 解决方案 |
-|------|-------------------|
-| 新成员难以理解代码库 | AI 自动生成代码地图 + 架构故事，10 分钟快速上手 |
+| 痛点 | 解决方案 |
+|------|---------|
+| 新成员难以理解代码库 | AI 自动生成代码地图与架构叙事，10 分钟快速上手 |
 | 技术债务不可见 | AI 检测反模式，在地图上标记为"衰减区域" |
 | 变更影响不可知 | AI 模拟变更的涟漪效应并动画展示 |
 | 架构文档永远过时 | 每次扫描自动更新 |
@@ -43,30 +43,46 @@
 
 ## 快速开始
 
+### 环境要求
+
+- Java 17+
+- Node.js 20+
+- MySQL 5.7+
+- Redis 7+
+- Maven 3.8+
+
+### 启动步骤
+
 ```bash
-# 1. 克隆
-git clone https://github.com/zferrys/codeatlas.git
+# 1. 克隆仓库
+git clone https://github.com/<your-org>/codeatlas.git
 cd codeatlas
 
-# 2. 启动依赖
+# 2. 启动依赖服务
 docker-compose up -d mysql redis
 
 # 3. 配置环境变量
-export DEEPSEEK_API_KEY=your-deepseek-key
-export ANTHROPIC_API_KEY=your-claude-key
-export MYSQL_PASSWORD=your-db-password
-export NEO4J_PASSWORD=your-neo4j-password
+export DEEPSEEK_API_KEY=<your-deepseek-api-key>
+export ANTHROPIC_API_KEY=<your-claude-api-key>
+export MYSQL_PASSWORD=<your-db-password>
+export NEO4J_PASSWORD=<your-neo4j-password>
 export CODEATLAS_JWT_SECRET=$(openssl rand -base64 64)
 
-# 4. 构建并运行
+# 4. 构建并运行后端
 mvn clean package -DskipTests
 java -jar codeatlas-server/target/codeatlas-server.jar
 
-# 5. 打开浏览器
-open http://localhost:8080
+# 5. 启动前端
+cd codeatlas-web
+npm install
+npm run dev
+
+# 6. 打开浏览器
+# 后端 API: http://localhost:8080
+# 前端页面: http://localhost:5173
 ```
 
-默认管理员账号: `admin` / `admin123`
+> 首次启动后请立即修改默认管理员密码。
 
 ## 技术栈
 
@@ -74,15 +90,15 @@ open http://localhost:8080
 |------|------|
 | 后端 | Java 17, Spring Boot 3.3, MyBatis 3, Neo4j, Redis |
 | 前端 | Vue 3, Three.js, G6, Ant Design Vue |
-| AI | Claude API / DeepSeek API（带降级链 + 幻觉检测） |
+| AI | Claude API / DeepSeek API（降级链 + 幻觉检测） |
 | 存储 | MySQL + Neo4j（图）+ Redis（缓存/限流/预算） |
 | DevOps | Docker, GitHub Actions, Prometheus + Grafana |
 
-## 架构
+## 架构流程
 
 ```
 上传代码 → 解析（JavaParser）→ 构建依赖图（Neo4j）
-→ AI 5阶段分析管道 → 生成3D地图 + 架构叙事
+→ AI 多阶段分析管道 → 生成 3D 地图 + 架构叙事
 → 宪法规则检查 → 影响模拟
 ```
 

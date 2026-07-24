@@ -21,13 +21,13 @@
 
 ## What is CodeAtlas?
 
-Upload your code → AI generates an interactive **3D code topology map**. Explore your architecture like Google Earth, with an AI tour guide narrating the architectural story.
+Upload your code (Git URL or ZIP) and CodeAtlas parses the source, builds a dependency graph, and generates an interactive **3D code topology map** powered by AI. Explore your architecture like a map, with an AI tour guide narrating the architectural story.
 
 ## Why CodeAtlas?
 
-| Pain Point | CodeAtlas Solution |
-|-----------|-------------------|
-| New developers struggle to understand the codebase | AI auto-generates a code map + architecture story — understand in 10 minutes |
+| Pain Point | Solution |
+|-----------|----------|
+| New developers struggle to understand the codebase | AI generates a code map + architecture story — understand in 10 minutes |
 | Technical debt is invisible | AI detects anti-patterns, highlighted as "decay zones" on the map |
 | Change impact is unknown | AI simulates impact ripple effects with animation |
 | Architecture docs are always outdated | Auto-updates after every scan |
@@ -57,15 +57,18 @@ Upload your code → AI generates an interactive **3D code topology map**. Explo
 
 ```bash
 # 1. Clone
-git clone https://github.com/zferrys/codeatlas.git
+git clone https://github.com/<your-org>/codeatlas.git
 cd codeatlas
 
 # 2. Start dependencies
 docker-compose up -d mysql redis
 
-# 3. Configure AI API keys
-export DEEPSEEK_API_KEY=your-deepseek-key
-export CLAUDE_API_KEY=your-claude-key
+# 3. Configure environment variables
+export DEEPSEEK_API_KEY=<your-deepseek-api-key>
+export ANTHROPIC_API_KEY=<your-claude-api-key>
+export MYSQL_PASSWORD=<your-db-password>
+export NEO4J_PASSWORD=<your-neo4j-password>
+export CODEATLAS_JWT_SECRET=$(openssl rand -base64 64)
 
 # 4. Build & Run backend
 mvn clean package -DskipTests
@@ -77,26 +80,28 @@ npm install
 npm run dev
 
 # 6. Open browser
-open http://localhost:5173
+# Backend API: http://localhost:8080
+# Frontend: http://localhost:5173
 ```
 
-Default admin account: `admin` / `admin123`
+> Change the default admin password immediately after first login.
 
 ## Tech Stack
 
 | Layer | Technology |
 |-------|-----------|
-| Backend | Java 17, Spring Boot 3.3, MyBatis, Neo4j, Redis |
-| Frontend | Vue 3, Ant Design Vue 4, G6, Three.js |
-| AI | Claude API / DeepSeek API with Resilience4j circuit breaker |
-| Storage | MySQL 5.7 + Neo4j + Redis |
-| DevOps | Docker, GitHub Actions |
+| Backend | Java 17, Spring Boot 3.3, MyBatis 3, Neo4j, Redis |
+| Frontend | Vue 3, Three.js, G6, Ant Design Vue |
+| AI | Claude API / DeepSeek API with fallback chain & hallucination detection |
+| Storage | MySQL + Neo4j (graph) + Redis (cache/rate-limit/budget) |
+| DevOps | Docker, GitHub Actions, Prometheus + Grafana |
 
-## Architecture
+## Architecture Flow
 
 ```
 Upload Code → Parse (JavaParser) → Build Dependency Graph (Neo4j)
-→ AI Multi-Stage Analysis Pipeline → Generate Map + Architecture Story
+→ AI Multi-Stage Analysis Pipeline → Generate 3D Map + Architecture Story
+→ Constitution Rule Check → Impact Simulation
 ```
 
 ## Project Structure
