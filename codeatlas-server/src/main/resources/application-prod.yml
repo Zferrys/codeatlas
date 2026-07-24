@@ -8,17 +8,109 @@
 knife4j:
   enable: false
 
-# ---- Actuator（生产环境仅暴露 health） ----
+# ---- Actuator ----
 management:
   endpoints:
     web:
       exposure:
-        include: health
+        include: health,info,metrics,prometheus
   endpoint:
     health:
-      show-details: never
+      show-details: when-authorized
+      probes:
+        enabled: true
+  health:
+    neo4j:
+      enabled: false
+  metrics:
+    export:
+      prometheus:
+        enabled: true
+    tags:
+      application: codeatlas
 
-# ---- MyBatis SQL 日志（生产环境关闭） ----
+# ---- MyBatis（生产环境关闭 SQL 日志） ----
 mybatis:
   configuration:
     log-impl: org.apache.ibatis.logging.nologging.NoLoggingImpl
+
+# ---- 数据源连接池（生产环境调大） ----
+spring:
+  datasource:
+    hikari:
+      maximum-pool-size: 50
+      minimum-idle: 10
+      idle-timeout: 600000
+      connection-timeout: 10000
+      max-lifetime: 1800000
+      leak-detection-threshold: 60000
+
+  # ---- Redis（生产环境连接池） ----
+  redis:
+    timeout: 5000ms
+    lettuce:
+      pool:
+        max-active: 16
+        max-idle: 16
+        min-idle: 4
+
+# ---- CodeAtlas 业务配置 ----
+codeatlas:
+  ai:
+    primary: claude
+  analysis:
+    max-file-size: 10485760
+    max-project-size: 524288000
+    timeout-minutes: 30
+    max-concurrent-scans: 5
+  security:
+    jwt:
+      expiration-hours: 8
+    rate-limit:
+      enabled: true
+      default-rps: 20
+  alert:
+    webhook-url: "${CODEATLAS_ALERT_WEBHOOK_URL:}"
+  workspace:
+    dir: ./codeatlas-workspace
+    retention-hours: 24
+    cleanup-interval-ms: 3600000
+
+# ---- Resilience4j（生产环境更保守的重试/熔断） ----
+resilience4j:
+  circuitbreaker:
+    configs:
+      default:
+        sliding-window-size: 20
+        failure-rate-threshold: 40
+        wait-duration-in-open-state: 60s
+        permitted-number-of-calls-in-half-open-state: 5
+    instances:
+      aiClient:
+        base-config: default
+        minimum-number-of-calls: 10
+  retry:
+    configs:
+      default:
+        max-attempts: 3
+        wait-duration: 2s
+        exponential-backoff-multiplier: 2
+    instances:
+      aiClient:
+        base-config: default
+  bulkhead:
+    configs:
+      default:
+        max-concurrent-calls: 5
+        max-wait-duration: 30s
+    instances:
+      aiClient:
+        base-config: default
+
+# ---- 日志 ----
+logging:
+  level:
+    root: INFO
+    com.codeatlas: INFO
+    org.springframework.security: WARN
+    org.springframework.context.support.PostProcessorRegistrationDelegate: ERROR

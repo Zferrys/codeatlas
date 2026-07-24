@@ -5,6 +5,7 @@ import com.codeatlas.engine.ai.AiClient;
 import com.codeatlas.engine.ai.AiRequest;
 import com.codeatlas.engine.ai.AiResponse;
 import com.codeatlas.engine.ai.PromptTemplate;
+import com.codeatlas.server.config.CodeAtlasMetrics;
 import com.codeatlas.server.config.TokenBudgetManager;
 import com.codeatlas.server.entity.AiAuditLogEntity;
 import com.codeatlas.server.entity.ClassSummaryEntity;
@@ -52,6 +53,7 @@ public class AiAnalysisService {
     private final HallucinationChecker hallucinationChecker;
     private final AlertService alertService;
     private final TokenBudgetManager tokenBudgetManager;
+    private final CodeAtlasMetrics metrics;
 
     @Lazy
     @Autowired
@@ -63,6 +65,7 @@ public class AiAnalysisService {
                               HallucinationChecker hallucinationChecker,
                               AlertService alertService,
                               TokenBudgetManager tokenBudgetManager,
+                              CodeAtlasMetrics metrics,
                               @Autowired(required = false) AiClient aiClient) {
         this.projectMapper = projectMapper;
         this.scanMapper = scanMapper;
@@ -72,6 +75,7 @@ public class AiAnalysisService {
         this.hallucinationChecker = hallucinationChecker;
         this.alertService = alertService;
         this.tokenBudgetManager = tokenBudgetManager;
+        this.metrics = metrics;
         this.aiClient = aiClient;
         if (aiClient != null) {
             log.info("AiAnalysisService initialized with AI client: {}", aiClient.getModelName());
@@ -225,6 +229,12 @@ public class AiAnalysisService {
         if (response.getLatencyMs() <= 0) {
             response.setLatencyMs(System.currentTimeMillis() - start);
         }
+        metrics.recordAiCall();
+        int tokens = response.getTokensUsed() > 0 ? response.getTokensUsed()
+                : response.getPromptTokens() + response.getCompletionTokens();
+        if (tokens > 0) {
+            metrics.recordAiTokensConsumed(tokens);
+        }
         return response;
     }
 
@@ -233,6 +243,7 @@ public class AiAnalysisService {
      */
     public AiResponse aiFallback(AiRequest request, Exception e) {
         log.warn("AI call fallback: circuit breaker open or retries exhausted: {}", e.getMessage());
+        metrics.recordAiCallFailed();
         alertService.sendAlert("AI 模型全部不可用",
                 "所有 AI 模型（Claude/DeepSeek）均已熔断或重试耗尽，后续分析请求将全部失败。\n错误: " + e.getMessage());
         return null;

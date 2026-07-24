@@ -29,4 +29,4 @@ COPY --from=backend-builder /app/codeatlas-server/target/*.jar app.jar
 USER codeatlas
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 CMD curl -f http://localhost:8080/actuator/health || exit 1
-ENTRYPOINT ["/sbin/tini", "--", "java", "-Xms512m", "-Xmx2g", "-XX:+UseG1GC", "-jar", "app.jar"]
+ENTRYPOINT ["/sbin/tini", "--", "java", "-Xms512m", "-Xmx2g", "-XX:+UseG1GC", "-Dspring.profiles.active=prod", "-jar", "app.jar"]

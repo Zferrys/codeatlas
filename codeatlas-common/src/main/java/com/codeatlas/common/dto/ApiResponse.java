@@ -2,6 +2,7 @@ package com.codeatlas.common.dto;
 
 import com.codeatlas.common.constant.ErrorCode;
 import com.fasterxml.jackson.annotation.JsonInclude;
+import org.slf4j.MDC;
 
 /**
  * 统一 API 响应包装。
@@ -24,6 +25,7 @@ public class ApiResponse<T> {
         r.code = ErrorCode.SUCCESS.getCode();
         r.message = "success";
         r.data = data;
+        r.traceId = MDC.get("traceId");
         return r;
     }
 
@@ -35,6 +37,7 @@ public class ApiResponse<T> {
         ApiResponse<T> r = new ApiResponse<>();
         r.code = code;
         r.message = message;
+        r.traceId = MDC.get("traceId");
         return r;
     }
 

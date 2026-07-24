@@ -21,6 +21,7 @@ import com.codeatlas.common.dto.PageResult;
 import com.codeatlas.engine.rule.RuleDefinition;
 import com.codeatlas.engine.rule.RuleEngine;
 import com.codeatlas.engine.rule.ViolationResult;
+import com.codeatlas.server.config.CodeAtlasMetrics;
 import com.codeatlas.server.config.WorkspaceConfig;
 import com.codeatlas.server.service.AiAnalysisService;
 import com.codeatlas.server.service.AlertService;
@@ -71,6 +72,7 @@ public class ScanServiceImpl implements ScanService {
     private final WorkspaceConfig workspaceConfig;
     private final CacheManager cacheManager;
     private final AlertService alertService;
+    private final CodeAtlasMetrics metrics;
 
     public ScanServiceImpl(ScanMapper scanMapper, ProjectMapper projectMapper,
                            ClassSummaryMapper classSummaryMapper,
@@ -84,7 +86,8 @@ public class ScanServiceImpl implements ScanService {
                            @Qualifier("scanExecutor") Executor scanExecutor,
                            WorkspaceConfig workspaceConfig,
                            CacheManager cacheManager,
-                           AlertService alertService) {
+                           AlertService alertService,
+                           CodeAtlasMetrics metrics) {
         this.scanMapper = scanMapper;
         this.projectMapper = projectMapper;
         this.classSummaryMapper = classSummaryMapper;
@@ -99,6 +102,7 @@ public class ScanServiceImpl implements ScanService {
         this.workspaceConfig = workspaceConfig;
         this.cacheManager = cacheManager;
         this.alertService = alertService;
+        this.metrics = metrics;
     }
 
     @Override
@@ -144,6 +148,8 @@ public class ScanServiceImpl implements ScanService {
         scan.setStatus("RUNNING");
         scan.setStartedAt(LocalDateTime.now());
         scanMapper.insert(scan);
+
+        metrics.recordScanTriggered();
 
         // 异步执行扫描，让 POST 立即返回，前端通过 SSE 获取实时进度
         final boolean isIncremental = incremental;
@@ -346,6 +352,12 @@ public class ScanServiceImpl implements ScanService {
         if ("COMPLETED".equals(scan.getStatus()) && totalClasses > 0) {
             emitProgress(projectId, scan.getId(), "AI", 80, "开始 AI 架构分析...");
             aiAnalysisService.triggerAsync(projectId, scan.getId());
+        }
+
+        if ("COMPLETED".equals(scan.getStatus())) {
+            metrics.recordScanCompleted(duration);
+        } else {
+            metrics.recordScanFailed();
         }
 
         emitProgress(projectId, scan.getId(),
