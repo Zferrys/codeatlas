@@ -55,7 +55,7 @@ codeatlas:
         temperature: 0.3
       deepseek:
         base-url: https://api.deepseek.com
-        model: deepseek-chat
+        model: deepseek-v4-pro
         max-tokens: 4096
         temperature: 0.3
   analysis:

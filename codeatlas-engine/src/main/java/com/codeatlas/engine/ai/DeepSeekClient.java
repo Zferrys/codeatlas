@@ -22,7 +22,7 @@ public class DeepSeekClient implements AiClient {
     private static final Logger log = LoggerFactory.getLogger(DeepSeekClient.class);
 
     private static final String DEFAULT_API_URL = "https://api.deepseek.com/v1/chat/completions";
-    private static final String DEFAULT_MODEL = "deepseek-chat";
+    private static final String DEFAULT_MODEL = "deepseek-v4-pro";
 
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
     private static final MediaType JSON_MEDIA_TYPE = MediaType.parse("application/json; charset=utf-8");
