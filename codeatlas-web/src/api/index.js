@@ -1,5 +1,6 @@
 import axios from 'axios'
 import { message } from 'ant-design-vue'
+import { report } from '../utils/errorReporter'
 
 const api = axios.create({
   baseURL: '/api/v1',
@@ -27,6 +28,15 @@ api.interceptors.response.use(
   response => response,
   error => {
     const { response } = error
+    if (response && response.status >= 400) {
+      report({
+        type: 'api_error',
+        url: error.config?.url,
+        status: response.status,
+        traceId: response.headers?.['x-trace-id'],
+        timestamp: Date.now()
+      })
+    }
     if (response) {
       const { status, data } = response
       switch (status) {

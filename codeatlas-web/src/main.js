@@ -7,6 +7,7 @@ import App from './App.vue'
 import Antd from 'ant-design-vue'
 import 'ant-design-vue/dist/reset.css'
 import './styles/theme.css'
+import './utils/errorReporter'
 
 const app = createApp(App)
 

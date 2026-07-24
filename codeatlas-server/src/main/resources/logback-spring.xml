@@ -25,7 +25,7 @@
             </timeBasedFileNamingAndTriggeringPolicy>
         </rollingPolicy>
         <encoder>
-            <pattern>${LOG_PATTERN}</pattern>
+            <pattern>${LOG_PATTERN_MASK}</pattern>
             <charset>UTF-8</charset>
         </encoder>
     </appender>
@@ -41,7 +41,7 @@
             <maxHistory>90</maxHistory>
         </rollingPolicy>
         <encoder>
-            <pattern>${LOG_PATTERN}</pattern>
+            <pattern>${LOG_PATTERN_MASK}</pattern>
             <charset>UTF-8</charset>
         </encoder>
     </appender>
