@@ -13,8 +13,8 @@ spring:
   # ---- DataSource / MySQL ----
   datasource:
     url: jdbc:mysql://127.0.0.1:3306/codeatlas?useUnicode=true&characterEncoding=UTF-8&useSSL=false&serverTimezone=Asia/Shanghai
-    username: root
-    password: zph  # 生产环境请用 jasypt 加密: mvn jasypt:encrypt-value -Djasypt.encryptor.password=MASTER_KEY -Djasypt.plugin.value=zph
+    username: "${DB_USERNAME:root}"
+    password: "${DB_PASSWORD:}"
     driver-class-name: com.mysql.cj.jdbc.Driver
     hikari:
       maximum-pool-size: 20
@@ -37,7 +37,7 @@ spring:
     uri: "${NEO4J_URI:bolt://localhost:7687}"
     authentication:
       username: "${NEO4J_USERNAME:neo4j}"
-      password: "${NEO4J_PASSWORD:1978738217}"
+      password: "${NEO4J_PASSWORD:}"
 
   # ---- Redis ----
   redis:
@@ -116,7 +116,7 @@ codeatlas:
   security:
     jwt:
       secret: "${CODEATLAS_JWT_SECRET:}"
-      expiration-hours: 24
+      expiration-hours: 4
     rate-limit:
       enabled: true
       default-rps: 10

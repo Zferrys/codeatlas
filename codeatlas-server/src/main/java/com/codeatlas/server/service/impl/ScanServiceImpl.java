@@ -71,6 +71,8 @@ public class ScanServiceImpl implements ScanService {
                            AiAnalysisService aiAnalysisService,
                            ConstitutionRuleService constitutionRuleService,
                            Neo4jGraphService neo4jGraphService,
+                           GitService gitService,
+                           JavaParserService javaParserService,
                            ApplicationEventPublisher eventPublisher,
                            @Qualifier("scanExecutor") Executor scanExecutor) {
         this.scanMapper = scanMapper;
@@ -80,8 +82,8 @@ public class ScanServiceImpl implements ScanService {
         this.aiAnalysisService = aiAnalysisService;
         this.constitutionRuleService = constitutionRuleService;
         this.neo4jGraphService = neo4jGraphService;
-        this.gitService = new GitService();
-        this.javaParserService = new JavaParserService();
+        this.gitService = gitService;
+        this.javaParserService = javaParserService;
         this.eventPublisher = eventPublisher;
         this.scanExecutor = scanExecutor;
     }

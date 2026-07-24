@@ -41,6 +41,12 @@ public interface ProjectMapper {
             + "ORDER BY updated_at DESC LIMIT #{limit}")
     List<Project> searchByName(@Param("keyword") String keyword, @Param("limit") int limit);
 
+    @Select("SELECT p.* FROM project p JOIN project_member pm ON pm.project_id = p.id "
+            + "WHERE pm.user_id = #{userId} AND p.name LIKE CONCAT('%', #{keyword}, '%') "
+            + "ORDER BY p.updated_at DESC LIMIT #{limit}")
+    List<Project> searchByNameForUser(@Param("keyword") String keyword, @Param("limit") int limit,
+                                       @Param("userId") Long userId);
+
     @Delete("DELETE FROM project WHERE id = #{id}")
     int deleteById(Long id);
 }

@@ -23,13 +23,9 @@ public class UserDetailsServiceImpl implements UserDetailsService {
     @Override
     public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
         User user = userMapper.findByUsername(username);
-        if (user == null) {
-            log.warn("User not found: {}", username);
-            throw new UsernameNotFoundException("用户不存在: " + username);
-        }
-        if (user.getStatus() == null || user.getStatus() == 0) {
-            log.warn("User disabled: {}", username);
-            throw new UsernameNotFoundException("用户已被禁用: " + username);
+        if (user == null || user.getStatus() == null || user.getStatus() == 0) {
+            log.warn("Login failed for username: {}", username);
+            throw new UsernameNotFoundException("用户名或密码错误");
         }
         return new CodeAtlasUserDetails(user.getId(), user.getUsername(), user.getRole());
     }

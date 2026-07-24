@@ -32,18 +32,10 @@ public class SearchServiceImpl implements SearchService {
             return result;
         }
 
-        List<Project> userProjects = projectMapper.findByUserId(userId);
-        Set<Long> userProjectIds = userProjects.stream()
-                .map(Project::getId)
-                .collect(Collectors.toSet());
-
         if ("all".equals(type) || "project".equals(type)) {
-            List<Project> projects = projectMapper.searchByName(q, 20);
+            List<Project> projects = projectMapper.searchByNameForUser(q, 20, userId);
             List<Map<String, Object>> projectList = new ArrayList<>();
             for (Project p : projects) {
-                if (!userProjectIds.contains(p.getId())) {
-                    continue;
-                }
                 Map<String, Object> item = new LinkedHashMap<>();
                 item.put("id", p.getId());
                 item.put("name", p.getName());
@@ -55,12 +47,22 @@ public class SearchServiceImpl implements SearchService {
         }
 
         if ("all".equals(type) || "class".equals(type)) {
-            List<ClassSummaryEntity> classes = classSummaryMapper.searchByKeyword(q, 20);
+            // 只搜索用户有权限的项目中的类
+            List<Project> userProjects = projectMapper.findByUserId(userId);
+            Set<Long> userProjectIds = userProjects.stream()
+                    .map(Project::getId)
+                    .collect(Collectors.toSet());
+            if (userProjectIds.isEmpty()) {
+                result.put("classes", Collections.emptyList());
+                return result;
+            }
+            List<ClassSummaryEntity> classes = classSummaryMapper.searchByKeyword(q, 100);
             List<Map<String, Object>> classList = new ArrayList<>();
             for (ClassSummaryEntity c : classes) {
                 if (!userProjectIds.contains(c.getProjectId())) {
                     continue;
                 }
+                if (classList.size() >= 20) break;
                 Map<String, Object> item = new LinkedHashMap<>();
                 item.put("id", c.getId());
                 item.put("fqn", c.getFqn());

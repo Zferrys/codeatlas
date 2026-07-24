@@ -43,7 +43,7 @@ class UserServiceImplTest {
     @DisplayName("注册成功返回 token")
     void shouldRegisterSuccessfully() {
         when(userMapper.countByUsername("newuser")).thenReturn(0);
-        when(passwordEncoder.encode("123456")).thenReturn("hashed_pw");
+        when(passwordEncoder.encode("Test@1234")).thenReturn("hashed_pw");
 
         // 模拟 MyBatis 自动设置主键
         doAnswer(invocation -> {
@@ -55,7 +55,7 @@ class UserServiceImplTest {
         when(jwtTokenProvider.generateToken(eq(10L), eq("newuser"), eq("DEVELOPER")))
                 .thenReturn("jwt_token_xxx");
 
-        Map<String, Object> result = userService.register("newuser", "123456", "test@test.com");
+        Map<String, Object> result = userService.register("newuser", "Test@1234", "test@test.com");
 
         assertEquals("jwt_token_xxx", result.get("token"));
         assertEquals("newuser", result.get("username"));
@@ -67,7 +67,7 @@ class UserServiceImplTest {
     @DisplayName("用户名太短抛异常")
     void shouldRejectShortUsername() {
         assertThrows(BusinessException.class,
-                () -> userService.register("ab", "123456", null));
+                () -> userService.register("ab", "Test@1234", null));
     }
 
     @Test
@@ -76,16 +76,16 @@ class UserServiceImplTest {
         when(userMapper.countByUsername("exist")).thenReturn(1);
 
         assertThrows(BusinessException.class,
-                () -> userService.register("exist", "123456", null));
+                () -> userService.register("exist", "Test@1234", null));
     }
 
     @Test
-    @DisplayName("密码太短抛异常")
+    @DisplayName("密码强度不足抛异常")
     void shouldRejectWeakPassword() {
         when(userMapper.countByUsername("test")).thenReturn(0);
 
         assertThrows(BusinessException.class,
-                () -> userService.register("test", "12345", null));
+                () -> userService.register("test", "12345678", null));
     }
 
     // ========== login ==========

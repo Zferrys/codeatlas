@@ -19,11 +19,7 @@ public class ClassServiceImpl implements ClassService {
 
     @Override
     public Map<String, Object> getClassDetail(Long projectId, String fqn) {
-        List<ClassSummaryEntity> all = classSummaryMapper.findByProjectId(projectId);
-        ClassSummaryEntity target = all.stream()
-                .filter(c -> fqn.equals(c.getFqn()))
-                .findFirst()
-                .orElse(null);
+        ClassSummaryEntity target = classSummaryMapper.findByProjectIdAndFqn(projectId, fqn);
         if (target == null) {
             return null;
         }

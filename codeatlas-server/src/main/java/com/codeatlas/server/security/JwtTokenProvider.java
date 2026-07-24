@@ -30,9 +30,9 @@ public class JwtTokenProvider {
         }
         byte[] keyBytes = secret.getBytes(StandardCharsets.UTF_8);
         if (keyBytes.length < 32) {
-            byte[] padded = new byte[32];
-            System.arraycopy(keyBytes, 0, padded, 0, Math.min(keyBytes.length, 32));
-            keyBytes = padded;
+            throw new IllegalStateException(
+                    "JWT secret too short: requires at least 32 bytes (256 bits), got " + keyBytes.length
+                            + " bytes. Set CODEATLAS_JWT_SECRET with a strong random key.");
         }
         this.secretKey = Keys.hmacShaKeyFor(keyBytes);
         this.expirationMs = expirationHours * 3600 * 1000;

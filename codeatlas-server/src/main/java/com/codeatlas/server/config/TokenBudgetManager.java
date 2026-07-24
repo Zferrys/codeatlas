@@ -4,10 +4,12 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
+import java.util.Collections;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -23,11 +25,29 @@ public class TokenBudgetManager {
 
     private static final long MONTHLY_TOKEN_BUDGET = 10_000_000L; // 1000 万 token/月
 
+    /** Lua 脚本：原子性地递增预算计数器，超限时回退 */
+    private static final String TRY_CONSUME_SCRIPT =
+            "local used = redis.call('INCRBY', KEYS[1], ARGV[1]) " +
+            "if used == tonumber(ARGV[1]) then " +
+            "    redis.call('EXPIRE', KEYS[1], ARGV[2]) " +
+            "end " +
+            "if used > tonumber(ARGV[3]) then " +
+            "    redis.call('DECRBY', KEYS[1], ARGV[1]) " +
+            "    return 0 " +
+            "end " +
+            "return 1";
+
     @Autowired(required = false)
     private StringRedisTemplate redisTemplate;
 
+    private final DefaultRedisScript<Long> tryConsumeScript;
+
+    public TokenBudgetManager() {
+        this.tryConsumeScript = new DefaultRedisScript<>(TRY_CONSUME_SCRIPT, Long.class);
+    }
+
     /**
-     * 消费前检查预算。返回 false 表示预算已耗尽。
+     * 消费前检查预算（Lua 脚本保证原子性）。返回 false 表示预算已耗尽。
      */
     public boolean tryConsume(long estimatedTokens) {
         if (redisTemplate == null) {
@@ -35,20 +55,18 @@ public class TokenBudgetManager {
         }
         try {
             String monthKey = "ai:budget:" + LocalDate.now().format(MONTH_FMT) + ":tokens";
-            Long used = redisTemplate.opsForValue().increment(monthKey, estimatedTokens);
-            if (used == null) {
+            Long result = redisTemplate.execute(
+                    tryConsumeScript,
+                    Collections.singletonList(monthKey),
+                    String.valueOf(estimatedTokens),        // ARGV[1]: tokens to add
+                    String.valueOf(TimeUnit.DAYS.toSeconds(40)), // ARGV[2]: TTL
+                    String.valueOf(MONTHLY_TOKEN_BUDGET)    // ARGV[3]: budget cap
+            );
+            if (result == null || result == 1) {
                 return true;
             }
-            // 首次使用时设置过期（下月自动清零）
-            if (used == estimatedTokens) {
-                redisTemplate.expire(monthKey, 40, TimeUnit.DAYS);
-            }
-            if (used > MONTHLY_TOKEN_BUDGET) {
-                redisTemplate.opsForValue().decrement(monthKey, estimatedTokens);
-                log.warn("AI token monthly budget exceeded: used={}, budget={}", used, MONTHLY_TOKEN_BUDGET);
-                return false;
-            }
-            return true;
+            log.warn("AI token monthly budget exceeded: budget={}", MONTHLY_TOKEN_BUDGET);
+            return false;
         } catch (Exception e) {
             log.warn("Token budget check failed (Redis error): {}", e.getMessage());
             return true; // Redis 异常时不拦截

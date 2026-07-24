@@ -22,7 +22,10 @@ public class RateLimitInterceptor implements HandlerInterceptor {
     private static final Logger log = LoggerFactory.getLogger(RateLimitInterceptor.class);
 
     /** key → 请求时间戳队列（Redis 不可用时的降级方案） */
-    private static final Map<String, ConcurrentLinkedDeque<Long>> WINDOWS = new ConcurrentHashMap<>();
+    private final Map<String, ConcurrentLinkedDeque<Long>> windows;
+    /** 上次清理时间 */
+    private volatile long lastCleanupTime = System.currentTimeMillis();
+    private static final long CLEANUP_INTERVAL_MS = 300_000; // 5 分钟清理一次
 
     /** 每个窗口允许的最大请求数 */
     private final int maxRequests;
@@ -43,6 +46,7 @@ public class RateLimitInterceptor implements HandlerInterceptor {
         this.maxRequests = maxRequestsPerMinute;
         this.windowMs = 60_000L;
         this.redisRateLimiter = redisRateLimiter;
+        this.windows = new ConcurrentHashMap<>();
         this.rateLimitCounter = Counter.builder("ratelimit.hit.total")
                 .description("Total rate limit hits")
                 .tag("source", redisRateLimiter != null ? "redis" : "memory")
@@ -70,9 +74,15 @@ public class RateLimitInterceptor implements HandlerInterceptor {
 
         // 降级：内存滑动窗口限流
         long now = System.currentTimeMillis();
-        long cutoff = now - windowMs;
 
-        ConcurrentLinkedDeque<Long> timestamps = WINDOWS.computeIfAbsent(
+        // 定期清理过期的 key，防止内存泄漏
+        if (now - lastCleanupTime > CLEANUP_INTERVAL_MS) {
+            cleanupStaleWindows(now);
+            lastCleanupTime = now;
+        }
+
+        long cutoff = now - windowMs;
+        ConcurrentLinkedDeque<Long> timestamps = windows.computeIfAbsent(
                 key, k -> new ConcurrentLinkedDeque<>());
 
         // 清理过期时间戳
@@ -122,5 +132,16 @@ public class RateLimitInterceptor implements HandlerInterceptor {
 
     private String normalizePath(String path) {
         return path.replaceAll("/\\d+", "/{id}");
+    }
+
+    private void cleanupStaleWindows(long now) {
+        long cutoff = now - windowMs * 2; // 保留最近两个窗口的 key
+        windows.entrySet().removeIf(entry -> {
+            ConcurrentLinkedDeque<Long> q = entry.getValue();
+            while (!q.isEmpty() && q.peekFirst() < cutoff) {
+                q.pollFirst();
+            }
+            return q.isEmpty();
+        });
     }
 }

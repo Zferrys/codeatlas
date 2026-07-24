@@ -222,7 +222,7 @@ public class AiAnalysisService {
         return deps.size();
     }
 
-    private List<String> parseDeps(String json) {
+    List<String> parseDeps(String json) {
         if (json == null || json.isEmpty() || "[]".equals(json)) return Collections.emptyList();
         try {
             return OBJECT_MAPPER.readValue(json, new com.fasterxml.jackson.core.type.TypeReference<List<String>>() {});
@@ -231,7 +231,7 @@ public class AiAnalysisService {
         }
     }
 
-    private String shorten(String fqn) {
+    String shorten(String fqn) {
         int idx = fqn.lastIndexOf('.');
         return idx > 0 ? fqn.substring(idx + 1) : fqn;
     }

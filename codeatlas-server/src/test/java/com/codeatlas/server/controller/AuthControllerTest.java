@@ -90,11 +90,11 @@ class AuthControllerTest {
         regResult.put("token", "jwt_token");
         regResult.put("username", "newuser");
 
-        when(userService.register(eq("newuser"), eq("123456"), any())).thenReturn(regResult);
+        when(userService.register(eq("newuser"), eq("Test@12345"), any())).thenReturn(regResult);
 
         Map<String, String> body = new HashMap<>();
         body.put("username", "newuser");
-        body.put("password", "123456");
+        body.put("password", "Test@12345");
         body.put("email", "new@test.com");
 
         mockMvc.perform(post("/api/v1/auth/register")

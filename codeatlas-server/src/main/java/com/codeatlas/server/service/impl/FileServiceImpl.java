@@ -45,7 +45,7 @@ public class FileServiceImpl implements FileService {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "无法获取文件名");
         }
 
-        // 文件类型白名单检查
+        // 文件类型白名单检查（扩展名）
         String lowerName = originalName.toLowerCase();
         boolean allowed = false;
         for (String ext : ALLOWED_EXTENSIONS) {
@@ -57,6 +57,21 @@ public class FileServiceImpl implements FileService {
         if (!allowed) {
             throw new BusinessException(ErrorCode.BAD_REQUEST,
                     "不支持的文件类型，仅允许 .zip 和 .tar.gz");
+        }
+
+        // 魔数校验：确保文件内容与实际类型匹配
+        if (lowerName.endsWith(".zip")) {
+            byte[] magic = new byte[4];
+            try (InputStream is = file.getInputStream()) {
+                int read = is.read(magic);
+                if (read < 4 || !isZipMagic(magic)) {
+                    throw new BusinessException(ErrorCode.BAD_REQUEST, "文件内容不是有效的 ZIP 格式");
+                }
+            } catch (BusinessException e) {
+                throw e;
+            } catch (IOException e) {
+                throw new BusinessException(ErrorCode.BAD_REQUEST, "无法读取文件内容");
+            }
         }
 
         // 文件大小检查
@@ -131,6 +146,11 @@ public class FileServiceImpl implements FileService {
                 zis.closeEntry();
             }
         }
+    }
+
+    private boolean isZipMagic(byte[] magic) {
+        return magic.length >= 4
+                && magic[0] == 0x50 && magic[1] == 0x4B; // PK signature
     }
 
     /**

@@ -23,7 +23,7 @@ public class Neo4jGraphService {
     }
 
     /**
-     * 批量导入扫描产生的类节点和依赖关系到 Neo4j。
+     * 批量导入扫描产生的类节点和依赖关系到 Neo4j。使用 UNWIND 批量操作，避免 N+1 问题。
      */
     public void importGraph(Long projectId, List<ClassSummaryResult> classes) {
         try (Session session = neo4jDriver.session()) {
@@ -31,54 +31,68 @@ public class Neo4jGraphService {
             session.run("MATCH (c:Class {projectId: $projectId}) DETACH DELETE c",
                     Values.parameters("projectId", projectId));
 
-            // 2. 批量创建类节点
-            for (ClassSummaryResult cls : classes) {
-                session.run("""
-                                MERGE (c:Class {fqn: $fqn})
-                                SET c.projectId = $projectId,
-                                    c.simpleName = $simpleName,
-                                    c.packageName = $packageName,
-                                    c.layer = $layer,
-                                    c.classType = $classType,
-                                    c.publicMethods = $publicMethods,
-                                    c.totalMethods = $totalMethods,
-                                    c.lineCount = $lineCount
-                                """,
-                        Values.parameters(
-                                "fqn", cls.getFqn(),
-                                "projectId", projectId,
-                                "simpleName", cls.getSimpleName(),
-                                "packageName", cls.getPackageName(),
-                                "layer", cls.getLayer(),
-                                "classType", cls.getClassType(),
-                                "publicMethods", cls.getPublicMethods(),
-                                "totalMethods", cls.getTotalMethods(),
-                                "lineCount", cls.getLineCount()
-                        ));
+            if (classes.isEmpty()) {
+                return;
             }
+
+            // 2. 使用 UNWIND 批量创建类节点（单次 Cypher 调用）
+            List<Map<String, Object>> nodeParams = new ArrayList<>();
+            for (ClassSummaryResult cls : classes) {
+                Map<String, Object> props = new HashMap<>();
+                props.put("fqn", cls.getFqn());
+                props.put("projectId", projectId);
+                props.put("simpleName", cls.getSimpleName());
+                props.put("packageName", cls.getPackageName());
+                props.put("layer", cls.getLayer());
+                props.put("classType", cls.getClassType());
+                props.put("publicMethods", cls.getPublicMethods());
+                props.put("totalMethods", cls.getTotalMethods());
+                props.put("lineCount", cls.getLineCount());
+                nodeParams.add(props);
+            }
+            session.run("""
+                            UNWIND $nodes AS node
+                            MERGE (c:Class {fqn: node.fqn})
+                            SET c.projectId = node.projectId,
+                                c.simpleName = node.simpleName,
+                                c.packageName = node.packageName,
+                                c.layer = node.layer,
+                                c.classType = node.classType,
+                                c.publicMethods = node.publicMethods,
+                                c.totalMethods = node.totalMethods,
+                                c.lineCount = node.lineCount
+                            """,
+                    Values.parameters("nodes", nodeParams));
             log.info("Neo4j: {} class nodes created for projectId={}", classes.size(), projectId);
 
-            // 3. 批量创建 DEPENDS_ON 关系
+            // 3. 使用 UNWIND 批量创建 DEPENDS_ON 关系（单次 Cypher 调用）
             Set<String> fqnSet = new HashSet<>();
             for (ClassSummaryResult cls : classes) {
                 fqnSet.add(cls.getFqn());
             }
 
-            int edgeCount = 0;
+            List<Map<String, Object>> edgeParams = new ArrayList<>();
             for (ClassSummaryResult cls : classes) {
                 for (String dep : cls.getDependencies()) {
                     if (dep != null && fqnSet.contains(dep)) {
-                        session.run("""
-                                        MATCH (a:Class {fqn: $source})
-                                        MATCH (b:Class {fqn: $target})
-                                        MERGE (a)-[:DEPENDS_ON]->(b)
-                                        """,
-                                Values.parameters("source", cls.getFqn(), "target", dep));
-                        edgeCount++;
+                        Map<String, Object> edge = new HashMap<>();
+                        edge.put("source", cls.getFqn());
+                        edge.put("target", dep);
+                        edgeParams.add(edge);
                     }
                 }
             }
-            log.info("Neo4j: {} DEPENDS_ON edges created for projectId={}", edgeCount, projectId);
+
+            if (!edgeParams.isEmpty()) {
+                session.run("""
+                                UNWIND $edges AS edge
+                                MATCH (a:Class {fqn: edge.source})
+                                MATCH (b:Class {fqn: edge.target})
+                                MERGE (a)-[:DEPENDS_ON]->(b)
+                                """,
+                        Values.parameters("edges", edgeParams));
+            }
+            log.info("Neo4j: {} DEPENDS_ON edges created for projectId={}", edgeParams.size(), projectId);
         } catch (Exception e) {
             log.error("Neo4j import failed for projectId={}: {}", projectId, e.getMessage());
         }

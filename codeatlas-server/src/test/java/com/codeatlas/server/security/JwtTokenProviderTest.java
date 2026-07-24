@@ -64,11 +64,9 @@ class JwtTokenProviderTest {
     }
 
     @Test
-    @DisplayName("短密钥自动补全到 32 字节")
-    void shouldPadShortKey() {
-        JwtTokenProvider provider = new JwtTokenProvider("short", EXPIRATION_HOURS);
-        String token = provider.generateToken(1L, "test", "DEVELOPER");
-        assertTrue(provider.validateToken(token));
+    @DisplayName("短密钥抛异常（需至少 32 字节）")
+    void shouldRejectShortKey() {
+        assertThrows(IllegalStateException.class, () -> new JwtTokenProvider("short", EXPIRATION_HOURS));
     }
 
     @Test

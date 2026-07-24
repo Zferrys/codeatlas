@@ -134,6 +134,7 @@ public class ProjectServiceImpl implements ProjectService {
         if (project == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND, "项目不存在");
         }
+        checkProjectAccess(project, userId, "查看");
         long scanCount = scanMapper.countByProjectId(projectId);
         long insightCount = insightMapper.countByProjectId(projectId);
         return toVO(project, (int) scanCount, (int) insightCount);
@@ -171,6 +172,7 @@ public class ProjectServiceImpl implements ProjectService {
         if (project == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND, "项目不存在");
         }
+        checkProjectAccess(project, userId, "修改");
         if (!StringUtils.hasText(name)) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "项目名称不能为空");
         }
@@ -181,6 +183,19 @@ public class ProjectServiceImpl implements ProjectService {
         long scanCount = scanMapper.countByProjectId(projectId);
         long insightCount = insightMapper.countByProjectId(projectId);
         return toVO(project, (int) scanCount, (int) insightCount);
+    }
+
+    /**
+     * 校验用户是否有权限访问项目：创建者、项目成员或管理员可访问。
+     */
+    private void checkProjectAccess(Project project, Long userId, String action) {
+        if (userId.equals(project.getCreatedBy())) return;
+        ProjectMember member = projectMemberMapper.findByProjectAndUser(project.getId(), userId);
+        if (member != null) return;
+        User user = userMapper.findById(userId);
+        if (user != null && "ADMIN".equals(user.getRole())) return;
+        throw new BusinessException(ErrorCode.FORBIDDEN,
+                "无权" + action + "该项目，仅项目创建者、成员或管理员可操作");
     }
 
     @Override

@@ -1,5 +1,7 @@
 package com.codeatlas.server.security;
 
+import com.codeatlas.server.entity.User;
+import com.codeatlas.server.mapper.UserMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -21,9 +23,11 @@ public class JwtAuthFilter extends OncePerRequestFilter {
     private static final String BEARER_PREFIX = "Bearer ";
 
     private final JwtTokenProvider jwtTokenProvider;
+    private final UserMapper userMapper;
 
-    public JwtAuthFilter(JwtTokenProvider jwtTokenProvider) {
+    public JwtAuthFilter(JwtTokenProvider jwtTokenProvider, UserMapper userMapper) {
         this.jwtTokenProvider = jwtTokenProvider;
+        this.userMapper = userMapper;
     }
 
     @Override
@@ -36,6 +40,18 @@ public class JwtAuthFilter extends OncePerRequestFilter {
             Long userId = jwtTokenProvider.getUserId(token);
             String username = jwtTokenProvider.getUsername(token);
             String role = jwtTokenProvider.getRole(token);
+
+            // 检查用户是否被禁用
+            User user = userMapper.findById(userId);
+            if (user == null || user.getStatus() == null || user.getStatus() == 0) {
+                log.debug("JWT rejected: user {} is disabled or deleted", userId);
+                filterChain.doFilter(request, response);
+                return;
+            }
+            // 同步 role 变更（管理员可能已更新角色）
+            if (user.getRole() != null && !user.getRole().equals(role)) {
+                role = user.getRole();
+            }
 
             CodeAtlasUserDetails userDetails = new CodeAtlasUserDetails(userId, username, role);
             UsernamePasswordAuthenticationToken authentication =

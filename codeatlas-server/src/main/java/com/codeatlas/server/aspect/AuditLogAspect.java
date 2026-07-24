@@ -3,7 +3,7 @@ package com.codeatlas.server.aspect;
 import com.codeatlas.server.annotation.AuditLog;
 import com.codeatlas.server.entity.AuditLogEntity;
 import com.codeatlas.server.entity.User;
-import com.codeatlas.server.mapper.AuditLogMapper;
+import com.codeatlas.server.config.AsyncAuditLogWriter;
 import com.codeatlas.server.mapper.UserMapper;
 import com.codeatlas.server.security.CodeAtlasUserDetails;
 import org.aspectj.lang.ProceedingJoinPoint;
@@ -33,11 +33,11 @@ public class AuditLogAspect {
     private static final ExpressionParser SPEL_PARSER = new SpelExpressionParser();
     private static final DefaultParameterNameDiscoverer PARAM_DISCOVERER = new DefaultParameterNameDiscoverer();
 
-    private final AuditLogMapper auditLogMapper;
+    private final AsyncAuditLogWriter auditLogWriter;
     private final UserMapper userMapper;
 
-    public AuditLogAspect(AuditLogMapper auditLogMapper, UserMapper userMapper) {
-        this.auditLogMapper = auditLogMapper;
+    public AuditLogAspect(AsyncAuditLogWriter auditLogWriter, UserMapper userMapper) {
+        this.auditLogWriter = auditLogWriter;
         this.userMapper = userMapper;
     }
 
@@ -93,7 +93,7 @@ public class AuditLogAspect {
                 entity.setUserAgent(attrs.getRequest().getHeader("User-Agent"));
             }
 
-            auditLogMapper.insert(entity);
+            auditLogWriter.write(entity);
         } catch (Exception e) {
             log.warn("Failed to write audit log: {}", e.getMessage());
         }
