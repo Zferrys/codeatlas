@@ -191,3 +191,287 @@ body {
 [data-theme="dark"] .ant-statistic-content {
   color: var(--color-text-primary);
 }
+
+/* ---- 视图级卡片/容器暗色覆盖 ---- */
+/* Vue scoped 样式的 data-v-* 属性比类选择器优先级高，需使用 !important */
+
+/* ProjectOverview — 所有卡片 */
+[data-theme="dark"] .health-card,
+[data-theme="dark"] .dim-card,
+[data-theme="dark"] .trend-card,
+[data-theme="dark"] .section-card {
+  background: var(--color-bg-component) !important;
+  box-shadow: 0 1px 4px var(--color-shadow) !important;
+}
+
+/* ProjectOverview — 卡片标题 & 数值 */
+[data-theme="dark"] .card-label,
+[data-theme="dark"] .card-title,
+[data-theme="dark"] .health-value {
+  color: var(--color-text-primary) !important;
+}
+
+[data-theme="dark"] .card-total,
+[data-theme="dark"] .card-count,
+[data-theme="dark"] .health-unit,
+[data-theme="dark"] .dim-label,
+[data-theme="dark"] .layer-name,
+[data-theme="dark"] .layer-count,
+[data-theme="dark"] .progress-stage,
+[data-theme="dark"] .progress-msg,
+[data-theme="dark"] .trend-label-item {
+  color: var(--color-text-secondary) !important;
+}
+
+[data-theme="dark"] .dim-value {
+  color: var(--color-primary) !important;
+}
+
+/* ProjectOverview — 扫描进度卡片 */
+[data-theme="dark"] .scan-progress-card {
+  background: var(--color-bg-input) !important;
+  border-color: var(--color-border) !important;
+}
+
+[data-theme="dark"] .progress-pct {
+  color: var(--color-primary) !important;
+}
+
+/* ProjectOverview — 层分布条背景 */
+[data-theme="dark"] .layer-bar-track {
+  background: var(--color-bg-input) !important;
+}
+
+/* ProjectViolations / ProjectRules / ProjectSettings — 通用卡片 */
+[data-theme="dark"] .violations-card,
+[data-theme="dark"] .rules-card,
+[data-theme="dark"] .settings-card {
+  background: var(--color-bg-component) !important;
+  box-shadow: 0 1px 4px var(--color-shadow) !important;
+}
+
+/* ProjectViolations — 类名标记 */
+[data-theme="dark"] .class-fqn {
+  background: #2a2a4a !important;
+  color: var(--color-primary) !important;
+}
+
+[data-theme="dark"] .class-fqn-full {
+  color: var(--color-text-tertiary) !important;
+}
+
+/* ProjectRules — 禁用规则 */
+[data-theme="dark"] .rule-name.disabled {
+  color: var(--color-text-tertiary) !important;
+}
+
+/* ProjectStory — 内容区 */
+[data-theme="dark"] .story-content {
+  background: var(--color-bg-component) !important;
+}
+
+[data-theme="dark"] .markdown-body {
+  color: var(--color-text-primary) !important;
+}
+
+[data-theme="dark"] .markdown-body h1 {
+  border-bottom-color: var(--color-border) !important;
+}
+
+[data-theme="dark"] .markdown-body code {
+  background: var(--color-bg-input) !important;
+}
+
+[data-theme="dark"] .markdown-body pre {
+  background: var(--color-bg-input) !important;
+}
+
+[data-theme="dark"] .markdown-body blockquote {
+  color: var(--color-text-secondary) !important;
+  background: var(--color-bg-input) !important;
+}
+
+[data-theme="dark"] .markdown-body th {
+  background: var(--color-bg-input) !important;
+}
+
+[data-theme="dark"] .markdown-body th,
+[data-theme="dark"] .markdown-body td {
+  border-color: var(--color-border) !important;
+}
+
+/* CodeMap 2D/3D — 地图容器 */
+[data-theme="dark"] .map-container {
+  background: var(--color-bg-component) !important;
+}
+
+/* Dashboard — 统计卡片中的图标背景、错误提示等 */
+[data-theme="dark"] .danger-zone {
+  background: #2a1f1f !important;
+  border-color: #5c1a1a !important;
+}
+
+/* 通用 — 被 scoped 覆盖的硬编码文本色 */
+[data-theme="dark"] .app-main h1,
+[data-theme="dark"] .app-main h2,
+[data-theme="dark"] .app-main h3,
+[data-theme="dark"] .app-main h4,
+[data-theme="dark"] .app-main h5,
+[data-theme="dark"] .app-main h6 {
+  color: var(--color-text-primary);
+}
+
+/* 通用 — scoped 样式中硬编码的 #999 辅助文本 */
+[data-theme="dark"] .app-main [class*="-sub"],
+[data-theme="dark"] .app-main [class*="-hint"],
+[data-theme="dark"] .app-main [class*="-meta"],
+[data-theme="dark"] .app-main [class*="-desc"] {
+  color: var(--color-text-secondary);
+}
+
+/* ProjectInsights — 工具栏计数 */
+[data-theme="dark"] .insight-count,
+[data-theme="dark"] .confidence-label,
+[data-theme="dark"] .insight-time {
+  color: var(--color-text-tertiary) !important;
+}
+
+[data-theme="dark"] .insight-preview {
+  color: var(--color-text-secondary) !important;
+}
+
+/* ProjectInsights — 置信度条 */
+[data-theme="dark"] .confidence-bar-track {
+  background: var(--color-bg-input) !important;
+}
+
+/* ProjectInsights — 详情弹窗 */
+[data-theme="dark"] .insight-meta {
+  border-bottom-color: var(--color-border) !important;
+  color: var(--color-text-tertiary) !important;
+}
+
+[data-theme="dark"] .insight-meta code {
+  background: var(--color-bg-input) !important;
+  color: var(--color-primary) !important;
+}
+
+/* ProjectInsights — 详情内 Markdown (scoped) */
+[data-theme="dark"] .insight-content.markdown-body {
+  color: var(--color-text-primary) !important;
+}
+
+[data-theme="dark"] .insight-content.markdown-body h2,
+[data-theme="dark"] .insight-content.markdown-body h3 {
+  color: var(--color-text-primary) !important;
+}
+
+[data-theme="dark"] .insight-content.markdown-body blockquote {
+  background: var(--color-bg-input) !important;
+  color: var(--color-text-secondary) !important;
+  border-left-color: var(--color-primary) !important;
+}
+
+[data-theme="dark"] .insight-content.markdown-body code {
+  background: var(--color-bg-input) !important;
+}
+
+[data-theme="dark"] .insight-content.markdown-body pre {
+  background: var(--color-bg-input) !important;
+  border-color: var(--color-border) !important;
+}
+
+[data-theme="dark"] .insight-content.markdown-body th {
+  background: var(--color-bg-input) !important;
+}
+
+[data-theme="dark"] .insight-content.markdown-body th,
+[data-theme="dark"] .insight-content.markdown-body td {
+  border-color: var(--color-border) !important;
+}
+
+/* CodeMap — 图谱容器 */
+[data-theme="dark"] .code-map-wrapper {
+  background: var(--color-bg-body) !important;
+}
+
+[data-theme="dark"] .graph-legend {
+  background: var(--color-bg-component) !important;
+  border-top-color: var(--color-border) !important;
+}
+
+[data-theme="dark"] .legend-item {
+  color: var(--color-text-secondary) !important;
+}
+
+/* AuthLayout — 右侧表单背景 */
+[data-theme="dark"] .auth-form-wrapper {
+  background: var(--color-bg-body) !important;
+}
+
+[data-theme="dark"] .auth-footer {
+  color: var(--color-text-tertiary) !important;
+}
+
+/* Dashboard — 上传区域文本 */
+[data-theme="dark"] .upload-text {
+  color: var(--color-text-secondary) !important;
+}
+
+[data-theme="dark"] .upload-hint {
+  color: var(--color-text-tertiary) !important;
+}
+
+/* Profile — 用户信息 */
+[data-theme="dark"] .profile-username {
+  color: var(--color-text-primary) !important;
+}
+
+[data-theme="dark"] .info-icon,
+[data-theme="dark"] .info-label {
+  color: var(--color-text-tertiary) !important;
+}
+
+[data-theme="dark"] .info-value {
+  color: var(--color-text-primary) !important;
+}
+
+/* Login / Register 表单页 */
+[data-theme="dark"] .login-card,
+[data-theme="dark"] .register-card {
+  background: var(--color-bg-component) !important;
+}
+
+[data-theme="dark"] .login-card h2,
+[data-theme="dark"] .register-card h2 {
+  color: var(--color-text-primary) !important;
+}
+
+/* 通用 — 局部白色背景条（如 Dashboard 删除按钮悬浮、表格分隔） */
+[data-theme="dark"] .app-main .ant-table-thead > tr > th {
+  background: #262626 !important;
+}
+
+/* 通用 — 分页器背景 */
+[data-theme="dark"] .ant-pagination-item {
+  background: var(--color-bg-component);
+  border-color: var(--color-border);
+}
+
+[data-theme="dark"] .ant-pagination-item a {
+  color: var(--color-text-primary);
+}
+
+[data-theme="dark"] .ant-pagination-item-active {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+}
+
+/* 通用 — Steps 组件 */
+[data-theme="dark"] .ant-steps-item-title {
+  color: var(--color-text-primary) !important;
+}
+
+[data-theme="dark"] .ant-steps-item-description {
+  color: var(--color-text-secondary) !important;
+}
