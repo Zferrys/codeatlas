@@ -81,6 +81,9 @@
     </springProfile>
     <logger name="org.springframework.security" level="INFO"/>
 
+    <!-- 压制 Spring Boot 启动时的 BeanPostProcessorChecker 无害噪音 -->
+    <logger name="org.springframework.context.support.PostProcessorRegistrationDelegate" level="ERROR"/>
+
     <!-- AI 审计 logger -->
     <logger name="ai-audit" level="INFO" additivity="false">
         <appender-ref ref="AI_AUDIT"/>

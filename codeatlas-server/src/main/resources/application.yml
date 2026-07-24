@@ -38,6 +38,13 @@ spring:
     authentication:
       username: "${NEO4J_USERNAME:neo4j}"
       password: "${NEO4J_PASSWORD}"
+    pool:
+      metrics-enabled: true
+
+  # ---- Neo4j Data ----
+  data:
+    neo4j:
+      transaction-manager-name: neo4jTransactionManager
 
   # ---- Redis ----
   redis:
