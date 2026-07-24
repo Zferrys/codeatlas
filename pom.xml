@@ -38,7 +38,7 @@
         <mybatis-spring-boot.version>3.0.4</mybatis-spring-boot.version>
         <mysql-connector.version>8.0.33</mysql-connector.version>
         <neo4j-driver.version>5.26.0</neo4j-driver.version>
-        <jgit.version>5.13.3.202401111512-r</jgit.version>
+        <jgit.version>6.10.0.202406032230-r</jgit.version>
         <javaparser.version>3.25.10</javaparser.version>
         <okhttp.version>4.12.0</okhttp.version>
         <knife4j.version>4.5.0</knife4j.version>
