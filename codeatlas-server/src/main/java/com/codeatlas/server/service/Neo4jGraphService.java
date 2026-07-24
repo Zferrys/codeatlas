@@ -243,8 +243,18 @@ public class Neo4jGraphService {
      * @param size  每页节点数
      */
     public GraphVO queryFullGraphPaged(Long projectId, String level, int page, int size) {
+        String lvl = level != null ? level.toUpperCase() : "CLASS";
+        if ("PACKAGE".equals(lvl) || "MODULE".equals(lvl)) {
+            return queryPackageLevelGraph(projectId, lvl, page, size);
+        }
+        return queryClassLevelGraph(projectId, page, size);
+    }
+
+    /**
+     * CLASS 级别分页查询：直接返回类节点，按 fqn 排序。
+     */
+    private GraphVO queryClassLevelGraph(Long projectId, int page, int size) {
         try (Session session = neo4jDriver.session()) {
-            // Count total nodes for pagination metadata
             var countResult = session.run(
                     "MATCH (c:Class {projectId: $projectId}) RETURN count(c) AS total",
                     Values.parameters("projectId", projectId));
@@ -252,13 +262,12 @@ public class Neo4jGraphService {
 
             int skip = Math.max(0, (page - 1) * size);
 
-            // Query paginated nodes
             var nodeResult = session.run(
                     "MATCH (c:Class {projectId: $projectId}) RETURN c ORDER BY c.fqn SKIP $skip LIMIT $limit",
                     Values.parameters("projectId", projectId, "skip", skip, "limit", size));
 
             List<GraphVO.NodeVO> graphNodes = new ArrayList<>();
-            Set<String> pageFqns = new HashSet<>();
+            List<String> pageFqns = new ArrayList<>();
             while (nodeResult.hasNext()) {
                 var record = nodeResult.next();
                 var node = record.get("c").asNode();
@@ -276,22 +285,144 @@ public class Neo4jGraphService {
                 graphNodes.add(n);
             }
 
-            // Query edges where both source and target are in the current page
             List<GraphVO.EdgeVO> graphEdges = new ArrayList<>();
             if (!pageFqns.isEmpty()) {
-                var edgeResult = session.run("""
-                                MATCH (a:Class {projectId: $projectId})-[r:DEPENDS_ON]->(b:Class)
-                                WHERE b.projectId = $projectId
-                                RETURN a.fqn AS source, b.fqn AS target
-                                """,
-                        Values.parameters("projectId", projectId));
+                var edgeResult = session.run(
+                        "MATCH (a:Class {projectId: $projectId})-[r:DEPENDS_ON]->(b:Class {projectId: $projectId}) "
+                                + "WHERE a.fqn IN $pageFqns AND b.fqn IN $pageFqns "
+                                + "RETURN a.fqn AS source, b.fqn AS target",
+                        Values.parameters("projectId", projectId, "pageFqns", pageFqns));
                 while (edgeResult.hasNext()) {
                     var record = edgeResult.next();
-                    String source = record.get("source").asString();
-                    String target = record.get("target").asString();
-                    if (pageFqns.contains(source) && pageFqns.contains(target)) {
+                    GraphVO.EdgeVO e = new GraphVO.EdgeVO();
+                    e.setSource(record.get("source").asString());
+                    e.setTarget(record.get("target").asString());
+                    e.setType("dependency");
+                    graphEdges.add(e);
+                }
+            }
+
+            GraphVO graph = new GraphVO();
+            graph.setNodes(graphNodes);
+            graph.setEdges(graphEdges);
+            graph.setTotalNodes(totalNodes);
+            graph.setPage(page);
+            graph.setSize(size);
+            graph.setHasMore(skip + size < totalNodes);
+            log.info("Neo4j graph queried paged(CLASS): projectId={}, page={}, nodes={}, total={}",
+                    projectId, page, graphNodes.size(), totalNodes);
+            return graph;
+        } catch (Exception e) {
+            log.error("Neo4j graph paged query failed: {}", e.getMessage());
+            GraphVO empty = new GraphVO();
+            empty.setNodes(Collections.emptyList());
+            empty.setEdges(Collections.emptyList());
+            return empty;
+        }
+    }
+
+    /**
+     * PACKAGE/MODULE 级别：按包名聚合节点，统计类数、方法数、行数，构建包间依赖边。
+     * MODULE 级别取包名前两段作为模块标识（如 com.codeatlas）。
+     */
+    private GraphVO queryPackageLevelGraph(Long projectId, String level, int page, int size) {
+        boolean isModule = "MODULE".equals(level);
+        try (Session session = neo4jDriver.session()) {
+            // 1. 按 packageName 聚合所有类节点
+            var aggResult = session.run(
+                    "MATCH (c:Class {projectId: $projectId}) "
+                            + "RETURN c.packageName AS packageName, "
+                            + "head(collect(c.layer)) AS layer, "
+                            + "count(c) AS classCount, "
+                            + "sum(c.totalMethods) AS totalMethods, "
+                            + "sum(c.lineCount) AS totalLineCount "
+                            + "ORDER BY packageName",
+                    Values.parameters("projectId", projectId));
+
+            // 2. 收集原始包信息，模块级别做二次合并
+            List<PackageInfo> rawPackages = new ArrayList<>();
+            while (aggResult.hasNext()) {
+                var record = aggResult.next();
+                PackageInfo pi = new PackageInfo();
+                pi.packageName = record.get("packageName").asString();
+                pi.layer = record.get("layer").asString();
+                pi.classCount = record.get("classCount").asInt();
+                pi.totalMethods = record.get("totalMethods").asInt(0);
+                pi.totalLineCount = record.get("totalLineCount").asInt(0);
+                rawPackages.add(pi);
+            }
+
+            // 3. MODULE 级别：合并同模块的包
+            Map<String, PackageInfo> merged = new LinkedHashMap<>();
+            for (PackageInfo pi : rawPackages) {
+                String key = isModule ? extractModule(pi.packageName) : pi.packageName;
+                PackageInfo existing = merged.get(key);
+                if (existing == null) {
+                    PackageInfo mergedPi = new PackageInfo();
+                    mergedPi.packageName = key;
+                    mergedPi.layer = pi.layer;
+                    mergedPi.classCount = pi.classCount;
+                    mergedPi.totalMethods = pi.totalMethods;
+                    mergedPi.totalLineCount = pi.totalLineCount;
+                    merged.put(key, mergedPi);
+                } else {
+                    existing.classCount += pi.classCount;
+                    existing.totalMethods += pi.totalMethods;
+                    existing.totalLineCount += pi.totalLineCount;
+                    if (existing.layer == null && pi.layer != null) {
+                        existing.layer = pi.layer;
+                    }
+                }
+            }
+
+            // 4. 查询包/模块间依赖边
+            Map<String, Set<String>> groupEdges = new LinkedHashMap<>();
+            var edgeResult = session.run(
+                    "MATCH (a:Class {projectId: $projectId})-[r:DEPENDS_ON]->(b:Class {projectId: $projectId}) "
+                            + "WHERE a.packageName <> b.packageName "
+                            + "RETURN DISTINCT a.packageName AS srcPkg, b.packageName AS tgtPkg",
+                    Values.parameters("projectId", projectId));
+            while (edgeResult.hasNext()) {
+                var record = edgeResult.next();
+                String srcPkg = record.get("srcPkg").asString();
+                String tgtPkg = record.get("tgtPkg").asString();
+                String srcKey = isModule ? extractModule(srcPkg) : srcPkg;
+                String tgtKey = isModule ? extractModule(tgtPkg) : tgtPkg;
+                if (!srcKey.equals(tgtKey)) {
+                    groupEdges.computeIfAbsent(srcKey, k -> new HashSet<>()).add(tgtKey);
+                }
+            }
+
+            // 5. 构建节点列表并分页
+            List<PackageInfo> allGroups = new ArrayList<>(merged.values());
+            long totalNodes = allGroups.size();
+            int skip = Math.max(0, (page - 1) * size);
+            int end = Math.min(skip + size, allGroups.size());
+            List<PackageInfo> pageGroups = allGroups.subList(Math.min(skip, allGroups.size()), end);
+
+            List<GraphVO.NodeVO> graphNodes = new ArrayList<>();
+            Set<String> pageKeys = new HashSet<>();
+            for (PackageInfo pi : pageGroups) {
+                pageKeys.add(pi.packageName);
+                GraphVO.NodeVO n = new GraphVO.NodeVO();
+                n.setId(pi.packageName);
+                n.setLabel(pi.packageName);
+                String layer = pi.layer != null ? pi.layer.toLowerCase() : "unknown";
+                n.setGroup(layer);
+                n.setLayer(pi.layer);
+                n.setMethods(pi.totalMethods);
+                n.setLineCount(pi.totalLineCount);
+                graphNodes.add(n);
+            }
+
+            // 6. 过滤边：仅保留当前页内的包间边
+            List<GraphVO.EdgeVO> graphEdges = new ArrayList<>();
+            for (Map.Entry<String, Set<String>> entry : groupEdges.entrySet()) {
+                if (!pageKeys.contains(entry.getKey())) continue;
+                for (String target : entry.getValue()) {
+                    if (pageKeys.contains(target)) {
                         GraphVO.EdgeVO e = new GraphVO.EdgeVO();
-                        e.setSource(source);
+                        e.setSource(entry.getKey());
                         e.setTarget(target);
                         e.setType("dependency");
                         graphEdges.add(e);
@@ -306,8 +437,8 @@ public class Neo4jGraphService {
             graph.setPage(page);
             graph.setSize(size);
             graph.setHasMore(skip + size < totalNodes);
-            log.info("Neo4j graph queried paged: projectId={}, page={}, nodes={}, total={}",
-                    projectId, page, graphNodes.size(), totalNodes);
+            log.info("Neo4j graph queried paged({}): projectId={}, page={}, groups={}, edges={}, total={}",
+                    level, projectId, page, graphNodes.size(), graphEdges.size(), totalNodes);
             return graph;
         } catch (Exception e) {
             log.error("Neo4j graph paged query failed: {}", e.getMessage());
@@ -316,6 +447,32 @@ public class Neo4jGraphService {
             empty.setEdges(Collections.emptyList());
             return empty;
         }
+    }
+
+    /** 取包名前两段作为模块标识，如 com.codeatlas.server.config → com.codeatlas */
+    private String extractModule(String packageName) {
+        if (packageName == null || packageName.isEmpty()) {
+            return "default";
+        }
+        int dots = 0;
+        for (int i = 0; i < packageName.length(); i++) {
+            if (packageName.charAt(i) == '.') {
+                dots++;
+                if (dots == 2) {
+                    return packageName.substring(0, i);
+                }
+            }
+        }
+        return packageName;
+    }
+
+    /** 聚合包信息（内部类） */
+    private static class PackageInfo {
+        String packageName;
+        String layer;
+        int classCount;
+        int totalMethods;
+        int totalLineCount;
     }
 
     private String safeProp(org.neo4j.driver.types.Node node, String key) {
