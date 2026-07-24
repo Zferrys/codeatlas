@@ -98,6 +98,86 @@ AI 不是一步到位，而是分阶段深度分析：
 - Micrometer 指标：AI 调用量、失败率、Token 消耗、P99 延迟
 - 健康检查端点 `/actuator/health` 包含 AI API 连通性探活
 
+## 生产级工程实践
+
+这不是一个 Demo，而是一套按照企业标准构建的生产级系统。以下是从代码中可以直接验证的工程决策：
+
+### 安全纵深防御
+
+```
+请求进入 → CORS 白名单校验 → JWT 签名验证 → RBAC 方法级鉴权 → 参数化查询 → 响应脱敏
+              │                    │               │                  │
+              └─ 环境变量配置       └─ 黑名单吊销     └─ @PreAuthorize   └─ MyBatis #{}
+```
+
+| 机制 | 实现 |
+|------|------|
+| 认证 | BCrypt 密码哈希 + JWT 无状态令牌，过期时间按环境可配（开发 24h / 生产 8h） |
+| 鉴权 | 4 级 RBAC 角色，方法级 `@PreAuthorize` 注解，AOP 审计日志自动记录操作人 |
+| 注入防护 | MyBatis 全链路 `#{}` 参数化，零字符串拼接；文件上传白名单校验（类型+大小） |
+| 限流 | Redis Lua 脚本实现分布式令牌桶，登录 10 次/分钟，通用 API 20 QPS |
+| 敏感信息 | 所有密钥/密码通过环境变量注入，JWT Token 日志输出自动脱敏 |
+| 依赖审计 | CI 集成 OWASP Dependency Check，CVSS ≥ 7 阻断构建 |
+
+### 数据架构设计
+
+```
+┌─────────┐     ┌─────────┐     ┌─────────┐
+│  MySQL  │     │  Neo4j  │     │  Redis  │
+│ 关系存储 │     │ 图存储   │     │ 缓存层   │
+├─────────┤     ├─────────┤     ├─────────┤
+│ 项目元数据│     │ 类依赖图  │     │ 地图缓存  │
+│ 用户/角色 │     │ 方法调用链 │     │ 限流计数  │
+│ 审计日志  │     │ 包结构树  │     │ Token预算 │
+│ AI审计   │     │ 影响路径  │     │ 会话黑名单 │
+│ 扫描记录  │     │ 反模式标记 │     │ 分布式锁  │
+└─────────┘     └─────────┘     └─────────┘
+```
+
+**为什么用 Neo4j 而不是在 MySQL 里存关联表？** 代码依赖关系本质是有向图——一个类的变更影响分析需要 BFS 多层遍历，SQL 的递归 CTE 在 5 层以上性能急剧退化，而 Neo4j 原生图遍历无压力到 20+ 层。
+
+### 弹性工程三板斧
+
+```
+@CircuitBreaker (熔断)      → 失败率 > 40% 自动断开 60s，快速失败优于雪崩
+@Retry (重试)              → 指数退避 2s→4s→8s，最多 3 次，仅对瞬时故障
+@Bulkhead (舱壁)           → AI 调用独立线程池，饱和时直接拒绝，不拖垮主业务
+```
+
+同时作用于：AI API 调用、Redis 连接、Neo4j 查询。不是简单加个注解，而是根据每种资源特性调了独立参数。
+
+### 数据库变更管控
+
+所有 DDL 通过 **Flyway 版本化迁移**，SQL 脚本纳入 Git 版本控制：
+
+```
+V1__init_schema.sql       → 核心表结构
+V2__seed_rules.sql        → 内置架构规则
+V3__seed_admin_user.sql   → 预置管理员（BCrypt 哈希）
+V4__ai_audit_log.sql      → AI 审计表
+V5__add_performance_indexes.sql → 性能索引
+```
+
+CI 流水线有专门的 `flyway-validation` Job，每次 PR 自动校验迁移脚本的 checksum 未被篡改。
+
+### 优雅关闭
+
+```java
+server.shutdown=graceful
+spring.lifecycle.timeout-per-shutdown-phase=30s
+```
+
+Kill 信号到达时：停止接受新请求 → 等待进行中的扫描写入检查点 → 30s 超时强制终止 → 进程退出。临时工作目录在启动时自动清理孤儿残留（JVM 崩溃也不是问题）。
+
+### CI 质量门禁
+
+```
+PR 提交 → mvn compile → Checkstyle (0 容忍) → PMD → 单元测试 (54 个)
+       → JaCoCo 覆盖率 ≥ 70% → OWASP 漏洞扫描 → Flyway 校验 → Docker 构建
+```
+
+全部通过才算 CI 绿。六道门禁，一道不过就不能合并。
+
 ## 快速开始
 
 ### 环境要求
@@ -118,7 +198,7 @@ cd codeatlas
 # 2. 启动依赖服务
 docker-compose up -d mysql redis
 
-# 3. 配置环境变量
+# 3. 配置环境变量（生产环境切勿使用弱密码）
 export DEEPSEEK_API_KEY=<你的DeepSeek-API-Key>
 export ANTHROPIC_API_KEY=<你的Claude-API-Key>
 export MYSQL_PASSWORD=<数据库密码>
@@ -154,25 +234,28 @@ npm run dev
 ## 架构流程
 
 ```
-上传代码 → 解析（JavaParser） → 构建依赖图（Neo4j）
-→ AI 多阶段分析流水线 → 生成 3D 地图 + 架构叙事
-→ 规约规则检查 → 影响模拟
+上传代码 → JavaParser AST 解析 (支持 Java 17 语法)
+→ 提取类/方法/字段/注解 → 构建 Neo4j 依赖图 (class_contains_method 等关系)
+→ AI 五阶段分析流水线 → 生成 3D 拓扑图 (Three.js 力导向布局)
+→ 规约规则引擎 → BFS 变更影响模拟 → 结果持久化
 ```
 
 ## 项目结构
 
 ```
 codeatlas/
-├── codeatlas-common/     # 共享 DTO、错误码、异常类
-├── codeatlas-engine/     # JavaParser、规则引擎、Git 服务、AI 客户端
-├── codeatlas-server/     # Spring Boot REST API
-├── codeatlas-web/        # Vue 3 前端
+├── codeatlas-common/     # 共享 DTO、错误码、异常类（零外部依赖）
+├── codeatlas-engine/     # JavaParser、规则引擎、Git 服务、AI 客户端（纯 Java）
+├── codeatlas-server/     # Spring Boot REST API + 安全 + 缓存 + 监控
+├── codeatlas-web/        # Vue 3 前端，Three.js 3D 地图 + SSE 实时推送
 ├── docs/                 # 文档
-│   └── REQUIREMENTS.md   # 完整需求规格说明
+│   └── REQUIREMENTS.md   # 24 章完整需求规格说明
 ├── docker-compose.yml
 ├── Dockerfile
 └── pom.xml
 ```
+
+> `codeatlas-engine` 被刻意设计为无 Spring 依赖的纯 Java 模块——规则引擎和解析器可以独立测试，未来可以直接给 Android 或命令行工具复用。
 
 ## 参与贡献
 
