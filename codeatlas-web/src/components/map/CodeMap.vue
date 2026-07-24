@@ -117,16 +117,21 @@ function renderGraph(data) {
   const width = container.clientWidth || 900
   const height = container.clientHeight || 550
 
+  // 大节点量使用 Canvas 渲染器以提升性能
+  const useCanvas = nodes.length >= 1000
+
   graph = new G6.Graph({
     container: container,
     width,
     height,
+    renderer: useCanvas ? 'canvas' : 'svg',
     layout: {
       type: 'force',
       preventOverlap: true,
       nodeStrength: -120,
       edgeStrength: 0.15,
-      linkDistance: 150
+      linkDistance: 150,
+      workerEnabled: true
     },
     defaultNode: {
       size: [90, 36],
