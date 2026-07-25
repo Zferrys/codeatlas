@@ -5,6 +5,7 @@ import com.codeatlas.server.entity.InsightEntity;
 import com.codeatlas.server.entity.Project;
 import com.codeatlas.server.entity.ScanRecord;
 import com.codeatlas.server.security.CodeAtlasUserDetails;
+import com.codeatlas.server.service.AgenticSearchService;
 import com.codeatlas.server.service.AiAnalysisService;
 import com.codeatlas.server.service.ImpactAnalysisService;
 import com.codeatlas.server.service.InsightService;
@@ -29,17 +30,20 @@ public class AiController {
     private final InsightService insightService;
     private final ProjectService projectService;
     private final ScanService scanService;
+    private final AgenticSearchService agenticSearchService;
 
     public AiController(AiAnalysisService aiAnalysisService,
                         ImpactAnalysisService impactAnalysisService,
                         InsightService insightService,
                         ProjectService projectService,
-                        ScanService scanService) {
+                        ScanService scanService,
+                        AgenticSearchService agenticSearchService) {
         this.aiAnalysisService = aiAnalysisService;
         this.impactAnalysisService = impactAnalysisService;
         this.insightService = insightService;
         this.projectService = projectService;
         this.scanService = scanService;
+        this.agenticSearchService = agenticSearchService;
     }
 
     @GetMapping("/story")
@@ -105,7 +109,7 @@ public class AiController {
     }
 
     @PostMapping("/context-qa")
-    @Operation(summary = "上下文限定问答")
+    @Operation(summary = "上下文问答（支持 Agentic Search）")
     @PreAuthorize("isAuthenticated()")
     public ApiResponse<Map<String, Object>> contextQa(@PathVariable Long projectId,
                                                        @RequestBody Map<String, Object> body,
@@ -117,6 +121,13 @@ public class AiController {
             return ApiResponse.error(400, "question 不能为空");
         }
 
+        // 未指定类名 → Agentic Search（AI 自动搜索代码库）
+        if (classFqn == null || classFqn.trim().isEmpty()) {
+            Map<String, Object> result = agenticSearchService.search(projectId, question.trim(), principal.getUserId());
+            return ApiResponse.success(result);
+        }
+
+        // 指定了类名 → 精确上下文匹配（兼容原有行为）
         Map<String, Object> result = impactAnalysisService.contextualQa(projectId, question, classFqn);
         return ApiResponse.success(result);
     }

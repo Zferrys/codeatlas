@@ -458,6 +458,63 @@ public class Neo4jGraphService {
         }
     }
 
+    /**
+     * 查询指定类的直接依赖邻居，支持方向过滤。用于 Agentic Search 工具调用。
+     *
+     * @param direction "outgoing"（我依赖谁）/ "incoming"（谁依赖我）/ "both"（双向）
+     * @return 格式化的邻居列表字符串
+     */
+    public String queryDirectNeighbors(Long projectId, String fqn, String direction) {
+        try (Session session = neo4jDriver.session()) {
+            StringBuilder sb = new StringBuilder();
+            boolean outgoing = "outgoing".equals(direction) || "both".equals(direction);
+            boolean incoming = "incoming".equals(direction) || "both".equals(direction);
+
+            if (outgoing) {
+                var result = session.run(
+                        "MATCH (a:Class {fqn: $fqn})-[r:DEPENDS_ON]->(b:Class) " +
+                        "WHERE b.projectId = $projectId " +
+                        "RETURN b.fqn AS fqn, b.simpleName AS name, b.layer AS layer " +
+                        "ORDER BY name LIMIT 30",
+                        Values.parameters("fqn", fqn, "projectId", projectId));
+                sb.append("出向依赖（").append(fqn).append(" 依赖以下类）:\n");
+                int count = 0;
+                while (result.hasNext()) {
+                    var record = result.next();
+                    sb.append("- ").append(record.get("name").asString())
+                            .append(" (").append(record.get("fqn").asString()).append(")")
+                            .append(" [").append(record.get("layer").asString("unknown")).append("]\n");
+                    count++;
+                }
+                if (count == 0) sb.append("(无)\n");
+            }
+
+            if (incoming) {
+                var result = session.run(
+                        "MATCH (a:Class)-[r:DEPENDS_ON]->(b:Class {fqn: $fqn}) " +
+                        "WHERE a.projectId = $projectId " +
+                        "RETURN a.fqn AS fqn, a.simpleName AS name, a.layer AS layer " +
+                        "ORDER BY name LIMIT 30",
+                        Values.parameters("fqn", fqn, "projectId", projectId));
+                sb.append("入向依赖（以下类依赖 ").append(fqn).append("）:\n");
+                int count = 0;
+                while (result.hasNext()) {
+                    var record = result.next();
+                    sb.append("- ").append(record.get("name").asString())
+                            .append(" (").append(record.get("fqn").asString()).append(")")
+                            .append(" [").append(record.get("layer").asString("unknown")).append("]\n");
+                    count++;
+                }
+                if (count == 0) sb.append("(无)\n");
+            }
+
+            return sb.toString();
+        } catch (Exception e) {
+            log.error("Neo4j direct neighbors query failed: {}", e.getMessage());
+            return "(错误) Neo4j 查询失败: " + e.getMessage();
+        }
+    }
+
     /** 取包名前两段作为模块标识，如 com.codeatlas.server.config → com.codeatlas */
     private String extractModule(String packageName) {
         if (packageName == null || packageName.isEmpty()) {

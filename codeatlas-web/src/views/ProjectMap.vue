@@ -24,8 +24,8 @@
             影响模拟
           </a-button>
         </a-tooltip>
-        <a-tooltip title="对选中节点提问">
-          <a-button size="small" @click="openQaPanel" :disabled="!selectedNode">
+        <a-tooltip title="上下文问答（选中类为精准问答，未选中则全局智能搜索）">
+          <a-button size="small" @click="openQaPanel">
             <template #icon><QuestionCircleOutlined /></template>
             上下文问答
           </a-button>
@@ -146,7 +146,7 @@
 
     <a-modal
       v-model:open="showQaModal"
-      title="上下文问答"
+      :title="qaTarget ? '上下文问答 — ' + qaTarget.label : '全局智能搜索'"
       :footer="null"
       width="600px"
     >
@@ -155,9 +155,14 @@
         <strong>{{ qaTarget.label }}</strong>
         <span style="color:#999;font-size:12px;margin-left:8px">{{ qaTarget.id }}</span>
       </div>
+      <a-alert v-else type="info" show-icon message="全局搜索模式" style="margin-bottom:8px">
+        <template #description>
+          AI 将自动搜索代码库中的相关类来回答问题。提示：在问题中包含关键词（如功能名、类名）效果更好。
+        </template>
+      </a-alert>
       <a-textarea
         v-model:value="qaQuestion"
-        placeholder="基于当前类的上下文提问，例如: 这个类的主要职责是什么？它有哪些直接依赖？"
+        :placeholder="qaTarget ? '基于当前类的上下文提问，例如: 这个类的主要职责是什么？它有哪些直接依赖？' : '输入你的问题，例如: 支付相关的代码有哪些？项目中最核心的 Service 类是哪个？'"
         :rows="3"
         style="margin:12px 0"
       />

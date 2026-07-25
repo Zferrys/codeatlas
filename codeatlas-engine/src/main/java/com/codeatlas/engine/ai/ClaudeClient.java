@@ -11,7 +11,9 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
@@ -159,23 +161,51 @@ public class ClaudeClient implements AiClient {
         }
     }
 
+    @SuppressWarnings("unchecked")
     private String buildRequestBody(AiRequest request, boolean stream) throws JsonProcessingException {
         Map<String, Object> body = new java.util.LinkedHashMap<>();
         body.put("model", model);
         body.put("max_tokens", request.getMaxTokens());
         body.put("temperature", request.getTemperature());
 
-        // messages
-        java.util.List<Map<String, Object>> messages = new java.util.ArrayList<>();
-        Map<String, Object> userMsg = new java.util.LinkedHashMap<>();
-        userMsg.put("role", "user");
-        userMsg.put("content", request.getPrompt());
-        messages.add(userMsg);
+        List<Map<String, Object>> messages;
+
+        if (request.hasMessages()) {
+            // multi-turn mode: convert Message list to Anthropic format
+            messages = new ArrayList<>();
+            for (Message msg : request.getMessages()) {
+                if ("system".equals(msg.getRole())) {
+                    body.put("system", msg.getContent());
+                } else {
+                    messages.add(toAnthropicMessage(msg));
+                }
+            }
+        } else {
+            // simple mode: single user prompt (backward compat)
+            messages = new ArrayList<>();
+            Map<String, Object> userMsg = new java.util.LinkedHashMap<>();
+            userMsg.put("role", "user");
+            userMsg.put("content", request.getPrompt());
+            messages.add(userMsg);
+
+            if (request.getSystemPrompt() != null && !request.getSystemPrompt().isEmpty()) {
+                body.put("system", request.getSystemPrompt());
+            }
+        }
+
         body.put("messages", messages);
 
-        // system prompt
-        if (request.getSystemPrompt() != null && !request.getSystemPrompt().isEmpty()) {
-            body.put("system", request.getSystemPrompt());
+        // tools
+        if (request.getTools() != null && !request.getTools().isEmpty()) {
+            List<Map<String, Object>> tools = new ArrayList<>();
+            for (ToolDef tool : request.getTools()) {
+                Map<String, Object> t = new java.util.LinkedHashMap<>();
+                t.put("name", tool.getName());
+                t.put("description", tool.getDescription());
+                t.put("input_schema", tool.getParameters());
+                tools.add(t);
+            }
+            body.put("tools", tools);
         }
 
         if (stream) {
@@ -185,21 +215,74 @@ public class ClaudeClient implements AiClient {
         return OBJECT_MAPPER.writeValueAsString(body);
     }
 
+    /** 将一个内部 Message 转换为 Anthropic API 格式的消息对象 */
+    private Map<String, Object> toAnthropicMessage(Message msg) {
+        Map<String, Object> apiMsg = new java.util.LinkedHashMap<>();
+        apiMsg.put("role", msg.getRole());
+
+        if ("assistant".equals(msg.getRole()) && msg.getToolCalls() != null && !msg.getToolCalls().isEmpty()) {
+            // assistant message with tool_use blocks
+            List<Map<String, Object>> contentBlocks = new ArrayList<>();
+            if (msg.getContent() != null && !msg.getContent().isEmpty()) {
+                Map<String, Object> textBlock = new java.util.LinkedHashMap<>();
+                textBlock.put("type", "text");
+                textBlock.put("text", msg.getContent());
+                contentBlocks.add(textBlock);
+            }
+            for (ToolCall tc : msg.getToolCalls()) {
+                Map<String, Object> toolBlock = new java.util.LinkedHashMap<>();
+                toolBlock.put("type", "tool_use");
+                toolBlock.put("id", tc.getId());
+                toolBlock.put("name", tc.getName());
+                toolBlock.put("input", tc.getArguments() != null ? tc.getArguments() : Collections.emptyMap());
+                contentBlocks.add(toolBlock);
+            }
+            apiMsg.put("content", contentBlocks);
+        } else if ("user".equals(msg.getRole()) && msg.getToolCallId() != null) {
+            // tool result — must be a user message with tool_result content block
+            // our Message uses role="tool" but Anthropic requires role="user" for tool results
+            List<Map<String, Object>> contentBlocks = new ArrayList<>();
+            Map<String, Object> resultBlock = new java.util.LinkedHashMap<>();
+            resultBlock.put("type", "tool_result");
+            resultBlock.put("tool_use_id", msg.getToolCallId());
+            resultBlock.put("content", msg.getContent() != null ? msg.getContent() : "");
+            contentBlocks.add(resultBlock);
+            apiMsg.put("content", contentBlocks);
+        } else {
+            apiMsg.put("content", msg.getContent() != null ? msg.getContent() : "");
+        }
+
+        return apiMsg;
+    }
+
+    @SuppressWarnings("unchecked")
     private AiResponse parseResponse(String responseBody, long latencyMs) throws JsonProcessingException {
         JsonNode root = OBJECT_MAPPER.readTree(responseBody);
 
         int tokensUsed = 0;
         String content = "";
+        List<ToolCall> toolCalls = new ArrayList<>();
 
-        // Anthropic API response format: content is in content[0].text
         JsonNode contentArray = root.path("content");
-        if (contentArray.isArray() && contentArray.size() > 0) {
+        if (contentArray.isArray()) {
             for (JsonNode block : contentArray) {
-                if ("text".equals(block.path("type").asText())) {
+                String type = block.path("type").asText();
+                if ("text".equals(type)) {
                     content += block.path("text").asText();
+                } else if ("tool_use".equals(type)) {
+                    ToolCall tc = new ToolCall();
+                    tc.setId(block.path("id").asText());
+                    tc.setName(block.path("name").asText());
+                    JsonNode inputNode = block.path("input");
+                    if (!inputNode.isMissingNode() && inputNode.isObject()) {
+                        tc.setArguments(OBJECT_MAPPER.convertValue(inputNode, Map.class));
+                    }
+                    toolCalls.add(tc);
                 }
             }
         }
+
+        String finishReason = root.path("stop_reason").asText(null);
 
         // usage
         int promptTokens = 0;
@@ -218,6 +301,12 @@ public class ClaudeClient implements AiClient {
         response.setCompletionTokens(completionTokens);
         response.setLatencyMs(latencyMs);
         response.setSources(Collections.emptyList());
+        if (!toolCalls.isEmpty()) {
+            response.setToolCalls(toolCalls);
+        }
+        if (finishReason != null) {
+            response.setFinishReason(finishReason);
+        }
         return response;
     }
 }

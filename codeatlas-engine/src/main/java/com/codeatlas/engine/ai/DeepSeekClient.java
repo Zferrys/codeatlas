@@ -155,27 +155,56 @@ public class DeepSeekClient implements AiClient {
         }
     }
 
+    @SuppressWarnings("unchecked")
     private String buildRequestBody(AiRequest request, boolean stream) throws JsonProcessingException {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("model", model);
         body.put("max_tokens", request.getMaxTokens());
         body.put("temperature", request.getTemperature());
 
-        List<Map<String, Object>> messages = new ArrayList<>();
+        List<Map<String, Object>> messages;
 
-        if (request.getSystemPrompt() != null && !request.getSystemPrompt().isEmpty()) {
-            Map<String, Object> sysMsg = new LinkedHashMap<>();
-            sysMsg.put("role", "system");
-            sysMsg.put("content", request.getSystemPrompt());
-            messages.add(sysMsg);
+        if (request.hasMessages()) {
+            // multi-turn mode: convert Message list to OpenAI format
+            messages = new ArrayList<>();
+            for (Message msg : request.getMessages()) {
+                messages.add(toOpenAiMessage(msg));
+            }
+        } else {
+            // simple mode: single user prompt (backward compat)
+            messages = new ArrayList<>();
+
+            if (request.getSystemPrompt() != null && !request.getSystemPrompt().isEmpty()) {
+                Map<String, Object> sysMsg = new LinkedHashMap<>();
+                sysMsg.put("role", "system");
+                sysMsg.put("content", request.getSystemPrompt());
+                messages.add(sysMsg);
+            }
+
+            Map<String, Object> userMsg = new LinkedHashMap<>();
+            userMsg.put("role", "user");
+            userMsg.put("content", request.getPrompt());
+            messages.add(userMsg);
         }
 
-        Map<String, Object> userMsg = new LinkedHashMap<>();
-        userMsg.put("role", "user");
-        userMsg.put("content", request.getPrompt());
-        messages.add(userMsg);
-
         body.put("messages", messages);
+
+        // tools (OpenAI function-calling format)
+        if (request.getTools() != null && !request.getTools().isEmpty()) {
+            List<Map<String, Object>> tools = new ArrayList<>();
+            for (ToolDef tool : request.getTools()) {
+                Map<String, Object> func = new LinkedHashMap<>();
+                func.put("name", tool.getName());
+                func.put("description", tool.getDescription());
+                func.put("parameters", tool.getParameters());
+                Map<String, Object> t = new LinkedHashMap<>();
+                t.put("type", "function");
+                t.put("function", func);
+                tools.add(t);
+            }
+            body.put("tools", tools);
+            body.put("tool_choice", "auto");
+        }
 
         if (stream) {
             body.put("stream", true);
@@ -184,13 +213,72 @@ public class DeepSeekClient implements AiClient {
         return OBJECT_MAPPER.writeValueAsString(body);
     }
 
+    /** 将一个内部 Message 转换为 OpenAI 兼容格式的消息对象 */
+    private Map<String, Object> toOpenAiMessage(Message msg) {
+        Map<String, Object> apiMsg = new LinkedHashMap<>();
+        apiMsg.put("role", msg.getRole());
+
+        if ("assistant".equals(msg.getRole()) && msg.getToolCalls() != null && !msg.getToolCalls().isEmpty()) {
+            apiMsg.put("content", msg.getContent());
+            List<Map<String, Object>> toolCalls = new ArrayList<>();
+            for (ToolCall tc : msg.getToolCalls()) {
+                Map<String, Object> tcObj = new LinkedHashMap<>();
+                tcObj.put("id", tc.getId());
+                tcObj.put("type", "function");
+                Map<String, Object> func = new LinkedHashMap<>();
+                func.put("name", tc.getName());
+                func.put("arguments", OBJECT_MAPPER.convertValue(
+                        tc.getArguments() != null ? tc.getArguments() : Collections.emptyMap(), JsonNode.class)
+                        .toString());
+                tcObj.put("function", func);
+                toolCalls.add(tcObj);
+            }
+            apiMsg.put("tool_calls", toolCalls);
+        } else if ("tool".equals(msg.getRole())) {
+            apiMsg.put("tool_call_id", msg.getToolCallId());
+            apiMsg.put("content", msg.getContent() != null ? msg.getContent() : "");
+        } else {
+            apiMsg.put("content", msg.getContent() != null ? msg.getContent() : "");
+        }
+
+        return apiMsg;
+    }
+
+    @SuppressWarnings("unchecked")
     private AiResponse parseResponse(String responseBody, long latencyMs) throws JsonProcessingException {
         JsonNode root = OBJECT_MAPPER.readTree(responseBody);
 
         String content = "";
+        List<ToolCall> toolCalls = new ArrayList<>();
         JsonNode choices = root.path("choices");
         if (choices.isArray() && choices.size() > 0) {
-            content = choices.get(0).path("message").path("content").asText();
+            JsonNode message = choices.get(0).path("message");
+            content = message.path("content").asText();
+
+            // parse tool_calls
+            JsonNode tcArray = message.path("tool_calls");
+            if (tcArray.isArray()) {
+                for (JsonNode tcNode : tcArray) {
+                    ToolCall tc = new ToolCall();
+                    tc.setId(tcNode.path("id").asText());
+                    JsonNode func = tcNode.path("function");
+                    tc.setName(func.path("name").asText());
+                    String argsStr = func.path("arguments").asText();
+                    if (argsStr != null && !argsStr.isEmpty()) {
+                        try {
+                            tc.setArguments(OBJECT_MAPPER.readValue(argsStr, Map.class));
+                        } catch (JsonProcessingException e) {
+                            tc.setArguments(Collections.emptyMap());
+                        }
+                    }
+                    toolCalls.add(tc);
+                }
+            }
+        }
+
+        String finishReason = null;
+        if (choices.isArray() && choices.size() > 0) {
+            finishReason = choices.get(0).path("finish_reason").asText(null);
         }
 
         int tokensUsed = 0;
@@ -210,6 +298,12 @@ public class DeepSeekClient implements AiClient {
         response.setCompletionTokens(completionTokens);
         response.setLatencyMs(latencyMs);
         response.setSources(Collections.emptyList());
+        if (!toolCalls.isEmpty()) {
+            response.setToolCalls(toolCalls);
+        }
+        if (finishReason != null) {
+            response.setFinishReason(finishReason);
+        }
         return response;
     }
 }

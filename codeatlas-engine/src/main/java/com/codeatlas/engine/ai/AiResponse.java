@@ -14,6 +14,8 @@ public class AiResponse {
     private List<AiSource> sources;
     private String modelUsed;
     private boolean fallback;
+    private List<ToolCall> toolCalls;
+    private String finishReason;
 
     public AiResponse() {
         this.sources = new ArrayList<>();
@@ -42,6 +44,16 @@ public class AiResponse {
 
     public boolean isFallback() { return fallback; }
     public void setFallback(boolean fallback) { this.fallback = fallback; }
+
+    public List<ToolCall> getToolCalls() { return toolCalls; }
+    public void setToolCalls(List<ToolCall> toolCalls) { this.toolCalls = toolCalls; }
+
+    public String getFinishReason() { return finishReason; }
+    public void setFinishReason(String finishReason) { this.finishReason = finishReason; }
+
+    public boolean hasToolCalls() {
+        return toolCalls != null && !toolCalls.isEmpty();
+    }
 
     public static AiResponse of(String content, int tokensUsed, long latencyMs) {
         AiResponse r = new AiResponse();
