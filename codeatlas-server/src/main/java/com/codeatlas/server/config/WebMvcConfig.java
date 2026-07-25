@@ -3,6 +3,8 @@ package com.codeatlas.server.config;
 import com.codeatlas.server.security.CodeAtlasUserDetails;
 import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.web.servlet.FilterRegistrationBean;
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.MethodParameter;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -15,6 +17,10 @@ import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 import org.springframework.web.servlet.HandlerInterceptor;
 
+import jakarta.servlet.Filter;
+import jakarta.servlet.FilterChain;
+import jakarta.servlet.ServletRequest;
+import jakarta.servlet.ServletResponse;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.util.List;
@@ -94,5 +100,42 @@ public class WebMvcConfig implements WebMvcConfigurer {
                 return null;
             }
         });
+    }
+
+    /**
+     * 去掉 API 请求路径末尾的 /，兼容 Spring Boot 3.x。
+     * Spring Framework 6 默认不再将 /api/v1/projects/ 匹配到 /api/v1/projects，
+     * 导致前端请求尾部带斜杠时返回 404 → axios 拦截器弹出"资源不存在"。
+     * 用 request wrapper 静默改写，不影响 POST/PUT 等请求方法。
+     */
+    @Bean
+    public FilterRegistrationBean<Filter> trailingSlashFilter() {
+        Filter filter = (ServletRequest request, ServletResponse response, FilterChain chain)
+                -> {
+            HttpServletRequest req = (HttpServletRequest) request;
+            String uri = req.getRequestURI();
+            if (uri.length() > 1 && uri.endsWith("/")) {
+                String stripped = uri.substring(0, uri.length() - 1);
+                String scheme = req.getScheme();
+                String serverName = req.getServerName();
+                int port = req.getServerPort();
+                HttpServletRequest original = req;
+                req = new jakarta.servlet.http.HttpServletRequestWrapper(original) {
+                    @Override
+                    public String getRequestURI() { return stripped; }
+                    @Override
+                    public StringBuffer getRequestURL() {
+                        return new StringBuffer(scheme + "://" + serverName
+                                + ((port == 80 || port == 443) ? "" : ":" + port)
+                                + stripped);
+                    }
+                };
+            }
+            chain.doFilter(req, response);
+        };
+        FilterRegistrationBean<Filter> bean = new FilterRegistrationBean<>(filter);
+        bean.addUrlPatterns("/api/*");
+        bean.setOrder(-101); // 在 Spring Security 之前执行
+        return bean;
     }
 }
