@@ -141,14 +141,11 @@
           <a-select v-model:value="createForm.sourceType" placeholder="选择源码来源">
             <a-select-option value="GIT_URL">Git 仓库 URL</a-select-option>
             <a-select-option value="ZIP_UPLOAD">ZIP 文件上传</a-select-option>
-            <a-select-option value="LOCAL_PATH">本地路径</a-select-option>
+
           </a-select>
         </a-form-item>
         <a-form-item v-if="createForm.sourceType === 'GIT_URL'" label="Git URL" required>
           <a-input v-model:value="createForm.sourceUrl" placeholder="https://github.com/user/repo.git" />
-        </a-form-item>
-        <a-form-item v-if="createForm.sourceType === 'LOCAL_PATH'" label="本地路径" required>
-          <a-input v-model:value="createForm.sourceUrl" placeholder="例如：D:\projects\my-app 或 /home/user/projects/my-app" />
         </a-form-item>
         <a-form-item v-if="createForm.sourceType === 'ZIP_UPLOAD'" label="上传源码包">
           <a-upload-dragger
@@ -286,10 +283,6 @@ async function handleCreateProject() {
       message.warning('Git URL 格式不正确，示例：https://github.com/user/repo.git')
       return
     }
-  }
-  if (createForm.sourceType === 'LOCAL_PATH' && !createForm.sourceUrl) {
-    message.warning('请输入本地项目路径')
-    return
   }
   if (createForm.sourceType === 'ZIP_UPLOAD' && !uploadFile.value) {
     message.warning('请先选择要上传的 ZIP 文件')

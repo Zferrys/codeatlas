@@ -73,10 +73,6 @@ public class ProjectServiceImpl implements ProjectService {
             }
         }
 
-        // LOCAL_PATH 校验
-        if ("LOCAL_PATH".equals(sourceType) && !StringUtils.hasText(request.getSourceUrl())) {
-            throw new BusinessException(ErrorCode.BAD_REQUEST, "本地路径不能为空");
-        }
 
         Project project = new Project();
         project.setName(request.getName());

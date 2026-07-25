@@ -310,7 +310,7 @@ public class ScanServiceImpl implements ScanService {
             } else {
                 String reason = (workDir == null)
                         ? "未配置源码路径，请使用 Git URL 或 ZIP 上传"
-                        : "源码路径不存在: " + workDir.toAbsolutePath() + "（服务器无法访问本地路径，请使用 ZIP 上传源码包）";
+                        : "源码路径不存在: " + workDir.toAbsolutePath() + "（可能是临时文件已被清理，请重新上传）";
                 throw new RuntimeException(reason);
             }
         } catch (Exception e) {
