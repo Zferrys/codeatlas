@@ -321,58 +321,6 @@ public class AiAnalysisService {
         return idx > 0 ? fqn.substring(idx + 1) : fqn;
     }
 
-    private BigDecimal calculateConfidence(Project project, List<ClassSummaryEntity> classes, AiResponse response) {
-        String content = response.getContent();
-        if (content == null || content.isEmpty()) {
-            return BigDecimal.valueOf(0.50);
-        }
-
-        double score = 0.55; // base confidence
-
-        // 引用项目特定类名越多，置信度越高
-        Set<String> projectClassNames = classes.stream()
-                .map(ClassSummaryEntity::getSimpleName)
-                .collect(Collectors.toSet());
-        long matchedClasses = projectClassNames.stream()
-                .filter(name -> content.contains(name))
-                .count();
-        if (matchedClasses >= 8) {
-            score += 0.20;
-        } else if (matchedClasses >= 4) {
-            score += 0.14;
-        } else if (matchedClasses >= 1) {
-            score += 0.08;
-        }
-
-        // 内容足够详细
-        if (content.length() > 1500) {
-            score += 0.12;
-        } else if (content.length() > 600) {
-            score += 0.06;
-        }
-
-        // 未达到 token 上限（说明回复完整）
-        if (response.getTokensUsed() < 3500) {
-            score += 0.08;
-        }
-
-        // AI 表达了不确定性则扣分
-        String lower = content.toLowerCase();
-        if (lower.contains("不确定") || lower.contains("无法确定") || lower.contains("unsure")
-                || lower.contains("cannot determine") || lower.contains("可能")) {
-            score -= 0.10;
-        }
-
-        // 引用了合理的架构概念（加分项）
-        if (lower.contains("分层") || lower.contains("依赖") || lower.contains("耦合")
-                || lower.contains("设计模式") || lower.contains("架构")) {
-            score += 0.05;
-        }
-
-        double clamped = Math.max(0.50, Math.min(0.95, score));
-        return BigDecimal.valueOf(Math.round(clamped * 100.0) / 100.0);
-    }
-
     private String toJson(Object obj) {
         try {
             return OBJECT_MAPPER.writeValueAsString(obj);
@@ -381,18 +329,6 @@ public class AiAnalysisService {
         }
     }
 
-    private String buildMetadata(Project project, ScanRecord scan, List<ClassSummaryEntity> classes, AiResponse response) {
-        Map<String, Object> meta = new HashMap<>();
-        meta.put("tokensUsed", response.getTokensUsed());
-        meta.put("latencyMs", response.getLatencyMs());
-        meta.put("classCount", classes.size());
-        meta.put("totalLines", scan.getTotalLines());
-        try {
-            return OBJECT_MAPPER.writeValueAsString(meta);
-        } catch (JsonProcessingException e) {
-            return "{}";
-        }
-    }
 
     /**
      * 大项目分片分析：按包分组拆分为多个子任务，并发分析后汇总。
