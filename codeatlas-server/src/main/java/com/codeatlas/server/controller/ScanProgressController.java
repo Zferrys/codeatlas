@@ -7,6 +7,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.event.EventListener;
 import org.springframework.http.MediaType;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
@@ -16,6 +17,10 @@ import java.io.IOException;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 
 @RestController
 @RequestMapping("/api/v1/projects/{projectId}/scans")
@@ -30,6 +35,13 @@ public class ScanProgressController {
 
     /** projectId → 该项目的 SseEmitter 列表 */
     private final Map<Long, CopyOnWriteArrayList<SseEmitter>> emitters = new ConcurrentHashMap<>();
+    /** emitter → 对应的 heartbeat 定时任务，emitter 关闭时需取消 */
+    private final Map<SseEmitter, ScheduledFuture<?>> heartbeats = new ConcurrentHashMap<>();
+    private final ScheduledExecutorService heartbeatExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
+        Thread t = new Thread(r, "sse-heartbeat");
+        t.setDaemon(true);
+        return t;
+    });
 
     @GetMapping(value = "/progress", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     @PreAuthorize("isAuthenticated()")
@@ -51,9 +63,20 @@ public class ScanProgressController {
             removeEmitter(projectId, emitter);
         }
 
+        // SSE 心跳：每 15s 发送注释行，防止中间件/代理因空闲断开连接
+        ScheduledFuture<?> heartbeat = heartbeatExecutor.scheduleAtFixedRate(() -> {
+            try {
+                emitter.send(SseEmitter.event().comment("heartbeat"));
+            } catch (IOException e) {
+                removeEmitter(projectId, emitter);
+            }
+        }, 15, 15, TimeUnit.SECONDS);
+        heartbeats.put(emitter, heartbeat);
+
         return emitter;
     }
 
+    @Async("scanExecutor")
     @EventListener
     public void onScanProgress(ScanProgressEvent event) {
         CopyOnWriteArrayList<SseEmitter> list = emitters.get(event.getProjectId());
@@ -84,6 +107,10 @@ public class ScanProgressController {
     }
 
     private void removeEmitter(Long projectId, SseEmitter emitter) {
+        ScheduledFuture<?> heartbeat = heartbeats.remove(emitter);
+        if (heartbeat != null) {
+            heartbeat.cancel(false);
+        }
         CopyOnWriteArrayList<SseEmitter> list = emitters.get(projectId);
         if (list != null) {
             list.remove(emitter);

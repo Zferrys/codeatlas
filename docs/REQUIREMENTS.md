@@ -3100,13 +3100,16 @@ server {
         gzip_static on;
     }
 
-    # API 反向代理
+    # API 反向代理（含 SSE 长连接支持）
     location /api/ {
         proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
         proxy_set_header Host $host;
+        proxy_set_header Connection "";
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_read_timeout 300s;  # AI 分析可能很久
+        proxy_read_timeout 1800s;      # 扫描/AI 最长 30min
+        proxy_buffering off;           # SSE 必须关闭缓冲，否则事件一次性到达
     }
 
     # WebSocket 升级
