@@ -12,6 +12,7 @@ import org.springframework.stereotype.Service;
 
 import java.io.File;
 import java.io.IOException;
+import java.lang.management.ManagementFactory;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.BasicFileAttributes;
@@ -31,13 +32,8 @@ public class CleanupService {
     private final ScanMapper scanMapper;
     private final AlertService alertService;
 
-    /** 上次清理时间 */
     private LocalDateTime lastCleanupTime;
-
-    /** 上次清理释放的字节数 */
     private long lastCleanupFreedBytes;
-
-    /** 上次清理的文件数 */
     private int lastCleanupFileCount;
 
     public CleanupService(WorkspaceConfig workspaceConfig, ProjectMapper projectMapper,
@@ -48,7 +44,7 @@ public class CleanupService {
         this.alertService = alertService;
     }
 
-    @Scheduled(fixedRate = 1_800_000) // 30 分钟
+    @Scheduled(fixedRate = 1_800_000)
     public void scheduledCleanup() {
         log.info("Scheduled cleanup triggered");
         checkDiskSpace();
@@ -58,9 +54,6 @@ public class CleanupService {
         checkInactiveProjects();
     }
 
-    /**
-     * 检查磁盘空间，低于 20% 触发告警并清理。
-     */
     public void checkDiskSpace() {
         try {
             Path baseDir = workspaceConfig.getBaseDir();
@@ -73,7 +66,6 @@ public class CleanupService {
             long freeGb = usableSpace / (1024 * 1024 * 1024);
             long totalGb = totalSpace / (1024 * 1024 * 1024);
 
-            // 计算工作空间大小
             long workspaceSize = calculateDirSize(baseDir);
             long workspaceMb = workspaceSize / (1024 * 1024);
 
@@ -89,7 +81,6 @@ public class CleanupService {
                 } catch (Exception e) {
                     log.warn("Failed to send disk alert: {}", e.getMessage());
                 }
-                // Reach more aggressive: Level 1 → 2 → 3
                 cleanOrphanDirectories();
                 if (freePercent < 10) {
                     cleanOldUploads();
@@ -100,9 +91,6 @@ public class CleanupService {
         }
     }
 
-    /**
-     * 检查 JVM 堆内存和系统可用内存。
-     */
     public void checkMemory() {
         Runtime rt = Runtime.getRuntime();
         long max = rt.maxMemory();
@@ -123,7 +111,6 @@ public class CleanupService {
             }
         }
 
-        // 系统可用内存检查
         long systemFree = rt.freeMemory() + (rt.maxMemory() - rt.totalMemory());
         long systemFreeMb = systemFree / 1024 / 1024;
         if (systemFreeMb < 200) {
@@ -137,9 +124,6 @@ public class CleanupService {
         }
     }
 
-    /**
-     * 清理超过 24 小时的孤儿扫描临时目录。
-     */
     public void cleanOrphanDirectories() {
         Path scansDir = workspaceConfig.getScansDir();
         if (scansDir == null || !Files.exists(scansDir)) {
@@ -159,7 +143,6 @@ public class CleanupService {
                 BasicFileAttributes attrs = Files.readAttributes(dir.toPath(), BasicFileAttributes.class);
                 Instant created = attrs.creationTime().toInstant();
                 if (created.isBefore(cutoff)) {
-                    // 检查是否包含扫描ID（格式: projectId-scanId）
                     String name = dir.getName();
                     if (name.matches("^\\d+-\\d+$")) {
                         long size = calculateDirSize(dir.toPath());
@@ -182,9 +165,6 @@ public class CleanupService {
         lastCleanupFileCount += count;
     }
 
-    /**
-     * 清理超过 7 天的上传文件。
-     */
     public void cleanOldUploads() {
         Path uploadsDir = workspaceConfig.getUploadsDir();
         if (uploadsDir == null || !Files.exists(uploadsDir)) {
@@ -223,9 +203,6 @@ public class CleanupService {
         lastCleanupFileCount += count;
     }
 
-    /**
-     * 检查不活跃项目（30 天未访问），记录日志。
-     */
     public void checkInactiveProjects() {
         try {
             List<Project> projects = projectMapper.findAll();
@@ -261,13 +238,9 @@ public class CleanupService {
         }
     }
 
-    /**
-     * 获取清理状态数据，供管理后台 API 使用。
-     */
     public Map<String, Object> getCleanupStatus() {
         Map<String, Object> status = new LinkedHashMap<>();
 
-        // 磁盘信息
         try {
             Path baseDir = workspaceConfig.getBaseDir();
             File disk = baseDir.toFile();
@@ -281,19 +254,30 @@ public class CleanupService {
             status.put("diskError", e.getMessage());
         }
 
-        // 内存信息
         Runtime rt = Runtime.getRuntime();
         status.put("heapMaxMb", rt.maxMemory() / (1024 * 1024));
         status.put("heapTotalMb", rt.totalMemory() / (1024 * 1024));
         status.put("heapFreeMb", rt.freeMemory() / (1024 * 1024));
         status.put("heapUsedPercent", (int) Math.round((rt.totalMemory() - rt.freeMemory()) * 100.0 / rt.maxMemory()));
 
-        // 清理统计
+        long uptimeMs = ManagementFactory.getRuntimeMXBean().getUptime();
+        long uptimeMinutes = uptimeMs / 60000;
+        status.put("uptimeMinutes", uptimeMinutes);
+        if (uptimeMinutes < 60) {
+            status.put("uptimeFormatted", uptimeMinutes + "m");
+        } else if (uptimeMinutes < 1440) {
+            status.put("uptimeFormatted", (uptimeMinutes / 60) + "h " + (uptimeMinutes % 60) + "m");
+        } else {
+            status.put("uptimeFormatted", (uptimeMinutes / 1440) + "d " + ((uptimeMinutes % 1440) / 60) + "h");
+        }
+        status.put("startedAt", LocalDateTime.now()
+                .minus(uptimeMs / 1000, ChronoUnit.SECONDS)
+                .toString().replace("T", " "));
+
         status.put("lastCleanupTime", lastCleanupTime != null ? lastCleanupTime.toString() : "never");
         status.put("lastCleanupFreedMb", lastCleanupFreedBytes / (1024 * 1024));
         status.put("lastCleanupFileCount", lastCleanupFileCount);
 
-        // 项目统计
         try {
             List<Project> projects = projectMapper.findAll();
             status.put("totalProjects", projects.size());

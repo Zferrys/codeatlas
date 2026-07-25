@@ -35,6 +35,10 @@
         </a-menu-item>
 
         <a-menu-item-group v-if="authStore.user?.role === 'ADMIN'" :title="$t('nav.admin')">
+          <a-menu-item key="admin-dashboard">
+            <template #icon><AppstoreOutlined /></template>
+            <span>系统概览</span>
+          </a-menu-item>
           <a-menu-item key="admin-users">
             <template #icon><TeamOutlined /></template>
             <span>{{ $t('nav.userManagement') }}</span>
@@ -290,7 +294,7 @@ const breadcrumbs = computed(() => {
   } else if (pathParts[0] === 'admin') {
     items.push({ label: t('nav.workspace'), path: '/dashboard' })
     items.push({ label: t('nav.admin') })
-    const adminTabMap = { users: t('nav.userManagement'), 'audit-log': t('nav.auditLog') }
+    const adminTabMap = { dashboard: '系统概览', users: t('nav.userManagement'), 'audit-log': t('nav.auditLog') }
     if (pathParts.length >= 2) {
       items.push({ label: adminTabMap[pathParts[1]] || pathParts[1] })
     }
@@ -316,6 +320,8 @@ watch(() => route.name, (name) => {
   if (!name) return
   if (name === 'Dashboard') {
     selectedKeys.value = ['dashboard']
+  } else if (name === 'AdminDashboard') {
+    selectedKeys.value = ['admin-dashboard']
   } else if (name === 'AdminUsers') {
     selectedKeys.value = ['admin-users']
   } else if (name === 'AdminAuditLog') {
@@ -336,6 +342,8 @@ function onMenuClick({ key }) {
 
   if (key === 'dashboard') {
     router.push('/dashboard')
+  } else if (key === 'admin-dashboard') {
+    router.push('/admin/dashboard')
   } else if (key === 'admin-users') {
     router.push('/admin/users')
   } else if (key === 'admin-audit-log') {
