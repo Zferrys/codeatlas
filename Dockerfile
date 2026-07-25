@@ -1,5 +1,6 @@
 # ---- 前端构建 ----
 FROM node:20-alpine AS frontend-builder
+ENV NODE_OPTIONS="--max-old-space-size=384"
 WORKDIR /frontend
 COPY codeatlas-web/package.json codeatlas-web/package-lock.json ./
 RUN npm ci --silent
