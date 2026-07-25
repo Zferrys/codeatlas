@@ -198,6 +198,7 @@ public class ScanServiceImpl implements ScanService {
             }
 
             if (workDir != null && Files.exists(workDir)) {
+                checkMemory(projectId, scan.getId(), "PARSING");
                 emitProgress(projectId, scan.getId(), "PARSING", 30, "解析 Java 源码...");
                 List<ClassSummaryResult> classes = javaParserService.analyzeDirectory(workDir);
                 totalClasses = classes.size();
@@ -262,6 +263,7 @@ public class ScanServiceImpl implements ScanService {
                 }
 
                 try {
+                    checkMemory(projectId, scan.getId(), "NEO4J_IMPORT");
                     neo4jGraphService.importGraph(projectId, classes);
                 } catch (Exception e) {
                     log.warn("Neo4j graph import failed for projectId={}: {}", projectId, e.getMessage());
@@ -353,6 +355,7 @@ public class ScanServiceImpl implements ScanService {
         projectMapper.updateStats(project);
 
         if ("COMPLETED".equals(scan.getStatus()) && totalClasses > 0) {
+            checkMemory(projectId, scan.getId(), "AI_ANALYSIS");
             emitProgress(projectId, scan.getId(), "AI", 80, "开始 AI 架构分析...");
             aiAnalysisService.triggerAsync(projectId, scan.getId());
         }
@@ -374,6 +377,31 @@ public class ScanServiceImpl implements ScanService {
             eventPublisher.publishEvent(new ScanProgressEvent(projectId, scanId, stage, progress, message));
         } catch (Exception e) {
             log.debug("Failed to emit progress event: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * 检查 JVM 堆内存使用率，紧张时发日志告警 + SSE 通知。
+     * 服务器内存有限（3.7GB，JVM 堆上限 512MB），大项目扫描需要感知内存状态。
+     */
+    private void checkMemory(Long projectId, Long scanId, String stage) {
+        Runtime rt = Runtime.getRuntime();
+        long max = rt.maxMemory();
+        long total = rt.totalMemory();
+        long free = rt.freeMemory();
+        long used = total - free;
+        double usageRatio = (double) used / max;
+
+        long usedMb = used / 1024 / 1024;
+        long maxMb = max / 1024 / 1024;
+        if (usageRatio > 0.85) {
+            String warn = String.format("内存紧张: %s 阶段堆使用率 %.0f%% (已用 %dMB / 上限 %dMB)",
+                    stage, usageRatio * 100, usedMb, maxMb);
+            log.warn(warn);
+            emitProgress(projectId, scanId, stage, -1, warn);
+        } else {
+            log.info("内存正常: {} 阶段堆使用率 {}% ({}MB / {}MB)",
+                    stage, Math.round(usageRatio * 100), usedMb, maxMb);
         }
     }
 
