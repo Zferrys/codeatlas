@@ -1,7 +1,16 @@
 <template>
   <div class="story-page">
     <a-spin :spinning="loading" tip="加载架构叙事...">
-      <div v-if="!loading && error" class="story-error">
+      <div v-if="aiProcessing" class="story-processing">
+        <a-spin>
+          <template #tip>
+            <span style="font-size: 15px;">AI 正在分析架构叙事，请稍候...</span>
+          </template>
+        </a-spin>
+        <p class="processing-hint">扫描完成后 AI 会自动生成架构叙事，通常需要 1-3 分钟</p>
+      </div>
+
+      <div v-else-if="!loading && error" class="story-error">
         <a-result status="error" title="加载失败" :sub-title="error">
           <template #extra>
             <a-button type="primary" @click="fetchStory">重试</a-button>
@@ -40,7 +49,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { ReloadOutlined } from '@ant-design/icons-vue'
@@ -67,8 +76,50 @@ const loading = ref(false)
 const error = ref(null)
 const story = ref(null)
 const generating = ref(false)
+const aiProcessing = ref(false)
+let pollTimer = null
 
-onMounted(() => fetchStory())
+onMounted(() => checkAiStatus())
+onBeforeUnmount(() => stopPolling())
+
+async function checkAiStatus() {
+  try {
+    const res = await api.get(`/projects/${projectId.value}/scans/status`)
+    const data = res.data.data
+    if (data && data.aiAnalysisRunning) {
+      aiProcessing.value = true
+      startPolling()
+    } else {
+      fetchStory()
+    }
+  } catch (e) {
+    fetchStory()
+  }
+}
+
+function startPolling() {
+  stopPolling()
+  pollTimer = setInterval(async () => {
+    try {
+      const res = await api.get(`/projects/${projectId.value}/insights`, { params: { type: 'ARCH_STORY' } })
+      const list = res.data.data?.records || []
+      if (list.length > 0) {
+        story.value = list[0]
+        aiProcessing.value = false
+        stopPolling()
+      }
+    } catch (e) {
+      // silent retry
+    }
+  }, 5000)
+}
+
+function stopPolling() {
+  if (pollTimer) {
+    clearInterval(pollTimer)
+    pollTimer = null
+  }
+}
 
 async function fetchStory() {
   loading.value = true
@@ -111,6 +162,8 @@ function formatDate(date) {
 
 <style scoped>
 .story-page { padding: 0; max-width: 960px; margin: 0 auto; }
+.story-processing { padding: 60px 0; text-align: center; }
+.processing-hint { color: #999; font-size: 13px; margin-top: 20px; }
 .story-error, .story-empty { padding: 40px 0; }
 .story-content { background: #fff; border-radius: 8px; padding: 24px 32px 48px; }
 .markdown-body { line-height: 1.9; color: #333; font-size: 15px; }

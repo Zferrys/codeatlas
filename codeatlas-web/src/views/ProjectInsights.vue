@@ -1,10 +1,19 @@
 <template>
   <div class="insights-page">
+    <!-- AI 处理中状态 -->
+    <div v-if="aiProcessing" class="state-wrap" style="text-align:center; padding: 80px 0;">
+      <a-spin size="large">
+        <template #tip>
+          <span style="font-size: 15px;">AI 正在分析中，请稍候...</span>
+        </template>
+      </a-spin>
+      <p style="color: #999; font-size: 13px; margin-top: 16px;">扫描完成后 AI 会自动生成洞察，通常需要 1-3 分钟</p>
+    </div>
+
     <!-- 加载态 -->
-    <a-spin :spinning="loading" tip="AI 正在分析...">
+    <a-spin v-else :spinning="loading" tip="AI 正在分析...">
       <a-skeleton v-if="loading" active :paragraph="{ rows: 6 }" />
 
-      <!-- 错误态 -->
       <div v-else-if="error" class="state-wrap">
         <a-result status="error" title="加载失败" :sub-title="error">
           <template #extra>
@@ -13,7 +22,6 @@
         </a-result>
       </div>
 
-      <!-- 空状态 -->
       <div v-else-if="insights.length === 0" class="state-wrap">
         <a-empty description="暂无 AI 洞察">
           <template #description>
@@ -22,7 +30,6 @@
         </a-empty>
       </div>
 
-      <!-- 洞察列表 -->
       <template v-else>
         <div class="insights-toolbar">
           <a-radio-group v-model:value="activeType" option-type="button" size="small" @change="onTypeChange">
@@ -78,7 +85,6 @@
       </template>
     </a-spin>
 
-    <!-- 详情弹窗 -->
     <a-modal
       v-model:open="modalVisible"
       :title="selectedInsight?.title || '洞察详情'"
@@ -105,7 +111,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted, nextTick } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import { marked } from 'marked'
 import { markedHighlight } from 'marked-highlight'
@@ -114,7 +120,6 @@ import 'highlight.js/styles/github.css'
 import { ClockCircleOutlined } from '@ant-design/icons-vue'
 import api from '../api'
 
-// Configure marked with highlight.js for code syntax highlighting
 marked.use(markedHighlight({
   langPrefix: 'hljs language-',
   highlight(code, lang) {
@@ -134,6 +139,8 @@ const insights = ref([])
 const activeType = ref('all')
 const selectedInsight = ref(null)
 const modalVisible = ref(false)
+const aiProcessing = ref(false)
+let pollTimer = null
 
 watch(selectedInsight, (val) => {
   modalVisible.value = val !== null
@@ -144,7 +151,47 @@ const filteredInsights = computed(() => {
   return insights.value.filter(i => i.type === activeType.value)
 })
 
-onMounted(() => fetchInsights())
+onMounted(() => checkAiStatus())
+onBeforeUnmount(() => stopPolling())
+
+async function checkAiStatus() {
+  try {
+    const res = await api.get(`/projects/${projectId.value}/scans/status`)
+    const data = res.data.data
+    if (data && data.aiAnalysisRunning) {
+      aiProcessing.value = true
+      startPolling()
+    } else {
+      fetchInsights()
+    }
+  } catch (e) {
+    fetchInsights()
+  }
+}
+
+function startPolling() {
+  stopPolling()
+  pollTimer = setInterval(async () => {
+    try {
+      const res = await api.get(`/projects/${projectId.value}/insights`)
+      const list = res.data.data?.records || []
+      if (list.length > 0) {
+        insights.value = list
+        aiProcessing.value = false
+        stopPolling()
+      }
+    } catch (e) {
+      // silent retry
+    }
+  }, 5000)
+}
+
+function stopPolling() {
+  if (pollTimer) {
+    clearInterval(pollTimer)
+    pollTimer = null
+  }
+}
 
 async function fetchInsights() {
   loading.value = true
@@ -239,8 +286,6 @@ function formatDate(date) {
 <style scoped>
 .insights-page { padding: 0; }
 .state-wrap { padding: 40px 0; }
-
-/* 工具栏 */
 .insights-toolbar {
   display: flex;
   align-items: center;
@@ -249,30 +294,21 @@ function formatDate(date) {
   flex-wrap: wrap;
   gap: 8px;
 }
-
-.insight-count {
-  font-size: 13px;
-  color: #999;
-}
-
-/* 卡片 */
+.insight-count { font-size: 13px; color: #999; }
 .insight-card {
   border-radius: 12px;
   height: 100%;
   transition: transform 0.2s, box-shadow 0.2s;
 }
-
 .insight-card:hover {
   transform: translateY(-2px);
   box-shadow: 0 6px 20px rgba(0,0,0,0.08);
 }
-
 .card-title-row {
   display: flex;
   align-items: center;
   gap: 10px;
 }
-
 .card-type-icon {
   width: 28px;
   height: 28px;
@@ -285,7 +321,6 @@ function formatDate(date) {
   justify-content: center;
   flex-shrink: 0;
 }
-
 .card-title-text {
   font-size: 14px;
   font-weight: 600;
@@ -293,7 +328,6 @@ function formatDate(date) {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-
 .insight-preview {
   color: #666;
   font-size: 13px;
@@ -302,21 +336,13 @@ function formatDate(date) {
   overflow: hidden;
   margin-bottom: 16px;
 }
-
-/* 置信度条 */
 .insight-confidence {
   display: flex;
   align-items: center;
   gap: 8px;
   margin-bottom: 8px;
 }
-
-.confidence-label {
-  font-size: 12px;
-  color: #999;
-  flex-shrink: 0;
-}
-
+.confidence-label { font-size: 12px; color: #999; flex-shrink: 0; }
 .confidence-bar-track {
   flex: 1;
   height: 4px;
@@ -324,19 +350,12 @@ function formatDate(date) {
   border-radius: 2px;
   overflow: hidden;
 }
-
 .confidence-bar-fill {
   height: 100%;
   border-radius: 2px;
   transition: width 0.4s ease;
 }
-
-.confidence-value {
-  font-size: 12px;
-  font-weight: 600;
-  flex-shrink: 0;
-}
-
+.confidence-value { font-size: 12px; font-weight: 600; flex-shrink: 0; }
 .insight-time {
   font-size: 12px;
   color: #bbb;
@@ -344,8 +363,6 @@ function formatDate(date) {
   align-items: center;
   gap: 4px;
 }
-
-/* 详情弹窗 */
 .insight-detail .insight-meta {
   display: flex;
   gap: 16px;
@@ -357,7 +374,6 @@ function formatDate(date) {
   font-size: 13px;
   flex-wrap: wrap;
 }
-
 .insight-meta code {
   background: #f5f5f5;
   padding: 1px 6px;
@@ -365,12 +381,7 @@ function formatDate(date) {
   font-size: 12px;
   color: #1677ff;
 }
-
-.insight-content {
-  padding: 8px 0;
-}
-
-/* Markdown 样式 (with highlight.js) */
+.insight-content { padding: 8px 0; }
 .markdown-body { line-height: 1.8; font-size: 14px; color: #333; }
 .markdown-body :deep(h1) { font-size: 22px; font-weight: 600; margin-top: 24px; }
 .markdown-body :deep(h2) { font-size: 18px; font-weight: 600; margin-top: 24px; color: #1a1a2e; }
@@ -400,29 +411,10 @@ function formatDate(date) {
   margin: 12px 0;
   border: 1px solid #e8e8e8;
 }
-.markdown-body :deep(pre code) {
-  background: none;
-  padding: 0;
-  font-size: 13px;
-}
-.markdown-body :deep(table) {
-  border-collapse: collapse;
-  margin: 12px 0;
-  width: 100%;
-}
-.markdown-body :deep(th), .markdown-body :deep(td) {
-  border: 1px solid #e8e8e8;
-  padding: 8px 12px;
-  font-size: 13px;
-}
-.markdown-body :deep(th) {
-  background: #fafafa;
-  font-weight: 600;
-}
-.markdown-body :deep(a) {
-  color: #1677ff;
-}
-.markdown-body :deep(img) {
-  max-width: 100%;
-}
+.markdown-body :deep(pre code) { background: none; padding: 0; font-size: 13px; }
+.markdown-body :deep(table) { border-collapse: collapse; margin: 12px 0; width: 100%; }
+.markdown-body :deep(th), .markdown-body :deep(td) { border: 1px solid #e8e8e8; padding: 8px 12px; font-size: 13px; }
+.markdown-body :deep(th) { background: #fafafa; font-weight: 600; }
+.markdown-body :deep(a) { color: #1677ff; }
+.markdown-body :deep(img) { max-width: 100%; }
 </style>

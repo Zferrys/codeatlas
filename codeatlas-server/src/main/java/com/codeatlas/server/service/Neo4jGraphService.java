@@ -99,47 +99,56 @@ public class Neo4jGraphService {
     }
 
     /**
-     * 从 Neo4j 查询项目依赖图谱。
+     * 从 Neo4j 查询项目依赖图谱。单次 Cypher 查询同时返回节点和边，减少网络往返。
      */
     public GraphVO queryFullGraph(Long projectId) {
         try (Session session = neo4jDriver.session()) {
-            // 查询所有类节点
-            var nodeResult = session.run(
-                    "MATCH (c:Class {projectId: $projectId}) RETURN c",
+            // 单次查询：先收集所有节点，再 OPTIONAL MATCH 边，避免无边时返回空
+            var result = session.run(
+                    "MATCH (c:Class {projectId: $projectId}) " +
+                    "WITH collect(c) AS nodes " +
+                    "OPTIONAL MATCH (a:Class {projectId: $projectId})-[r:DEPENDS_ON]->(b:Class {projectId: $projectId}) " +
+                    "RETURN nodes, collect({source: a.fqn, target: b.fqn}) AS edges",
                     Values.parameters("projectId", projectId));
 
             List<GraphVO.NodeVO> graphNodes = new ArrayList<>();
-            Set<String> fqnSet = new HashSet<>();
-            while (nodeResult.hasNext()) {
-                var record = nodeResult.next();
-                var node = record.get("c").asNode();
-                String fqn = node.get("fqn").asString();
-                fqnSet.add(fqn);
-
-                GraphVO.NodeVO n = new GraphVO.NodeVO();
-                n.setId(fqn);
-                n.setLabel(safeProp(node, "simpleName"));
-                String layer = safeProp(node, "layer");
-                n.setGroup(layer != null ? layer.toLowerCase() : "unknown");
-                n.setLayer(layer);
-                n.setMethods(safePropInt(node, "totalMethods"));
-                n.setLineCount(safePropInt(node, "lineCount"));
-                graphNodes.add(n);
-            }
-
-            // 查询所有 DEPENDS_ON 关系
-            var edgeResult = session.run(
-                    "MATCH (a:Class {projectId: $projectId})-[r:DEPENDS_ON]->(b:Class) WHERE b.projectId = $projectId RETURN a.fqn AS source, b.fqn AS target",
-                    Values.parameters("projectId", projectId));
-
             List<GraphVO.EdgeVO> graphEdges = new ArrayList<>();
-            while (edgeResult.hasNext()) {
-                var record = edgeResult.next();
-                GraphVO.EdgeVO e = new GraphVO.EdgeVO();
-                e.setSource(record.get("source").asString());
-                e.setTarget(record.get("target").asString());
-                e.setType("dependency");
-                graphEdges.add(e);
+
+            if (result.hasNext()) {
+                var record = result.next();
+
+                // 解析节点
+                var nodesList = record.get("nodes").asList();
+                for (var nodeValue : nodesList) {
+                    var node = (org.neo4j.driver.types.Node) nodeValue;
+                    String fqn = node.get("fqn").asString();
+
+                    GraphVO.NodeVO n = new GraphVO.NodeVO();
+                    n.setId(fqn);
+                    n.setLabel(safeProp(node, "simpleName"));
+                    String layer = safeProp(node, "layer");
+                    n.setGroup(layer != null ? layer.toLowerCase() : "unknown");
+                    n.setLayer(layer);
+                    n.setMethods(safePropInt(node, "totalMethods"));
+                    n.setLineCount(safePropInt(node, "lineCount"));
+                    graphNodes.add(n);
+                }
+
+                // 解析边
+                var edgesList = record.get("edges").asList();
+                for (var edgeValue : edgesList) {
+                    @SuppressWarnings("unchecked")
+                    var edgeMap = (Map<String, Object>) edgeValue;
+                    String source = (String) edgeMap.get("source");
+                    String target = (String) edgeMap.get("target");
+                    if (source != null && target != null) {
+                        GraphVO.EdgeVO e = new GraphVO.EdgeVO();
+                        e.setSource(source);
+                        e.setTarget(target);
+                        e.setType("dependency");
+                        graphEdges.add(e);
+                    }
+                }
             }
 
             GraphVO graph = new GraphVO();

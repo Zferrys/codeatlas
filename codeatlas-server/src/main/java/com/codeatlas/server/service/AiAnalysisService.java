@@ -12,6 +12,7 @@ import com.codeatlas.server.entity.ClassSummaryEntity;
 import com.codeatlas.server.entity.InsightEntity;
 import com.codeatlas.server.entity.Project;
 import com.codeatlas.server.entity.ScanRecord;
+import com.codeatlas.server.event.ScanProgressEvent;
 import com.codeatlas.server.mapper.AiAuditLogMapper;
 import com.codeatlas.server.mapper.ClassSummaryMapper;
 import com.codeatlas.server.mapper.ProjectMapper;
@@ -25,12 +26,14 @@ import io.micrometer.core.annotation.Timed;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 @Service
@@ -39,9 +42,7 @@ public class AiAnalysisService {
     private static final Logger log = LoggerFactory.getLogger(AiAnalysisService.class);
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
-    // Max classes per AI analysis chunk before splitting
     private static final int MAX_CLASSES_PER_CHUNK = 200;
-    // Max concurrent chunk analyses
     private static final int MAX_CHUNK_CONCURRENCY = 3;
 
     private final ProjectMapper projectMapper;
@@ -54,6 +55,10 @@ public class AiAnalysisService {
     private final AlertService alertService;
     private final TokenBudgetManager tokenBudgetManager;
     private final CodeAtlasMetrics metrics;
+    private final ApplicationEventPublisher eventPublisher;
+
+    /** 正在运行的 AI 分析，key = projectId */
+    private final ConcurrentHashMap<Long, Boolean> runningAnalyses = new ConcurrentHashMap<>();
 
     @Lazy
     @Autowired
@@ -66,6 +71,7 @@ public class AiAnalysisService {
                               AlertService alertService,
                               TokenBudgetManager tokenBudgetManager,
                               CodeAtlasMetrics metrics,
+                              ApplicationEventPublisher eventPublisher,
                               @Autowired(required = false) AiClient aiClient) {
         this.projectMapper = projectMapper;
         this.scanMapper = scanMapper;
@@ -76,6 +82,7 @@ public class AiAnalysisService {
         this.alertService = alertService;
         this.tokenBudgetManager = tokenBudgetManager;
         this.metrics = metrics;
+        this.eventPublisher = eventPublisher;
         this.aiClient = aiClient;
         if (aiClient != null) {
             log.info("AiAnalysisService initialized with AI client: {}", aiClient.getModelName());
@@ -84,21 +91,33 @@ public class AiAnalysisService {
         }
     }
 
-    /**
-     * 异步触发架构分析（不阻塞调用方）。
-     */
     @Async("aiAnalysisExecutor")
     public void triggerAsync(Long projectId, Long scanId) {
+        runningAnalyses.put(projectId, true);
         try {
+            publishAiEvent(projectId, scanId, "AI_STARTED", 82, "AI 开始分析架构叙事...");
             analyzeArchitecture(projectId, scanId);
+            publishAiEvent(projectId, scanId, "AI_COMPLETED", 95, "AI 架构叙事分析完成");
         } catch (Exception e) {
             log.error("AI analysis failed for projectId={}, scanId={}", projectId, scanId, e);
+            publishAiEvent(projectId, scanId, "AI_FAILED", 90, "AI 分析失败: " + e.getMessage());
+        } finally {
+            runningAnalyses.remove(projectId);
         }
     }
 
-    /**
-     * 同步执行架构叙事分析。
-     */
+    public boolean isAiAnalysisRunning(Long projectId) {
+        return Boolean.TRUE.equals(runningAnalyses.get(projectId));
+    }
+
+    private void publishAiEvent(Long projectId, Long scanId, String stage, int progress, String message) {
+        try {
+            eventPublisher.publishEvent(new ScanProgressEvent(projectId, scanId, stage, progress, message));
+        } catch (Exception e) {
+            log.debug("Failed to publish AI progress event: {}", e.getMessage());
+        }
+    }
+
     @Timed(value = "ai.analysis.duration", description = "AI architecture analysis duration")
     public InsightEntity analyzeArchitecture(Long projectId, Long scanId) {
         if (aiClient == null) {
@@ -120,7 +139,6 @@ public class AiAnalysisService {
         long totalLatency = 0;
 
         if (classes.size() > MAX_CLASSES_PER_CHUNK) {
-            // 大项目分片：按包/模块拆分为多个子任务分别分析，再汇总
             log.info("Large project detected: {} classes > {}, triggering chunked analysis for projectId={}",
                     classes.size(), MAX_CLASSES_PER_CHUNK, projectId);
             finalContent = analyzeWithChunking(project, scan, classes);
@@ -129,7 +147,6 @@ public class AiAnalysisService {
                 return null;
             }
         } else {
-            // 常规单次分析
             Map<String, String> vars = buildPromptVariables(project, scan, classes);
             PromptTemplate template = new PromptTemplate("prompts/architecture-story.md");
             String prompt = template.render(vars);
@@ -139,7 +156,6 @@ public class AiAnalysisService {
                 return null;
             }
 
-            // 预算前置检查：预估 token 数（中文约 1.5 字符/token）
             int estimatedTokens = prompt.length() * 2 / 3 + 4096;
             if (!tokenBudgetManager.tryConsume(estimatedTokens)) {
                 log.warn("AI token monthly budget exceeded, rejecting analysis for projectId={}", projectId);
@@ -148,7 +164,6 @@ public class AiAnalysisService {
                 return null;
             }
 
-            // 提示注入过滤
             String sanitizedPrompt = AiPromptSanitizer.sanitize(prompt);
 
             AiRequest request = new AiRequest();
@@ -174,7 +189,6 @@ public class AiAnalysisService {
             totalLatency = response.getLatencyMs();
         }
 
-        // 幻觉检测
         HallucinationChecker.HallucinationResult hResult =
                 hallucinationChecker.check(finalContent, classes);
         if (hResult.hasHallucination()) {
@@ -182,7 +196,6 @@ public class AiAnalysisService {
             log.warn("Hallucination check: result={}, fakeClasses={}, action={}",
                     hResult.hasHallucination(), hResult.getFakeClasses().size(), action);
             if (action == HallucinationChecker.Action.RETRY && classes.size() <= MAX_CLASSES_PER_CHUNK) {
-                // 低温重试一次（仅对非分片项目，分片项目已较复杂）
                 AiRequest retryReq = new AiRequest();
                 retryReq.setPrompt(finalContent);
                 retryReq.setSystemPrompt("你是一位资深软件架构师。请分析代码库并用中文生成深入、准确的架构叙事报告。");
@@ -199,7 +212,6 @@ public class AiAnalysisService {
             }
         }
 
-        // 保存 insight
         InsightEntity insight = new InsightEntity();
         insight.setScanId(scanId);
         insight.setProjectId(projectId);
@@ -216,10 +228,6 @@ public class AiAnalysisService {
         return insight;
     }
 
-    /**
-     * 带 Resilience4j 熔断、重试、隔离的 AI 调用。
-     * 通过 self-injection 确保注解代理生效。
-     */
     @CircuitBreaker(name = "aiClient", fallbackMethod = "aiFallback")
     @Retry(name = "aiClient")
     @Bulkhead(name = "aiClient")
@@ -238,9 +246,6 @@ public class AiAnalysisService {
         return response;
     }
 
-    /**
-     * 熔断/重试耗尽时的降级方法。
-     */
     public AiResponse aiFallback(AiRequest request, Exception e) {
         log.warn("AI call fallback: circuit breaker open or retries exhausted: {}", e.getMessage());
         metrics.recordAiCallFailed();
@@ -256,7 +261,6 @@ public class AiAnalysisService {
         vars.put("classCount", String.valueOf(classes.size()));
         vars.put("totalLines", String.valueOf(scan.getTotalLines() != null ? scan.getTotalLines() : 0));
 
-        // 分层分布
         Map<String, Long> layerDist = classes.stream()
                 .filter(c -> c.getLayer() != null)
                 .collect(Collectors.groupingBy(ClassSummaryEntity::getLayer, Collectors.counting()));
@@ -266,7 +270,6 @@ public class AiAnalysisService {
         }
         vars.put("layerDistribution", layerInfo.toString());
 
-        // 关键类摘要：取有依赖最多的前 15 个类
         List<ClassSummaryEntity> topClasses = classes.stream()
                 .sorted((a, b) -> Integer.compare(countDeps(b), countDeps(a)))
                 .limit(15)
@@ -282,7 +285,6 @@ public class AiAnalysisService {
         }
         vars.put("keyClasses", keyClasses.toString());
 
-        // 依赖关系高亮：取前 10 条边
         StringBuilder depHighlights = new StringBuilder();
         int edgeCount = 0;
         Set<String> fqnSet = classes.stream().map(ClassSummaryEntity::getFqn).collect(Collectors.toSet());
@@ -329,12 +331,7 @@ public class AiAnalysisService {
         }
     }
 
-
-    /**
-     * 大项目分片分析：按包分组拆分为多个子任务，并发分析后汇总。
-     */
     private String analyzeWithChunking(Project project, ScanRecord scan, List<ClassSummaryEntity> classes) {
-        // 按顶层包分组
         Map<String, List<ClassSummaryEntity>> groups = new LinkedHashMap<>();
         for (ClassSummaryEntity cls : classes) {
             String pkg = cls.getPackageName();
@@ -345,7 +342,6 @@ public class AiAnalysisService {
         log.info("Chunking: {} classes split into {} groups for projectId={}",
                 classes.size(), groups.size(), project.getId());
 
-        // Phase 1: 每个分组独立分析
         List<String> chunkResults = new ArrayList<>();
         String systemPrompt = "你是一位资深软件架构师。请分析以下代码模块，用中文输出该模块的：1) 职责描述 2) 关键类 3) 对外依赖。简明扼要，不超过500字。";
 
@@ -385,7 +381,6 @@ public class AiAnalysisService {
             return null;
         }
 
-        // Phase 2: 全局汇总
         StringBuilder combinedChunks = new StringBuilder();
         for (int i = 0; i < chunkResults.size(); i++) {
             combinedChunks.append(chunkResults.get(i)).append("\n\n");
@@ -407,7 +402,6 @@ public class AiAnalysisService {
             log.info("Chunking summary completed: groups={}, tokens={}", chunkResults.size(), summaryResp.getTokensUsed());
             return summaryResp.getContent();
         }
-        // 汇总失败则返回分片结果的直接拼接
         log.warn("Chunking summary failed, returning raw merged chunks");
         return combinedChunks.toString();
     }
@@ -452,9 +446,6 @@ public class AiAnalysisService {
         return BigDecimal.valueOf(Math.round(clamped * 100.0) / 100.0);
     }
 
-    /**
-     * 异步写入 AI 审计日志，不阻塞主流程。
-     */
     @Async("auditExecutor")
     public void saveAiAuditLog(String model, String stage, Long projectId, Long userId,
                                 long promptTokens, long completionTokens,
@@ -473,7 +464,6 @@ public class AiAnalysisService {
             logEntity.setSuccess(success);
             logEntity.setErrorMessage(errorMessage);
 
-            // 费用估算: Claude ≈ $15/MTok 输出 $3/MTok 输入, 简化按 $8/MTok 估
             if (totalTokens > 0) {
                 double cost = totalTokens / 1_000_000.0 * 8.0;
                 logEntity.setCost(java.math.BigDecimal.valueOf(Math.round(cost * 100000.0) / 100000.0));

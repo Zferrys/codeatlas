@@ -43,8 +43,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
@@ -126,13 +128,11 @@ public class ScanServiceImpl implements ScanService {
             throw new BusinessException(ErrorCode.NOT_FOUND, "项目不存在");
         }
 
-        // 检查是否有正在运行的扫描
         ScanRecord latest = scanMapper.findLatestByProjectId(projectId);
         if (latest != null && "RUNNING".equals(latest.getStatus())) {
             throw new BusinessException(ErrorCode.SCAN_ALREADY_RUNNING, "已有扫描正在运行");
         }
 
-        // GitHub 仓库预检：先查大小再决定能不能扫，避免网络传输太久
         if ("GIT_URL".equals(project.getSourceType()) && project.getSourceUrl() != null) {
             long estimatedBytes = gitService.estimateRepoSize(project.getSourceUrl());
             if (estimatedBytes > 100L * 1024 * 1024) {
@@ -142,7 +142,6 @@ public class ScanServiceImpl implements ScanService {
             }
         }
 
-        // 创建扫描记录并立即返回，实际扫描在后台线程执行
         ScanRecord scan = new ScanRecord();
         scan.setProjectId(projectId);
         scan.setStatus("RUNNING");
@@ -151,7 +150,6 @@ public class ScanServiceImpl implements ScanService {
 
         metrics.recordScanTriggered();
 
-        // 异步执行扫描，让 POST 立即返回，前端通过 SSE 获取实时进度
         final boolean isIncremental = incremental;
         CompletableFuture.runAsync(() -> executeScan(project, scan, userId, isIncremental), scanExecutor)
                 .exceptionally(ex -> {
@@ -162,10 +160,6 @@ public class ScanServiceImpl implements ScanService {
         return toVO(scan);
     }
 
-    /**
-     * 后台执行完整扫描流程：克隆 → 解析 → 规则检查 → AI 分析。
-     * 通过 ApplicationEventPublisher 推送进度事件给 SSE 订阅者。
-     */
     private void executeScan(Project project, ScanRecord scan, Long userId, boolean incremental) {
         long startTime = System.currentTimeMillis();
         Long projectId = project.getId();
@@ -209,7 +203,6 @@ public class ScanServiceImpl implements ScanService {
                 int deletedCount = 0;
 
                 if (incremental) {
-                    // 加载上一次扫描的类列表，计算增量差异
                     ScanRecord prevScan = scanMapper.findLatestCompletedBefore(projectId, scan.getId());
                     Set<String> prevFqns = new java.util.HashSet<>();
                     if (prevScan != null) {
@@ -221,7 +214,6 @@ public class ScanServiceImpl implements ScanService {
 
                     Set<String> newFqns = classes.stream().map(ClassSummaryResult::getFqn).collect(Collectors.toSet());
 
-                    // 删除已移除的类
                     Set<String> removedFqns = new java.util.HashSet<>(prevFqns);
                     removedFqns.removeAll(newFqns);
                     if (!removedFqns.isEmpty()) {
@@ -229,7 +221,6 @@ public class ScanServiceImpl implements ScanService {
                         log.info("Incremental scan: deleted {} removed classes for projectId={}", deletedCount, projectId);
                     }
 
-                    // 插入新增和变更的类（replace via delete + insert）
                     List<ClassSummaryEntity> batch = new ArrayList<>();
                     for (ClassSummaryResult cls : classes) {
                         ClassSummaryEntity entity = toEntity(cls, scan.getId(), projectId);
@@ -247,7 +238,6 @@ public class ScanServiceImpl implements ScanService {
                     emitProgress(projectId, scan.getId(), "PARSING", 40,
                             String.format("增量分析: 新增/更新 %d 类, 删除 %d 类", insertedCount, deletedCount));
                 } else {
-                    // 全量扫描：直接插入
                     List<ClassSummaryEntity> batch = new ArrayList<>();
                     for (ClassSummaryResult cls : classes) {
                         batch.add(toEntity(cls, scan.getId(), projectId));
@@ -340,7 +330,6 @@ public class ScanServiceImpl implements ScanService {
         scan.setCompletedAt(LocalDateTime.now());
         scanMapper.updateStats(scan);
 
-        // 驱逐地图缓存，确保下次查询加载最新数据
         try {
             Objects.requireNonNull(cacheManager.getCache("mapData")).evict(projectId);
         } catch (Exception e) {
@@ -380,10 +369,6 @@ public class ScanServiceImpl implements ScanService {
         }
     }
 
-    /**
-     * 检查 JVM 堆内存使用率，紧张时发日志告警 + SSE 通知。
-     * 服务器内存有限（3.7GB，JVM 堆上限 512MB），大项目扫描需要感知内存状态。
-     */
     private void checkMemory(Long projectId, Long scanId, String stage) {
         Runtime rt = Runtime.getRuntime();
         long max = rt.maxMemory();
@@ -434,6 +419,23 @@ public class ScanServiceImpl implements ScanService {
         return classSummaryMapper.findByScanId(scan.getId());
     }
 
+    @Override
+    public Map<String, Object> getScanStatus(Long projectId) {
+        Map<String, Object> status = new HashMap<>();
+        ScanRecord latest = scanMapper.findLatestByProjectId(projectId);
+        if (latest != null) {
+            status.put("scanStatus", latest.getStatus());
+            status.put("scanId", latest.getId());
+            status.put("lastScanTime", latest.getCreatedAt() != null ? latest.getCreatedAt().toString() : null);
+        } else {
+            status.put("scanStatus", "NONE");
+            status.put("scanId", null);
+            status.put("lastScanTime", null);
+        }
+        status.put("aiAnalysisRunning", aiAnalysisService.isAiAnalysisRunning(projectId));
+        return status;
+    }
+
     private ClassSummaryEntity toEntity(ClassSummaryResult cls, Long scanId, Long projectId) {
         ClassSummaryEntity entity = new ClassSummaryEntity();
         entity.setScanId(scanId);
@@ -462,19 +464,7 @@ public class ScanServiceImpl implements ScanService {
 
     private BigDecimal calculateHealthScore(int violations, int totalClasses, int knownViolations) {
         if (totalClasses == 0) return BigDecimal.ZERO;
-
-        // Architecture compliance (40%): based on violations
         double violationPenalty = Math.min(violations * 5.0, 40.0);
-
-        // Code structure (30%): classes with proper layering
-        double structureScore = 30.0;
-
-        // Code quality (20%): reasonable class sizes
-        double qualityScore = 20.0;
-
-        // Dependency health (10%): no circular dependencies
-        double dependencyScore = 10.0;
-
         double score = 100.0 - violationPenalty;
         double finalScore = Math.max(0.0, Math.min(100.0, score));
         return BigDecimal.valueOf(Math.round(finalScore * 100.0) / 100.0);

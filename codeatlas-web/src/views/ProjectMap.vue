@@ -1,6 +1,16 @@
 <template>
   <div class="map-page-wrapper">
-    <!-- 工具栏 -->
+    <!-- 地图数据准备中提示 -->
+    <a-alert
+      v-if="mapPreparing"
+      message="图谱数据正在准备中"
+      description="Neo4j 正在导入依赖关系图，通常需要几十秒到几分钟。数据就绪后地图将自动显示。"
+      type="info"
+      show-icon
+      closable
+      style="margin: 0 0 12px 0; border-radius: 8px;"
+    />
+
     <div class="map-toolbar">
       <a-space>
         <a-radio-group v-model:value="renderMode" size="small" button-style="solid">
@@ -32,13 +42,11 @@
       </a-space>
     </div>
 
-    <!-- 地图画布 -->
     <div class="map-canvas-area">
       <CodeMap v-if="renderMode === '2d'" ref="codeMap2dRef" :projectId="projectId" @node-click="onNodeClick" />
       <CodeMap3D v-else :projectId="projectId" @node-click="onNodeClick" />
     </div>
 
-    <!-- 节点详情抽屉 -->
     <a-drawer
       :open="drawerVisible"
       title="节点详情"
@@ -72,7 +80,6 @@
       <a-empty v-else description="请点击地图节点查看详情" />
     </a-drawer>
 
-    <!-- 变更影响模拟弹窗 -->
     <a-modal
       v-model:open="showImpactModal"
       title="变更影响模拟"
@@ -137,7 +144,6 @@
       </div>
     </a-modal>
 
-    <!-- 上下文问答弹窗 -->
     <a-modal
       v-model:open="showQaModal"
       title="上下文问答"
@@ -166,7 +172,7 @@
 </template>
 
 <script setup>
-import { ref, reactive } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { ThunderboltOutlined, QuestionCircleOutlined } from '@ant-design/icons-vue'
@@ -184,15 +190,27 @@ const codeMap2dRef = ref(null)
 const hasData = ref(false)
 const selectedNode = ref(null)
 const drawerVisible = ref(false)
+const mapPreparing = ref(false)
 
-// ---- 节点点击事件 (from CodeMap 2D) ----
+onMounted(async () => {
+  try {
+    const res = await api.get(`/projects/${projectId}/scans/status`)
+    const data = res.data.data
+    if (data && (data.scanStatus === 'RUNNING' || data.scanStatus === 'NONE' || data.aiAnalysisRunning)) {
+      mapPreparing.value = true
+    }
+  } catch (e) {
+    // ignore status check error
+  }
+})
+
 function onNodeClick(node) {
   selectedNode.value = node
   drawerVisible.value = true
   hasData.value = true
+  mapPreparing.value = false
 }
 
-// ---- 影响模拟 ----
 const showImpactModal = ref(false)
 const impactLoading = ref(false)
 const impactResult = ref(null)
@@ -224,7 +242,6 @@ async function doImpactSim() {
   }
 }
 
-// ---- 上下文问答 ----
 const showQaModal = ref(false)
 const qaTarget = ref(null)
 const qaQuestion = ref('')

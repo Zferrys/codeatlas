@@ -326,7 +326,14 @@ watch(() => route.name, (name) => {
   }
 }, { immediate: true })
 
+// 防抖：500ms 内忽略重复点击
+let lastMenuClickTime = 0
+
 function onMenuClick({ key }) {
+  const now = Date.now()
+  if (now - lastMenuClickTime < 500) return
+  lastMenuClickTime = now
+
   if (key === 'dashboard') {
     router.push('/dashboard')
   } else if (key === 'admin-users') {

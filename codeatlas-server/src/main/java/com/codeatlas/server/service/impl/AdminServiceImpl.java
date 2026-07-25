@@ -4,6 +4,7 @@ import com.codeatlas.common.dto.PageResult;
 import com.codeatlas.server.mapper.AuditLogMapper;
 import com.codeatlas.server.mapper.UserMapper;
 import com.codeatlas.server.service.AdminService;
+import com.codeatlas.server.service.CleanupService;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
@@ -13,10 +14,13 @@ public class AdminServiceImpl implements AdminService {
 
     private final UserMapper userMapper;
     private final AuditLogMapper auditLogMapper;
+    private final CleanupService cleanupService;
 
-    public AdminServiceImpl(UserMapper userMapper, AuditLogMapper auditLogMapper) {
+    public AdminServiceImpl(UserMapper userMapper, AuditLogMapper auditLogMapper,
+                            CleanupService cleanupService) {
         this.userMapper = userMapper;
         this.auditLogMapper = auditLogMapper;
+        this.cleanupService = cleanupService;
     }
 
     @Override
@@ -74,5 +78,10 @@ public class AdminServiceImpl implements AdminService {
             records.add(item);
         });
         return new PageResult<>(records, total, page, size);
+    }
+
+    @Override
+    public Map<String, Object> getSystemStatus() {
+        return cleanupService.getCleanupStatus();
     }
 }

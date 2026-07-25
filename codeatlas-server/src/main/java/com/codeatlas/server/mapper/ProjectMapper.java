@@ -49,4 +49,10 @@ public interface ProjectMapper {
 
     @Delete("DELETE FROM project WHERE id = #{id}")
     int deleteById(Long id);
+
+    @Update("UPDATE project SET last_accessed_at = NOW() WHERE id = #{id}")
+    int updateLastAccessedAt(@Param("id") Long id);
+
+    @Select("SELECT * FROM project ORDER BY id")
+    List<Project> findAll();
 }

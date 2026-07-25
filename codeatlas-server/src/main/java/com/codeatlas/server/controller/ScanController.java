@@ -12,6 +12,8 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.Map;
+
 @RestController
 @RequestMapping("/api/v1/projects/{projectId}/scans")
 @Tag(name = "扫描管理")
@@ -49,6 +51,13 @@ public class ScanController {
     public ApiResponse<ScanVO> getLatestScan(@PathVariable Long projectId,
                                               @AuthenticationPrincipal CodeAtlasUserDetails principal) {
         return ApiResponse.success(scanService.getLatestScan(projectId, principal.getUserId()));
+    }
+
+    @GetMapping("/status")
+    @PreAuthorize("isAuthenticated()")
+    @Operation(summary = "扫描状态")
+    public ApiResponse<Map<String, Object>> getScanStatus(@PathVariable Long projectId) {
+        return ApiResponse.success(scanService.getScanStatus(projectId));
     }
 
     @PostMapping("/increment")

@@ -61,4 +61,10 @@ public class AdminController {
             @RequestParam(defaultValue = "20") int size) {
         return ApiResponse.success(adminService.auditLog(page, size));
     }
+
+    @GetMapping("/system-status")
+    @Operation(summary = "系统状态(磁盘/内存/工作空间)")
+    public ApiResponse<Map<String, Object>> systemStatus() {
+        return ApiResponse.success(adminService.getSystemStatus());
+    }
 }

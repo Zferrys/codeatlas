@@ -2,6 +2,7 @@ package com.codeatlas.server.service;
 
 import com.codeatlas.common.dto.PageResult;
 import com.codeatlas.common.exception.BusinessException;
+import com.codeatlas.server.config.WorkspaceConfig;
 import com.codeatlas.server.dto.request.CreateProjectRequest;
 import com.codeatlas.server.dto.response.ProjectVO;
 import com.codeatlas.server.entity.Project;
@@ -44,16 +45,16 @@ class ProjectServiceImplTest {
     private ClassSummaryMapper classSummaryMapper;
     @Mock
     private UserMapper userMapper;
+    @Mock
+    private WorkspaceConfig workspaceConfig;
 
     private ProjectServiceImpl projectService;
 
     @BeforeEach
     void setUp() {
         projectService = new ProjectServiceImpl(projectMapper, projectMemberMapper,
-                scanMapper, insightMapper, classSummaryMapper, userMapper);
+                scanMapper, insightMapper, classSummaryMapper, userMapper, workspaceConfig);
     }
-
-    // ========== create ==========
 
     @Test
     @DisplayName("创建项目成功")
@@ -64,7 +65,6 @@ class ProjectServiceImplTest {
         request.setSourceType("GIT_URL");
         request.setSourceUrl("https://github.com/test/test.git");
 
-        // 模拟 MyBatis 自动设置主键
         doAnswer(invocation -> {
             Project p = invocation.getArgument(0);
             p.setId(100L);
@@ -103,8 +103,6 @@ class ProjectServiceImplTest {
         assertEquals("GIT_URL", result.getSourceType());
     }
 
-    // ========== list ==========
-
     @Test
     @DisplayName("项目列表分页查询")
     void shouldListProjects() {
@@ -134,8 +132,6 @@ class ProjectServiceImplTest {
         assertTrue(result.getRecords().isEmpty());
     }
 
-    // ========== get ==========
-
     @Test
     @DisplayName("获取项目详情")
     void shouldGetProjectById() {
@@ -157,8 +153,6 @@ class ProjectServiceImplTest {
                 () -> projectService.getProjectById(999L, 1L));
     }
 
-    // ========== delete ==========
-
     @Test
     @DisplayName("删除项目成功")
     void shouldDeleteProject() {
@@ -178,8 +172,6 @@ class ProjectServiceImplTest {
         assertThrows(BusinessException.class,
                 () -> projectService.deleteProject(999L, 1L));
     }
-
-    // ========== update ==========
 
     @Test
     @DisplayName("更新项目成功")
@@ -204,8 +196,6 @@ class ProjectServiceImplTest {
         assertThrows(BusinessException.class,
                 () -> projectService.updateProject(1L, "", "desc", 1L));
     }
-
-    // ========== helper ==========
 
     private Project createProject(Long id, String name) {
         Project p = new Project();

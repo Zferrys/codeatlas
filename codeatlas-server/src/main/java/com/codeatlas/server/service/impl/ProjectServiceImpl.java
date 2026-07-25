@@ -3,6 +3,7 @@ package com.codeatlas.server.service.impl;
 import com.codeatlas.common.constant.ErrorCode;
 import com.codeatlas.common.dto.PageResult;
 import com.codeatlas.common.exception.BusinessException;
+import com.codeatlas.server.config.WorkspaceConfig;
 import com.codeatlas.server.dto.request.CreateProjectRequest;
 import com.codeatlas.server.dto.response.ProjectVO;
 import com.codeatlas.server.entity.Project;
@@ -21,7 +22,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+import java.io.File;
+import java.io.IOException;
 import java.math.BigDecimal;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -40,16 +45,19 @@ public class ProjectServiceImpl implements ProjectService {
     private final InsightMapper insightMapper;
     private final ClassSummaryMapper classSummaryMapper;
     private final UserMapper userMapper;
+    private final WorkspaceConfig workspaceConfig;
 
     public ProjectServiceImpl(ProjectMapper projectMapper, ProjectMemberMapper projectMemberMapper,
                               ScanMapper scanMapper, InsightMapper insightMapper,
-                              ClassSummaryMapper classSummaryMapper, UserMapper userMapper) {
+                              ClassSummaryMapper classSummaryMapper, UserMapper userMapper,
+                              WorkspaceConfig workspaceConfig) {
         this.projectMapper = projectMapper;
         this.projectMemberMapper = projectMemberMapper;
         this.scanMapper = scanMapper;
         this.insightMapper = insightMapper;
         this.classSummaryMapper = classSummaryMapper;
         this.userMapper = userMapper;
+        this.workspaceConfig = workspaceConfig;
     }
 
     @Override
@@ -62,7 +70,6 @@ public class ProjectServiceImpl implements ProjectService {
         String sourceType = StringUtils.hasText(request.getSourceType())
                 ? request.getSourceType() : "GIT_URL";
 
-        // GIT_URL 格式校验
         if ("GIT_URL".equals(sourceType)) {
             String url = request.getSourceUrl();
             if (!StringUtils.hasText(url)) {
@@ -72,7 +79,6 @@ public class ProjectServiceImpl implements ProjectService {
                 throw new BusinessException(ErrorCode.BAD_REQUEST, "Git URL 格式不正确，示例：https://github.com/user/repo.git");
             }
         }
-
 
         Project project = new Project();
         project.setName(request.getName());
@@ -100,7 +106,6 @@ public class ProjectServiceImpl implements ProjectService {
         int offset = (page - 1) * size;
         List<Project> projects = projectMapper.findByUserIdPaged(userId, offset, size);
 
-        // batch query scan and insight counts
         List<Long> projectIds = projects.stream().map(Project::getId).collect(Collectors.toList());
         Map<Long, Long> scanCounts = new HashMap<>();
         Map<Long, Long> insightCounts = new HashMap<>();
@@ -131,6 +136,12 @@ public class ProjectServiceImpl implements ProjectService {
             throw new BusinessException(ErrorCode.NOT_FOUND, "项目不存在");
         }
         checkProjectAccess(project, userId, "查看");
+        // 更新最后访问时间
+        try {
+            projectMapper.updateLastAccessedAt(projectId);
+        } catch (Exception e) {
+            log.debug("Failed to update lastAccessedAt for projectId={}: {}", projectId, e.getMessage());
+        }
         long scanCount = scanMapper.countByProjectId(projectId);
         long insightCount = insightMapper.countByProjectId(projectId);
         return toVO(project, (int) scanCount, (int) insightCount);
@@ -148,7 +159,6 @@ public class ProjectServiceImpl implements ProjectService {
         if (project == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND, "项目不存在");
         }
-        // 仅项目创建者或系统管理员可删除
         boolean isOwner = userId.equals(project.getCreatedBy());
         if (!isOwner) {
             User user = userMapper.findById(userId);
@@ -157,8 +167,56 @@ public class ProjectServiceImpl implements ProjectService {
                 throw new BusinessException(ErrorCode.FORBIDDEN, "只有项目创建者或管理员才能删除项目");
             }
         }
+        // 清理工作空间文件
+        try {
+            cleanWorkspaceFiles(projectId);
+        } catch (Exception e) {
+            log.warn("Failed to clean workspace files for projectId={}: {}", projectId, e.getMessage());
+        }
         projectMapper.deleteById(projectId);
         log.info("Project deleted: id={}, userId={}", projectId, userId);
+    }
+
+    private void cleanWorkspaceFiles(Long projectId) {
+        String prefix = String.valueOf(projectId);
+        // 清理上传目录中属于该项目的文件
+        Path uploadsDir = workspaceConfig.getUploadsDir();
+        if (uploadsDir != null && Files.exists(uploadsDir)) {
+            File[] uploadFiles = uploadsDir.toFile().listFiles(
+                    (dir, name) -> name.startsWith(prefix + "_") || name.startsWith(prefix + "-"));
+            if (uploadFiles != null) {
+                for (File f : uploadFiles) {
+                    deleteRecursive(f.toPath());
+                }
+            }
+        }
+        // 清理扫描临时目录中属于该项目的文件
+        Path scansDir = workspaceConfig.getScansDir();
+        if (scansDir != null && Files.exists(scansDir)) {
+            File[] scanDirs = scansDir.toFile().listFiles(
+                    (dir, name) -> name.startsWith(prefix + "-"));
+            if (scanDirs != null) {
+                for (File f : scanDirs) {
+                    deleteRecursive(f.toPath());
+                }
+            }
+        }
+    }
+
+    private void deleteRecursive(Path path) {
+        try {
+            if (Files.isDirectory(path)) {
+                File[] children = path.toFile().listFiles();
+                if (children != null) {
+                    for (File child : children) {
+                        deleteRecursive(child.toPath());
+                    }
+                }
+            }
+            Files.deleteIfExists(path);
+        } catch (IOException e) {
+            log.warn("Failed to delete {}: {}", path, e.getMessage());
+        }
     }
 
     @Override
@@ -181,9 +239,6 @@ public class ProjectServiceImpl implements ProjectService {
         return toVO(project, (int) scanCount, (int) insightCount);
     }
 
-    /**
-     * 校验用户是否有权限访问项目：创建者、项目成员或管理员可访问。
-     */
     private void checkProjectAccess(Project project, Long userId, String action) {
         if (userId.equals(project.getCreatedBy())) return;
         ProjectMember member = projectMemberMapper.findByProjectAndUser(project.getId(), userId);
@@ -270,7 +325,6 @@ public class ProjectServiceImpl implements ProjectService {
             if (scan != null) {
                 vo.setLastScanTime(scan.getCreatedAt());
             }
-            // populate layer distribution from the latest scan
             List<Map<String, Object>> layerRows = classSummaryMapper.countLayerByScanId(p.getLastScanId());
             if (layerRows != null && !layerRows.isEmpty()) {
                 long totalCount = layerRows.stream().mapToLong(r -> ((Number) r.get("cnt")).longValue()).sum();

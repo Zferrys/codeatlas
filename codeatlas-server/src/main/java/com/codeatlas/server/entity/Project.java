@@ -21,4 +21,5 @@ public class Project {
     private Long createdBy;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
+    private LocalDateTime lastAccessedAt;
 }

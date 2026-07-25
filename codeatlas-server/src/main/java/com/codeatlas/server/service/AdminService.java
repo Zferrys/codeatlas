@@ -13,4 +13,7 @@ public interface AdminService {
     void updateStatus(Long id, int status);
 
     PageResult<Map<String, Object>> auditLog(int page, int size);
+
+    /** 获取系统状态（磁盘、内存、工作空间） */
+    Map<String, Object> getSystemStatus();
 }

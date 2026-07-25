@@ -24,7 +24,7 @@
 </template>
 
 <script setup>
-import { ref, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { ref, watch, onMounted, onBeforeUnmount, onActivated, nextTick } from 'vue'
 import G6 from '@antv/g6'
 import api from '../../api'
 
@@ -249,6 +249,21 @@ function renderGraph(data) {
 
 onMounted(() => {
   fetchMapData()
+})
+
+// keep-alive 激活时重新适配 G6 画布大小
+onActivated(() => {
+  if (graph && !graph.destroyed) {
+    nextTick(() => {
+      const container = graphContainer.value
+      if (container) {
+        const w = container.clientWidth || 900
+        const h = container.clientHeight || 550
+        graph.changeSize(w, h)
+        graph.fitView()
+      }
+    })
+  }
 })
 
 watch(() => props.projectId, () => {
