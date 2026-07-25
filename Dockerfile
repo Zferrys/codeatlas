@@ -8,7 +8,7 @@ COPY codeatlas-web/ .
 RUN npm run build
 
 # ---- 后端构建 ----
-FROM eclipse-temurin:17-jdk-alpine AS backend-builder
+FROM maven:3.9-eclipse-temurin-17-alpine AS backend-builder
 WORKDIR /app
 COPY pom.xml ./
 COPY codeatlas-common/pom.xml codeatlas-common/
