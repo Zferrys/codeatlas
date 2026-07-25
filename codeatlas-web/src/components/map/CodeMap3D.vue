@@ -268,7 +268,7 @@ async function renderGraph(mapData) {
   // Compute layout via Web Worker (fallback to sync for <50 nodes)
   let layoutPositions
   try {
-    if (nodes.length >= 50) {
+    if (nodes.length >= 10) {
       layoutComputing.value = true
       layoutProgress.value = 0
       layoutPositions = await forceLayoutAsync(nodes, edges, 80)
@@ -520,7 +520,7 @@ async function fetchData() {
     ready.value = true
     await nextTick()
     initScene(canvasRef.value)
-    renderGraph(mapData)
+    await renderGraph(mapData)
   } catch (e) {
     error.value = e.response?.data?.message || '获取图谱数据失败'
   } finally {

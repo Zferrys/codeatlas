@@ -307,6 +307,7 @@ async function handleCreateProject() {
       const formData = new FormData()
       formData.append('file', uploadFile.value)
       const uploadRes = await api.post('/files/upload', formData, {
+        timeout: 300000,
         onUploadProgress: (e) => {
           if (e.total > 0) {
             uploadPercent.value = Math.round((e.loaded / e.total) * 100)

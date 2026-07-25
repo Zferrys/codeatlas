@@ -151,7 +151,7 @@ function renderGraph(data) {
       default: ['drag-canvas', 'zoom-canvas', 'drag-node']
     },
     fitView: true,
-    animate: true
+    animate: false
   })
 
   graph.data({ nodes, edges })

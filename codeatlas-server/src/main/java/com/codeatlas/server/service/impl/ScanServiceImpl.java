@@ -308,7 +308,10 @@ public class ScanServiceImpl implements ScanService {
                 scan.setTotalViolations(totalViolations);
                 log.info("Violation check completed: projectId={}, violations={}", projectId, totalViolations);
             } else {
-                log.info("Scan skipped: no source to analyze for projectId={}", projectId);
+                String reason = (workDir == null)
+                        ? "未配置源码路径，请使用 Git URL 或 ZIP 上传"
+                        : "源码路径不存在: " + workDir.toAbsolutePath() + "（服务器无法访问本地路径，请使用 ZIP 上传源码包）";
+                throw new RuntimeException(reason);
             }
         } catch (Exception e) {
             log.error("Scan failed for projectId={}: {}", projectId, e.getMessage());
