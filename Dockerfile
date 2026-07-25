@@ -27,6 +27,7 @@ RUN apk add --no-cache tini curl
 WORKDIR /app
 RUN addgroup --system codeatlas && adduser --system --ingroup codeatlas codeatlas
 COPY --from=backend-builder /app/codeatlas-server/target/*.jar app.jar
+RUN mkdir -p /app/logs && chown codeatlas:codeatlas /app/logs
 USER codeatlas
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 CMD curl -f http://localhost:8080/actuator/health || exit 1
