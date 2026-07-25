@@ -17,6 +17,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.context.request.async.AsyncRequestNotUsableException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
@@ -72,6 +73,14 @@ public class GlobalExceptionHandler {
     @ExceptionHandler({IOException.class, AsyncRequestNotUsableException.class})
     public void handleIoException(Exception e) {
         log.debug("SSE/stream connection broken: {}", e.getMessage());
+    }
+
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<ApiResponse<Void>> handleNoResource(NoResourceFoundException e) {
+        log.debug("Resource not found: {}", e.getMessage());
+        ApiResponse<Void> response = ApiResponse.error(ErrorCode.NOT_FOUND.getCode(), "资源不存在");
+        response.setTraceId(MDC.get("traceId"));
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(response);
     }
 
     @ExceptionHandler(Exception.class)
