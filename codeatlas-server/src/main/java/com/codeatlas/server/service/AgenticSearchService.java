@@ -139,6 +139,31 @@ public class AgenticSearchService {
             }
         }
 
+        if (!success) {
+            // 工具轮次用尽模型仍在请求工具：去掉工具再追加一轮强制总结，保证用户拿到答案
+            messages.add(Message.user(
+                    "已达到工具调用轮次上限，请立即基于以上已获取的信息直接给出最终回答，不要再请求调用工具。"));
+            AiRequest finalRequest = new AiRequest();
+            finalRequest.setMessages(messages);
+            finalRequest.setTemperature(0.3);
+            finalRequest.setMaxTokens(2048);
+            try {
+                AiResponse finalResponse = aiClient.chat(finalRequest);
+                if (finalResponse != null) {
+                    totalTokenUsed += finalResponse.getTokensUsed();
+                    totalPromptTokens += finalResponse.getPromptTokens();
+                    totalCompletionTokens += finalResponse.getCompletionTokens();
+                    if (finalResponse.getContent() != null && !finalResponse.getContent().isEmpty()) {
+                        result.put("answer", finalResponse.getContent());
+                        success = true;
+                        log.info("Agentic search forced final synthesis succeeded after {} iterations", iterations);
+                    }
+                }
+            } catch (Exception e) {
+                log.warn("Agentic search forced final synthesis failed: {}", e.getMessage());
+            }
+        }
+
         if (!result.containsKey("answer")) {
             result.put("answer", "分析未能在 " + MAX_ITERATIONS + " 轮内完成，请尝试更具体的问题。");
         }
