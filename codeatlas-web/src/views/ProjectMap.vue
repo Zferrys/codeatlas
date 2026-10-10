@@ -154,6 +154,9 @@
         <a-tag :color="getLayerColor(qaTarget.layer)">{{ qaTarget.layer }}</a-tag>
         <strong>{{ qaTarget.label }}</strong>
         <span style="color:#999;font-size:12px;margin-left:8px">{{ qaTarget.id }}</span>
+        <a-button type="link" size="small" style="margin-left:auto;padding:0" @click="switchToGlobalQa">
+          切换为全局搜索
+        </a-button>
       </div>
       <a-alert v-else type="info" show-icon message="全局搜索模式" style="margin-bottom:8px">
         <template #description>
@@ -210,6 +213,12 @@ onMounted(async () => {
 })
 
 function onNodeClick(node) {
+  if (!node) {
+    // 地图上取消选中（点空白/关闭面板）时同步清除，问答回到全局模式
+    selectedNode.value = null
+    drawerVisible.value = false
+    return
+  }
   selectedNode.value = node
   drawerVisible.value = true
   hasData.value = true
@@ -258,6 +267,11 @@ function openQaPanel() {
   qaQuestion.value = ''
   qaAnswer.value = ''
   showQaModal.value = true
+}
+
+function switchToGlobalQa() {
+  qaTarget.value = null
+  qaAnswer.value = ''
 }
 
 async function doContextQa() {

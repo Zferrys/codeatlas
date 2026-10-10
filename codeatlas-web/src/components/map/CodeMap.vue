@@ -232,6 +232,8 @@ function renderGraph(data) {
   graph.on('canvas:click', () => {
     graph.getNodes().forEach(n => graph.updateItem(n, { style: { opacity: 1, stroke: '#fff', lineWidth: 1 } }))
     graph.getEdges().forEach(e => graph.updateItem(e, { style: { opacity: 1 } }))
+    // 通知父组件清除选中节点，否则问答面板会一直沿用旧类上下文
+    emit('node-click', null)
   })
 
   // resize handler

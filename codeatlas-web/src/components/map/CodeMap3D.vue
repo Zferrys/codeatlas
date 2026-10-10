@@ -50,7 +50,7 @@
       <div v-if="selectedNode" class="map3d-info-panel">
         <div class="panel-header">
           <h4>{{ selectedNode.label }}</h4>
-          <a-button type="text" size="small" @click="selectedNode = null">✕</a-button>
+          <a-button type="text" size="small" @click="deselectNode">✕</a-button>
         </div>
         <div class="panel-body">
           <div class="info-row"><span>全限定名</span><code>{{ selectedNode.id }}</code></div>
@@ -416,9 +416,15 @@ function onCanvasClick(event) {
     selectedNode.value = obj.userData
     emit('node-click', obj.userData)
   } else {
-    resetHighlight()
-    selectedNode.value = null
+    deselectNode()
   }
+}
+
+// 取消选中：清内部状态 + 复位高亮 + 通知父组件，避免问答面板沿用旧类上下文
+function deselectNode() {
+  selectedNode.value = null
+  resetHighlight()
+  emit('node-click', null)
 }
 
 function highlightNode(mesh) {
