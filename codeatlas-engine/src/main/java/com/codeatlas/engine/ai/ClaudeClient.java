@@ -238,9 +238,10 @@ public class ClaudeClient implements AiClient {
                 contentBlocks.add(toolBlock);
             }
             apiMsg.put("content", contentBlocks);
-        } else if ("user".equals(msg.getRole()) && msg.getToolCallId() != null) {
-            // tool result — must be a user message with tool_result content block
-            // our Message uses role="tool" but Anthropic requires role="user" for tool results
+        } else if ("tool".equals(msg.getRole()) && msg.getToolCallId() != null) {
+            // tool result — Message.tool() uses internal role "tool",
+            // but Anthropic only accepts user/assistant: wrap it in a role="user" message
+            apiMsg.put("role", "user");
             List<Map<String, Object>> contentBlocks = new ArrayList<>();
             Map<String, Object> resultBlock = new java.util.LinkedHashMap<>();
             resultBlock.put("type", "tool_result");
