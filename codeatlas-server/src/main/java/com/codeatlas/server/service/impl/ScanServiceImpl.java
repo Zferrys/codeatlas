@@ -60,6 +60,9 @@ public class ScanServiceImpl implements ScanService {
 
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
+    /** 网络克隆预检上限：GitHub API 裸仓库 size × 工作树系数后的预估值（非实际克隆字节数） */
+    private static final long MAX_CLONE_ESTIMATE_BYTES = 150L * 1024 * 1024;
+
     private final ScanMapper scanMapper;
     private final ProjectMapper projectMapper;
     private final ClassSummaryMapper classSummaryMapper;
@@ -135,10 +138,11 @@ public class ScanServiceImpl implements ScanService {
 
         if ("GIT_URL".equals(project.getSourceType()) && project.getSourceUrl() != null) {
             long estimatedBytes = gitService.estimateRepoSize(project.getSourceUrl());
-            if (estimatedBytes > 100L * 1024 * 1024) {
+            if (estimatedBytes > MAX_CLONE_ESTIMATE_BYTES) {
                 throw new BusinessException(ErrorCode.FILE_TOO_LARGE,
                         "仓库预估过大: ~" + (estimatedBytes / (1024 * 1024)) +
-                        " MB (网络克隆上限 100 MB)。请先 git clone 到本地，再使用本地路径扫描");
+                        " MB (网络克隆上限 " + (MAX_CLONE_ESTIMATE_BYTES / (1024 * 1024)) +
+                        " MB)。请先 git clone 到本地，再使用本地路径扫描");
             }
         }
 
