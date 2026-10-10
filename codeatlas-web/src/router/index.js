@@ -49,6 +49,12 @@ const routes = [
     meta: { requiresAuth: true, requiresAdmin: true }
   },
   {
+    path: '/admin/ai-models',
+    name: 'AdminAiModels',
+    component: () => import('../views/admin/AdminAiModels.vue'),
+    meta: { requiresAuth: true, requiresAdmin: true }
+  },
+  {
     path: '/project/:id',
     name: 'ProjectDetail',
     component: () => import('../views/ProjectDetail.vue'),

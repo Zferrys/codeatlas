@@ -16,6 +16,7 @@ export default {
     admin: 'Admin',
     userManagement: 'User Management',
     auditLog: 'Audit Log',
+    aiModels: 'AI Models',
     currentProject: 'Current Project',
     overview: 'Overview',
     codeMap: 'Code Map',

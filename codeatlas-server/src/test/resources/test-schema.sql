@@ -55,3 +55,13 @@ CREATE TABLE IF NOT EXISTS `scan` (
     `completed_at`     TIMESTAMP,
     `created_at`       TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS `system_config` (
+    `id`           BIGINT AUTO_INCREMENT PRIMARY KEY,
+    `config_key`   VARCHAR(64)  NOT NULL,
+    `config_value` VARCHAR(512) NOT NULL,
+    `description`  VARCHAR(255),
+    `created_at`   TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at`   TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_system_config_key ON `system_config` (`config_key`);

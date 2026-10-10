@@ -16,6 +16,7 @@ export default {
     admin: '管理后台',
     userManagement: '用户管理',
     auditLog: '审计日志',
+    aiModels: 'AI 模型',
     currentProject: '当前项目',
     overview: '项目概览',
     codeMap: '代码地图',

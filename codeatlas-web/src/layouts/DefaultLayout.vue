@@ -47,6 +47,10 @@
             <template #icon><AuditOutlined /></template>
             <span>{{ $t('nav.auditLog') }}</span>
           </a-menu-item>
+          <a-menu-item key="admin-ai-models">
+            <template #icon><RobotOutlined /></template>
+            <span>{{ $t('nav.aiModels') }}</span>
+          </a-menu-item>
         </a-menu-item-group>
 
         <a-menu-item-group v-if="currentProjectId" :title="$t('nav.currentProject')">
@@ -252,7 +256,7 @@ import {
   SafetyOutlined, WarningOutlined, BulbOutlined, SettingOutlined,
   MenuFoldOutlined, MenuUnfoldOutlined, BellOutlined, SearchOutlined,
   UserOutlined, LogoutOutlined, GithubOutlined, ProjectOutlined, FileTextOutlined,
-  TeamOutlined, AuditOutlined
+  TeamOutlined, AuditOutlined, RobotOutlined
 } from '@ant-design/icons-vue'
 import api from '../api'
 
@@ -294,7 +298,7 @@ const breadcrumbs = computed(() => {
   } else if (pathParts[0] === 'admin') {
     items.push({ label: t('nav.workspace'), path: '/dashboard' })
     items.push({ label: t('nav.admin') })
-    const adminTabMap = { dashboard: '系统概览', users: t('nav.userManagement'), 'audit-log': t('nav.auditLog') }
+    const adminTabMap = { dashboard: '系统概览', users: t('nav.userManagement'), 'audit-log': t('nav.auditLog'), 'ai-models': t('nav.aiModels') }
     if (pathParts.length >= 2) {
       items.push({ label: adminTabMap[pathParts[1]] || pathParts[1] })
     }
@@ -326,6 +330,8 @@ watch(() => route.name, (name) => {
     selectedKeys.value = ['admin-users']
   } else if (name === 'AdminAuditLog') {
     selectedKeys.value = ['admin-audit-log']
+  } else if (name === 'AdminAiModels') {
+    selectedKeys.value = ['admin-ai-models']
   } else {
     const key = name.replace('Project', '').toLowerCase()
     selectedKeys.value = [key]
@@ -348,6 +354,8 @@ function onMenuClick({ key }) {
     router.push('/admin/users')
   } else if (key === 'admin-audit-log') {
     router.push('/admin/audit-log')
+  } else if (key === 'admin-ai-models') {
+    router.push('/admin/ai-models')
   } else if (currentProjectId.value) {
     router.push(`/project/${currentProjectId.value}/${key}`)
   }
