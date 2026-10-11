@@ -22,7 +22,10 @@
     <!-- 违规表格 -->
     <div v-else class="violations-card">
       <div class="card-header">
-        <h3 class="card-title">违规列表</h3>
+        <div class="card-header-left">
+          <h3 class="card-title">违规列表</h3>
+          <span class="card-hint">点击违规行可跳转到类关系图谱中对应节点</span>
+        </div>
         <a-space>
           <a-tag color="red">{{ blockerCount }} 阻断</a-tag>
           <a-tag color="orange">{{ errorCount }} 错误</a-tag>
@@ -30,7 +33,8 @@
         </a-space>
       </div>
       <a-table :data-source="violations" :pagination="{ pageSize: 20, showSizeChanger: true, showTotal: t => `共 ${t} 条` }"
-        row-key="id" size="middle">
+        row-key="id" size="middle"
+        :custom-row="record => ({ onClick: () => goToClassNode(record), style: { cursor: 'pointer' } })">
         <a-table-column title="严重度" data-index="severity" :width="90">
           <template #default="{ record }">
             <a-tag :color="severityColor(record.severity)">{{ severityLabel(record.severity) }}</a-tag>
@@ -53,7 +57,7 @@
         <a-table-column title="操作" :width="90">
           <template #default="{ record }">
             <a-button v-if="!record.isResolved" type="link" size="small"
-              @click="resolveViolation(record.id)">标记解决</a-button>
+              @click.stop="resolveViolation(record.id)">标记解决</a-button>
           </template>
         </a-table-column>
       </a-table>
@@ -63,11 +67,12 @@
 
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
 import api from '../api'
 
 const route = useRoute()
+const router = useRouter()
 const projectId = computed(() => route.params.id)
 
 const loading = ref(false)
@@ -129,6 +134,11 @@ function shortName(fqn) {
   return idx > 0 ? fqn.substring(idx + 1) : fqn
 }
 
+function goToClassNode(record) {
+  if (!record?.classFqn) return
+  router.push({ path: `/project/${projectId.value}/map`, query: { focus: record.classFqn } })
+}
+
 async function subscribeScanProgress() {
   const token = localStorage.getItem('codeatlas_token')
   sseAbortController = new AbortController()
@@ -187,6 +197,17 @@ async function subscribeScanProgress() {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 16px;
+}
+
+.card-header-left {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.card-hint {
+  font-size: 12px;
+  color: #999;
 }
 
 .card-title {

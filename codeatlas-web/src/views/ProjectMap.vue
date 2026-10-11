@@ -30,6 +30,9 @@
             上下文问答
           </a-button>
         </a-tooltip>
+        <a-divider type="vertical" />
+        <a-checkbox v-model:checked="hideTest" size="small">隐藏测试类</a-checkbox>
+        <a-checkbox v-model:checked="hideUtil" size="small">隐藏工具类</a-checkbox>
       </a-space>
       <a-space>
         <a-input-search
@@ -43,8 +46,10 @@
     </div>
 
     <div class="map-canvas-area">
-      <CodeMap v-if="renderMode === '2d'" ref="codeMap2dRef" :projectId="projectId" @node-click="onNodeClick" />
-      <CodeMap3D v-else :projectId="projectId" @node-click="onNodeClick" />
+      <CodeMap v-if="renderMode === '2d'" ref="codeMap2dRef" :projectId="projectId"
+        :hide-test="hideTest" :hide-util="hideUtil" :focus-fqn="focusFqn" :focus-nonce="focusNonce" @node-click="onNodeClick" />
+      <CodeMap3D v-else :projectId="projectId"
+        :hide-test="hideTest" :hide-util="hideUtil" :focus-fqn="focusFqn" :focus-nonce="focusNonce" @node-click="onNodeClick" />
     </div>
 
     <a-drawer
@@ -180,7 +185,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { ThunderboltOutlined, QuestionCircleOutlined } from '@ant-design/icons-vue'
@@ -199,6 +204,22 @@ const hasData = ref(false)
 const selectedNode = ref(null)
 const drawerVisible = ref(false)
 const mapPreparing = ref(false)
+const hideTest = ref(false)
+const hideUtil = ref(false)
+const focusFqn = ref(null)
+const focusNonce = ref(0)
+
+// keep-alive 下从违规页跳回不触发 onMounted，必须用 watch 监听路由变化；
+// nonce 自增保证同一 FQN 重复跳转也能重新聚焦
+watch(() => route.fullPath, () => {
+  const val = route.query.focus
+  if (val) {
+    focusFqn.value = String(val)
+    focusNonce.value++
+  } else {
+    focusFqn.value = null
+  }
+}, { immediate: true })
 
 onMounted(async () => {
   try {

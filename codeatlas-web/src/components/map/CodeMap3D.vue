@@ -39,6 +39,15 @@
         <span>{{ item.label }}</span>
       </div>
       <a-divider style="margin:8px 0" />
+      <div class="legend-title">节点形状</div>
+      <div class="legend-row"><span>◆ 八面体 — 接口</span></div>
+      <div class="legend-row"><span>▲ 四面体 — 枚举</span></div>
+      <div class="legend-row"><span>● 球体 — 类 / 抽象类</span></div>
+      <div class="legend-title" style="margin-top:6px">连线</div>
+      <div class="legend-row"><span class="legend-line" style="background:#334466"></span><span>依赖</span></div>
+      <div class="legend-row"><span class="legend-line" style="background:#1677ff"></span><span>继承</span></div>
+      <div class="legend-row"><span class="legend-line" style="background:#52c41a"></span><span>实现</span></div>
+      <a-divider style="margin:8px 0" />
       <div class="legend-row">
         <a-switch size="small" v-model:checked="heatmapMode" @change="toggleHeatmap" />
         <span style="margin-left:8px">热力模式</span>
@@ -55,6 +64,7 @@
         <div class="panel-body">
           <div class="info-row"><span>全限定名</span><code>{{ selectedNode.id }}</code></div>
           <div class="info-row"><span>分层</span><a-tag :color="getLayerColor(selectedNode.layer)" size="small">{{ selectedNode.layer }}</a-tag></div>
+          <div class="info-row"><span>类型</span><span>{{ selectedNode.classType || 'CLASS' }}</span></div>
           <div class="info-row"><span>方法数</span><strong>{{ selectedNode.methods }}</strong></div>
           <div class="info-row"><span>代码行数</span><strong>{{ selectedNode.lineCount }}</strong></div>
           <div class="info-row"><span>依赖数</span><strong>{{ selectedNode.depCount }}</strong></div>
@@ -77,7 +87,11 @@ import { CSS2DRenderer, CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRe
 import api from '../../api'
 
 const props = defineProps({
-  projectId: { type: [Number, String], required: true }
+  projectId: { type: [Number, String], required: true },
+  hideTest: { type: Boolean, default: false },
+  hideUtil: { type: Boolean, default: false },
+  focusFqn: { type: String, default: null },
+  focusNonce: { type: Number, default: 0 }
 })
 
 const emit = defineEmits(['node-click'])
@@ -289,6 +303,8 @@ async function renderGraph(mapData) {
   }
 
   const sphereGeo = new THREE.SphereGeometry(1, 32, 32)
+  const octaGeo = new THREE.OctahedronGeometry(1.15)
+  const tetraGeo = new THREE.TetrahedronGeometry(1.25)
 
   // Create node meshes
   nodeMeshes = nodes.map((n, i) => {
@@ -304,12 +320,17 @@ async function renderGraph(mapData) {
       emissive: color,
       emissiveIntensity: 0.2
     })
-    const mesh = new THREE.Mesh(sphereGeo, material)
+    // classType → 几何形状: 接口=八面体, 枚举=四面体, 其余=球体
+    const geometry = n.classType === 'INTERFACE' ? octaGeo
+      : n.classType === 'ENUM' ? tetraGeo : sphereGeo
+    const mesh = new THREE.Mesh(geometry, material)
     mesh.scale.setScalar(importance)
     mesh.position.set(pos.x, pos.y, pos.z)
     mesh.userData = {
-      id: n.id, label: n.label, layer: n.layer, methods: n.methods || 0,
-      lineCount: n.lineCount || 0, depCount: depCount[n.id] || 0, originalColor: color
+      id: n.id, label: n.label, layer: n.layer, classType: n.classType || 'CLASS',
+      methods: n.methods || 0,
+      lineCount: n.lineCount || 0, depCount: depCount[n.id] || 0,
+      originalColor: color, hidden: false
     }
     scene.add(mesh)
 
@@ -341,15 +362,19 @@ async function renderGraph(mapData) {
   nodeMeshMap = {}
   nodeMeshes.forEach(m => { nodeMap[m.userData.id] = m; nodeMeshMap[m.userData.id] = m })
 
+  // 边关系 → 颜色: 继承=蓝, 实现=绿, 依赖=深蓝(现状)
+  const EDGE_RELATION_COLORS = { dependency: 0x334466, extends: 0x1677ff, implements: 0x52c41a }
+
   edgeLines = edges.map(e => {
     const src = nodeMap[e.source], tgt = nodeMap[e.target]
     if (!src || !tgt) return null
+    const baseColor = EDGE_RELATION_COLORS[e.type] || EDGE_RELATION_COLORS.dependency
     const points = [src.position.clone(), tgt.position.clone()]
     const geom = new THREE.BufferGeometry().setFromPoints(points)
     const line = new THREE.Line(geom, new THREE.LineBasicMaterial({
-      color: 0x334466, transparent: true, opacity: 0.4
+      color: baseColor, transparent: true, opacity: 0.4
     }))
-    line.userData = { source: e.source, target: e.target }
+    line.userData = { source: e.source, target: e.target, relation: e.type || 'dependency', baseColor }
     scene.add(line)
     return line
   }).filter(Boolean)
@@ -370,7 +395,7 @@ async function renderGraph(mapData) {
       frustum.setFromProjectionMatrix(projScreenMatrix)
 
       for (const mesh of nodeMeshes) {
-        mesh.visible = frustum.containsPoint(mesh.position)
+        mesh.visible = !mesh.userData.hidden && frustum.containsPoint(mesh.position)
       }
       // Hide edges connected to invisible nodes
       for (const line of edgeLines) {
@@ -385,6 +410,15 @@ async function renderGraph(mapData) {
     labelRenderer.render(scene, camera)
   }
   animate()
+
+  // 先应用过滤，再处理暂存的跳转定位请求（顺序反了会把刚恢复的节点重新隐藏）
+  applyLayerFilter3D()
+
+  if (pendingFocusFqn) {
+    const fqn = pendingFocusFqn
+    pendingFocusFqn = null
+    focusNode(fqn)
+  }
 }
 
 function clearScene() {
@@ -444,7 +478,7 @@ function highlightNode(mesh) {
   })
   edgeLines.forEach(l => {
     const connected = l.userData.source === mesh.userData.id || l.userData.target === mesh.userData.id
-    l.material.color.set(connected ? 0x00e5ff : 0x334466)
+    l.material.color.set(connected ? 0x00e5ff : l.userData.baseColor)
     l.material.opacity = connected ? 1.0 : 0.03
   })
 }
@@ -457,7 +491,7 @@ function resetHighlight() {
     if (!heatmapMode.value) m.material.color.set(m.userData.originalColor)
     m.children.forEach(c => { if (c.isMesh && c.geometry.type === 'TorusGeometry') c.material.opacity = 0.35 })
   })
-  edgeLines.forEach(l => { l.material.color.set(0x334466); l.material.opacity = 0.4 })
+  edgeLines.forEach(l => { l.material.color.set(l.userData.baseColor); l.material.opacity = 0.4 })
 }
 
 function onKeyDown(e) {
@@ -480,6 +514,59 @@ function onSearchSelect(val) {
   highlightNode(mesh)
   selectedNode.value = mesh.userData
   emit('node-click', mesh.userData)
+}
+
+let pendingFocusFqn = null
+
+// 跳转定位：聚焦到指定 FQN 的节点（复用搜索定位逻辑，被过滤隐藏时临时恢复显示）
+function focusNode(fqn) {
+  if (!fqn) return
+  if (!nodeMeshes.length) {
+    pendingFocusFqn = fqn
+    return
+  }
+  const mesh = nodeMeshMap[fqn]
+  if (!mesh) return
+  if (mesh.userData.hidden) {
+    mesh.userData.hidden = false
+    mesh.visible = true
+    mesh.children.forEach(c => { if (c.isCSS2DObject) c.visible = true })
+    edgeLines.forEach(l => {
+      if (l.userData.source === fqn || l.userData.target === fqn) l.visible = true
+    })
+  }
+  const pos = mesh.position
+  controls.target.copy(pos)
+  const dist = 5
+  camera.position.set(pos.x + dist, pos.y + dist * 0.6, pos.z + dist)
+  controls.update()
+  highlightNode(mesh)
+  selectedNode.value = mesh.userData
+  emit('node-click', mesh.userData)
+}
+
+function shouldHideMesh(mesh) {
+  const layer = (mesh.userData.layer || '').toLowerCase()
+  if (props.hideTest && layer === 'test') return true
+  if (props.hideUtil && layer === 'util') return true
+  return false
+}
+
+// 按开关隐藏/显示测试类与工具类；大图(>=500)时交由 animate 视锥剔除合并处理
+function applyLayerFilter3D() {
+  const large = nodeMeshes.length >= 500
+  nodeMeshes.forEach(m => {
+    m.userData.hidden = shouldHideMesh(m)
+    m.children.forEach(c => { if (c.isCSS2DObject) c.visible = !m.userData.hidden })
+    if (!large) m.visible = !m.userData.hidden
+  })
+  if (!large) {
+    edgeLines.forEach(l => {
+      const src = nodeMeshMap[l.userData.source]
+      const tgt = nodeMeshMap[l.userData.target]
+      l.visible = (!src || !src.userData.hidden) && (!tgt || !tgt.userData.hidden)
+    })
+  }
 }
 
 function toggleHeatmap(checked) {
@@ -547,6 +634,14 @@ onMounted(() => {
   if (canvasRef.value) resizeObserver.observe(canvasRef.value)
 })
 
+watch(() => props.focusNonce, () => {
+  if (props.focusFqn) focusNode(props.focusFqn)
+}, { immediate: true })
+
+watch([() => props.hideTest, () => props.hideUtil], () => {
+  applyLayerFilter3D()
+})
+
 watch(() => props.projectId, () => {
   clearScene()
   selectedNode.value = null
@@ -604,6 +699,7 @@ onBeforeUnmount(() => {
 .legend-title { color: #ccc; font-size: 12px; font-weight: 600; margin-bottom: 6px; }
 .legend-row { display: flex; align-items: center; gap: 6px; color: #aaa; font-size: 11px; margin: 3px 0; }
 .legend-dot { width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0; }
+.legend-line { width: 14px; height: 3px; border-radius: 2px; display: inline-block; flex-shrink: 0; }
 .map3d-info-panel {
   position: absolute;
   top: 16px;

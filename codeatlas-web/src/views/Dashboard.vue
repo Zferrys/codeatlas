@@ -111,7 +111,7 @@
               :percent="project.healthScore"
               :width="52"
               :stroke-color="healthColor(project.healthScore)"
-              :format="p => p + '%'"
+              :format="p => p + '分'"
             />
             <span class="health-label">健康度</span>
           </div>
@@ -577,6 +577,10 @@ function healthColor(score) {
 .health-label {
   font-size: 10px;
   color: var(--color-text-tertiary);
+}
+
+.card-health :deep(.ant-progress-text) {
+  font-size: 11px;
 }
 
 /* 上传组件 */

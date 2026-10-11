@@ -35,6 +35,8 @@ public class ScanProgressController {
 
     /** projectId → 该项目的 SseEmitter 列表 */
     private final Map<Long, CopyOnWriteArrayList<SseEmitter>> emitters = new ConcurrentHashMap<>();
+    /** projectId → 最近一次进度事件快照，客户端刷新/重连时用于立即恢复当前阶段 */
+    private final Map<Long, ScanProgressEvent> latestEvents = new ConcurrentHashMap<>();
     /** emitter → 对应的 heartbeat 定时任务，emitter 关闭时需取消 */
     private final Map<SseEmitter, ScheduledFuture<?>> heartbeats = new ConcurrentHashMap<>();
     private final ScheduledExecutorService heartbeatExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
@@ -59,6 +61,16 @@ public class ScanProgressController {
             emitter.send(SseEmitter.event()
                     .name("connected")
                     .data("{\"projectId\":" + projectId + "}"));
+            // 回放最近一次进度快照，客户端刷新/重连后立即恢复到当前阶段；
+            // 终态（COMPLETED/FAILED）不复放：陈旧终态对恢复无意义，还会让偶然连上的订阅者误判为"刚完成"
+            ScanProgressEvent snapshot = latestEvents.get(projectId);
+            if (snapshot != null
+                    && !"COMPLETED".equals(snapshot.getStage())
+                    && !"FAILED".equals(snapshot.getStage())) {
+                emitter.send(SseEmitter.event()
+                        .name("progress")
+                        .data(objectMapper.writeValueAsString(snapshot)));
+            }
         } catch (IOException e) {
             removeEmitter(projectId, emitter);
         }
@@ -79,6 +91,9 @@ public class ScanProgressController {
     @Async("scanExecutor")
     @EventListener
     public void onScanProgress(ScanProgressEvent event) {
+        // 无论是否有活跃订阅者，先记录快照（无订阅者时后续重连可回放）
+        latestEvents.put(event.getProjectId(), event);
+
         CopyOnWriteArrayList<SseEmitter> list = emitters.get(event.getProjectId());
         if (list == null || list.isEmpty()) return;
 

@@ -19,6 +19,8 @@ public class ClassSummaryResult {
     private List<String> methodNames;
     private List<String> dependencies;
     private List<String> fieldTypes;
+    private List<String> extendedTypes;
+    private List<String> implementedTypes;
     private String layer;
 
 }

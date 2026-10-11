@@ -152,6 +152,9 @@ public class ScanServiceImpl implements ScanService {
         scan.setStartedAt(LocalDateTime.now());
         scanMapper.insert(scan);
 
+        // 先于异步执行发出 PENDING，确保客户端连接时快照不是上一次扫描的终态
+        emitProgress(projectId, scan.getId(), "PENDING", 1, "扫描任务已创建，等待执行...");
+
         metrics.recordScanTriggered();
 
         final boolean isIncremental = incremental;

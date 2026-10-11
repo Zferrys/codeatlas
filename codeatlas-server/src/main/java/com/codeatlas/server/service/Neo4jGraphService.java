@@ -93,6 +93,53 @@ public class Neo4jGraphService {
                         Values.parameters("edges", edgeParams));
             }
             log.info("Neo4j: {} DEPENDS_ON edges created for projectId={}", edgeParams.size(), projectId);
+
+            // 4. 继承/实现关系边（仅项目内部类之间）
+            List<Map<String, Object>> extendsParams = new ArrayList<>();
+            List<Map<String, Object>> implementsParams = new ArrayList<>();
+            for (ClassSummaryResult cls : classes) {
+                if (cls.getExtendedTypes() != null) {
+                    for (String parent : cls.getExtendedTypes()) {
+                        if (parent != null && fqnSet.contains(parent)) {
+                            Map<String, Object> edge = new HashMap<>();
+                            edge.put("source", cls.getFqn());
+                            edge.put("target", parent);
+                            extendsParams.add(edge);
+                        }
+                    }
+                }
+                if (cls.getImplementedTypes() != null) {
+                    for (String itf : cls.getImplementedTypes()) {
+                        if (itf != null && fqnSet.contains(itf)) {
+                            Map<String, Object> edge = new HashMap<>();
+                            edge.put("source", cls.getFqn());
+                            edge.put("target", itf);
+                            implementsParams.add(edge);
+                        }
+                    }
+                }
+            }
+
+            if (!extendsParams.isEmpty()) {
+                session.run("""
+                                UNWIND $edges AS edge
+                                MATCH (a:Class {fqn: edge.source})
+                                MATCH (b:Class {fqn: edge.target})
+                                MERGE (a)-[:EXTENDS]->(b)
+                                """,
+                        Values.parameters("edges", extendsParams));
+            }
+            if (!implementsParams.isEmpty()) {
+                session.run("""
+                                UNWIND $edges AS edge
+                                MATCH (a:Class {fqn: edge.source})
+                                MATCH (b:Class {fqn: edge.target})
+                                MERGE (a)-[:IMPLEMENTS]->(b)
+                                """,
+                        Values.parameters("edges", implementsParams));
+            }
+            log.info("Neo4j: {} EXTENDS / {} IMPLEMENTS edges created for projectId={}",
+                    extendsParams.size(), implementsParams.size(), projectId);
         } catch (Exception e) {
             log.error("Neo4j import failed for projectId={}: {}", projectId, e.getMessage());
         }
@@ -107,8 +154,8 @@ public class Neo4jGraphService {
             var result = session.run(
                     "MATCH (c:Class {projectId: $projectId}) " +
                     "WITH collect(c) AS nodes " +
-                    "OPTIONAL MATCH (a:Class {projectId: $projectId})-[r:DEPENDS_ON]->(b:Class {projectId: $projectId}) " +
-                    "RETURN nodes, collect({source: a.fqn, target: b.fqn}) AS edges",
+                    "OPTIONAL MATCH (a:Class {projectId: $projectId})-[r:DEPENDS_ON|EXTENDS|IMPLEMENTS]->(b:Class {projectId: $projectId}) " +
+                    "RETURN nodes, collect({source: a.fqn, target: b.fqn, relType: type(r)}) AS edges",
                     Values.parameters("projectId", projectId));
 
             List<GraphVO.NodeVO> graphNodes = new ArrayList<>();
@@ -129,6 +176,7 @@ public class Neo4jGraphService {
                     String layer = safeProp(node, "layer");
                     n.setGroup(layer != null ? layer.toLowerCase() : "unknown");
                     n.setLayer(layer);
+                    n.setClassType(safeProp(node, "classType"));
                     n.setMethods(safePropInt(node, "totalMethods"));
                     n.setLineCount(safePropInt(node, "lineCount"));
                     graphNodes.add(n);
@@ -145,7 +193,7 @@ public class Neo4jGraphService {
                         GraphVO.EdgeVO e = new GraphVO.EdgeVO();
                         e.setSource(source);
                         e.setTarget(target);
-                        e.setType("dependency");
+                        e.setType(mapRelationType((String) edgeMap.get("relType")));
                         graphEdges.add(e);
                     }
                 }
@@ -195,6 +243,7 @@ public class Neo4jGraphService {
                         String layer = safeProp(node, "layer");
                         n.setGroup(layer != null ? layer.toLowerCase() : "unknown");
                         n.setLayer(layer);
+                        n.setClassType(safeProp(node, "classType"));
                         n.setMethods(safePropInt(node, "totalMethods"));
                         n.setLineCount(safePropInt(node, "lineCount"));
                         graphNodes.add(n);
@@ -289,6 +338,7 @@ public class Neo4jGraphService {
                 String layer = safeProp(node, "layer");
                 n.setGroup(layer != null ? layer.toLowerCase() : "unknown");
                 n.setLayer(layer);
+                n.setClassType(safeProp(node, "classType"));
                 n.setMethods(safePropInt(node, "totalMethods"));
                 n.setLineCount(safePropInt(node, "lineCount"));
                 graphNodes.add(n);
@@ -539,6 +589,13 @@ public class Neo4jGraphService {
         int classCount;
         int totalMethods;
         int totalLineCount;
+    }
+
+    /** Neo4j 关系类型 → 前端边类型；null（旧数据）默认 dependency */
+    private String mapRelationType(String relType) {
+        if ("EXTENDS".equals(relType)) return "extends";
+        if ("IMPLEMENTS".equals(relType)) return "implements";
+        return "dependency";
     }
 
     private String safeProp(org.neo4j.driver.types.Node node, String key) {

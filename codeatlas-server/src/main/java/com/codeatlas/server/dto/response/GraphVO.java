@@ -32,6 +32,7 @@ public class GraphVO {
         private String label;
         private String group;
         private String layer;
+        private String classType;
         private int methods;
         private int fields;
         private int lineCount;
@@ -44,6 +45,8 @@ public class GraphVO {
         public void setGroup(String group) { this.group = group; }
         public String getLayer() { return layer; }
         public void setLayer(String layer) { this.layer = layer; }
+        public String getClassType() { return classType; }
+        public void setClassType(String classType) { this.classType = classType; }
         public int getMethods() { return methods; }
         public void setMethods(int methods) { this.methods = methods; }
         public int getFields() { return fields; }

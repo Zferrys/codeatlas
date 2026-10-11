@@ -17,6 +17,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -57,10 +58,22 @@ public class JavaParserService {
 
         // 第二遍: 重新计算依赖，过滤出项目内部依赖
         for (ClassSummaryResult r : results) {
-            List<String> filteredDeps = r.getDependencies().stream()
-                    .filter(allFqns::contains)
-                    .collect(Collectors.toList());
-            r.setDependencies(filteredDeps);
+            if (r.getDependencies() != null) {
+                List<String> filteredDeps = r.getDependencies().stream()
+                        .filter(allFqns::contains)
+                        .collect(Collectors.toList());
+                r.setDependencies(filteredDeps);
+            }
+            if (r.getExtendedTypes() != null) {
+                r.setExtendedTypes(r.getExtendedTypes().stream()
+                        .filter(allFqns::contains)
+                        .collect(Collectors.toList()));
+            }
+            if (r.getImplementedTypes() != null) {
+                r.setImplementedTypes(r.getImplementedTypes().stream()
+                        .filter(allFqns::contains)
+                        .collect(Collectors.toList()));
+            }
         }
 
         log.info("Analyzed {} files, extracted {} classes", javaFiles.size(), results.size());
@@ -99,10 +112,25 @@ public class JavaParserService {
                 } else {
                     result.setClassType(cid.isAbstract() ? "ABSTRACT" : "CLASS");
                 }
+                result.setExtendedTypes(cid.getExtendedTypes().stream()
+                        .map(t -> resolveImport(imports, extractSimpleName(t.asString()), packageName))
+                        .filter(Objects::nonNull)
+                        .collect(Collectors.toList()));
+                result.setImplementedTypes(cid.getImplementedTypes().stream()
+                        .map(t -> resolveImport(imports, extractSimpleName(t.asString()), packageName))
+                        .filter(Objects::nonNull)
+                        .collect(Collectors.toList()));
             } else if (type.isEnumDeclaration()) {
                 result.setClassType("ENUM");
+                result.setExtendedTypes(new ArrayList<>());
+                result.setImplementedTypes(type.asEnumDeclaration().getImplementedTypes().stream()
+                        .map(t -> resolveImport(imports, extractSimpleName(t.asString()), packageName))
+                        .filter(Objects::nonNull)
+                        .collect(Collectors.toList()));
             } else {
                 result.setClassType("CLASS");
+                result.setExtendedTypes(new ArrayList<>());
+                result.setImplementedTypes(new ArrayList<>());
             }
 
             // 方法信息
@@ -130,6 +158,11 @@ public class JavaParserService {
             // 推断架构分层
             result.setLayer(inferLayer(packageName, result.getSimpleName(), result.getAnnotations()));
 
+            // 测试类覆盖: 路径含 src/test/java 或类名符合测试命名约定
+            if (isTestFile(file, result.getSimpleName())) {
+                result.setLayer("TEST");
+            }
+
             // 构建依赖列表 — 从 field types + param types 提取简单类名, 匹配 imports 解析为 FQN
             List<String> dependencies = buildDependencies(imports, fieldTypes, new ArrayList<>(paramTypes), packageName);
             result.setDependencies(dependencies);
@@ -142,6 +175,13 @@ public class JavaParserService {
         return type.getAnnotations().stream()
                 .map(a -> a.getNameAsString())
                 .collect(Collectors.toList());
+    }
+
+    private boolean isTestFile(Path file, String simpleName) {
+        String normalized = file.toString().replace('\\', '/');
+        if (normalized.contains("/src/test/java/")) return true;
+        if (simpleName == null || simpleName.length() <= 2) return false;
+        return simpleName.endsWith("Test") || simpleName.endsWith("Tests") || simpleName.endsWith("IT");
     }
 
     private String inferLayer(String packageName, String simpleName, List<String> annotations) {

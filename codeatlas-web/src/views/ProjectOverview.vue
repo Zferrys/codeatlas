@@ -35,7 +35,8 @@
         <a-col :xs="24" :sm="16" :lg="18">
           <a-row :gutter="[16, 16]">
             <a-col :xs="12" :lg="6" v-for="dim in dimensions" :key="dim.key">
-              <div class="dim-card">
+              <div class="dim-card" @click="openDimensionRule(dim)">
+                <InfoCircleOutlined class="dim-hint-icon" />
                 <div class="dim-icon" :style="{ background: dim.bg, color: dim.color }">
                   <component :is="dim.icon" />
                 </div>
@@ -81,7 +82,12 @@
                 </span>
               </div>
             </div>
-            <a-empty v-else description="暂无扫描数据" :image-style="{ height: '40px' }" />
+            <a-empty v-else :image-style="{ height: '40px' }">
+              <template #description>
+                <div class="trend-empty-title">暂无扫描数据</div>
+                <div class="trend-empty-hint">触发一次扫描后，这里将展示历次扫描的违规数量变化趋势</div>
+              </template>
+            </a-empty>
           </div>
         </a-col>
       </a-row>
@@ -183,17 +189,40 @@
           </div>
         </a-col>
       </a-row>
+
+      <!-- 扣分规则弹窗 -->
+      <a-modal
+        v-model:open="ruleModalVisible"
+        :title="ruleModalDim ? ruleModalDim.label + ' — 扣分规则' : ''"
+        :footer="null"
+        width="460px"
+      >
+        <div v-if="ruleModalDim" class="rule-modal-body">
+          <div class="rule-modal-head">
+            <span class="rule-modal-score" :style="{ color: ruleModalDim.color }">
+              {{ ruleModalDim.score }}<span class="rule-modal-score-unit">分</span>
+            </span>
+            <span class="rule-modal-weight" :style="{ color: ruleModalDim.color, borderColor: ruleModalDim.color }">
+              权重 {{ ruleModalDim.weight }}%
+            </span>
+          </div>
+          <div class="rule-modal-section">
+            <h4>评分规则</h4>
+            <p>{{ ruleModalDim.rule }}</p>
+          </div>
+        </div>
+      </a-modal>
     </template>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, reactive, computed, onMounted, onActivated, onBeforeUnmount } from 'vue'
 import { useRoute } from 'vue-router'
 import { message } from 'ant-design-vue'
 import {
   SafetyOutlined, CodeOutlined, BugOutlined, ApartmentOutlined, ScanOutlined,
-  DownloadOutlined, FilePdfOutlined, FileTextOutlined, SyncOutlined
+  DownloadOutlined, FilePdfOutlined, FileTextOutlined, SyncOutlined, InfoCircleOutlined
 } from '@ant-design/icons-vue'
 import api from '../api'
 
@@ -206,8 +235,12 @@ const scans = ref([])
 const scanning = ref(false)
 const scanProgress = reactive({ stage: '', progress: 0, message: '' })
 let sseAbortController = null
+let aiPollTimer = null
 const layerDistribution = ref([])
 const violationTrend = ref([])
+const dimensionScores = ref({})
+const ruleModalVisible = ref(false)
+const ruleModalDim = ref(null)
 
 const columns = [
   { title: '状态', key: 'status', width: 80 },
@@ -219,18 +252,28 @@ const columns = [
 ]
 
 const dimensions = computed(() => {
-  const score = healthScore.value || 0
+  const ds = dimensionScores.value || {}
+  const pick = (v) => (v === null || v === undefined ? 0 : v)
   return [
-    { key: 'arch', label: '架构合规', score: Math.min(100, Math.max(0, score - 5)),
-      icon: ApartmentOutlined, bg: '#f0e6ff', color: '#722ed1' },
-    { key: 'structure', label: '代码结构', score: Math.min(100, Math.max(0, score)),
-      icon: CodeOutlined, bg: '#e8f4ff', color: '#1890ff' },
-    { key: 'quality', label: '代码质量', score: Math.min(100, Math.max(0, score - 3)),
-      icon: BugOutlined, bg: '#e6f7e9', color: '#52c41a' },
-    { key: 'deps', label: '依赖健康', score: Math.min(100, Math.max(0, score - 8)),
-      icon: SafetyOutlined, bg: '#fff7e6', color: '#fa8c16' }
+    { key: 'arch', label: '架构合规', score: pick(ds.architectureCompliance), weight: 40,
+      icon: ApartmentOutlined, bg: '#f0e6ff', color: '#722ed1',
+      rule: '得分 = 100 − min(违规数 × 5 ÷ 类数, 40)。违规越少得分越高，扣分上限 40 分。' },
+    { key: 'structure', label: '代码结构', score: pick(ds.codeStructure), weight: 30,
+      icon: CodeOutlined, bg: '#e8f4ff', color: '#1890ff',
+      rule: '得分 = 已识别分层的类数 ÷ 总类数 × 100。分层覆盖率越高得分越高。' },
+    { key: 'quality', label: '代码质量', score: pick(ds.codeQuality), weight: 20,
+      icon: BugOutlined, bg: '#e6f7e9', color: '#52c41a',
+      rule: '按平均每类方法数评估：5–15 个方法为满分；不足 5 个每少 1 个扣 10 分；超过 15 个每多 1 个扣 3 分。' },
+    { key: 'deps', label: '依赖健康', score: pick(ds.dependencyHealth), weight: 10,
+      icon: SafetyOutlined, bg: '#fff7e6', color: '#fa8c16',
+      rule: '按平均每类依赖数评估：1–20 个依赖为满分；少于 1 个得 70 分；超过 20 个每多 1 个扣 2 分。' }
   ]
 })
+
+function openDimensionRule(dim) {
+  ruleModalDim.value = dim
+  ruleModalVisible.value = true
+}
 
 const healthLevel = computed(() => {
   const s = healthScore.value || 0
@@ -272,7 +315,7 @@ const trendLinePoints = computed(() => {
 })
 
 const stageLabels = {
-  CLONING: '克隆仓库', PARSING: '解析代码结构', RULES: '执行规则检查',
+  PENDING: '准备中', CLONING: '克隆仓库', PARSING: '解析代码结构', RULES: '执行规则检查',
   AI: 'AI 分析', COMPLETED: '扫描完成', FAILED: '扫描失败'
 }
 
@@ -306,13 +349,15 @@ async function loadData() {
   if (!projectId) return
   loading.value = true
   try {
-    const [projectRes, scanRes] = await Promise.all([
+    const [projectRes, scanRes, healthRes] = await Promise.all([
       api.get(`/projects/${projectId}`),
-      api.get(`/projects/${projectId}/scans`)
+      api.get(`/projects/${projectId}/scans`),
+      api.get(`/projects/${projectId}/health-score`).catch(() => null)
     ])
     const project = projectRes.data.data
     healthScore.value = project?.healthScore ?? 0
     totalClasses.value = project?.totalClasses || 0
+    dimensionScores.value = healthRes?.data?.data?.dimensions || {}
 
     // Layer distribution (from project or scan data)
     if (project?.layerDistribution) {
@@ -339,6 +384,7 @@ async function loadData() {
 async function triggerScan() {
   const projectId = route.params.id
   if (!projectId) return
+  stopAiPhasePoll()
   scanning.value = true
   scanProgress.stage = ''
   scanProgress.progress = 0
@@ -384,7 +430,8 @@ async function subscribeScanProgress(projectId) {
             }
             if (data.stage === 'COMPLETED' || data.stage === 'FAILED') {
               reader.cancel()
-              if (data.stage === 'COMPLETED') {
+              const completed = data.stage === 'COMPLETED'
+              if (completed) {
                 message.success('扫描完成')
               } else {
                 message.error('扫描失败: ' + (data.message || '未知错误'))
@@ -393,6 +440,9 @@ async function subscribeScanProgress(projectId) {
                 scanning.value = false
                 sseAbortController = null
                 await loadData()
+                if (completed) {
+                  await checkAiPhase(projectId)
+                }
               }, 800)
               return
             }
@@ -413,9 +463,83 @@ async function subscribeScanProgress(projectId) {
   }
 }
 
+let resumeInFlight = false
+
+// 页面刷新/切回时恢复：扫描进行中则重新订阅 SSE（服务端回放快照），
+// 仅 AI 分析进行中则进入轮询（扫描完成后 SSE 连接已关闭，收不到 AI 事件）
+async function resumeRunningScan() {
+  const projectId = route.params.id
+  if (!projectId) return
+  if (sseAbortController || aiPollTimer || resumeInFlight) return
+  resumeInFlight = true
+  try {
+    const res = await api.get(`/projects/${projectId}/scans/status`)
+    const data = res.data.data || {}
+    if (data.scanStatus === 'RUNNING') {
+      scanning.value = true
+      if (!scanProgress.stage) {
+        scanProgress.stage = 'PENDING'
+        scanProgress.progress = 1
+        scanProgress.message = '正在恢复扫描进度...'
+      }
+      subscribeScanProgress(projectId)
+    } else if (data.aiAnalysisRunning) {
+      scanning.value = true
+      startAiPhasePoll(projectId)
+    }
+  } catch (e) {
+    // 静默失败，不影响页面其余数据
+  } finally {
+    resumeInFlight = false
+  }
+}
+
+async function checkAiPhase(projectId) {
+  try {
+    const res = await api.get(`/projects/${projectId}/scans/status`)
+    const data = res.data.data || {}
+    if (data.aiAnalysisRunning) {
+      scanning.value = true
+      startAiPhasePoll(projectId)
+    }
+  } catch (e) {}
+}
+
+function startAiPhasePoll(projectId) {
+  stopAiPhasePoll()
+  scanProgress.stage = 'AI'
+  scanProgress.progress = 80
+  scanProgress.message = 'AI 架构分析中，请稍候...'
+  aiPollTimer = setInterval(async () => {
+    try {
+      const res = await api.get(`/projects/${projectId}/scans/status`)
+      const data = res.data.data || {}
+      if (!data.aiAnalysisRunning) {
+        stopAiPhasePoll()
+        scanProgress.stage = 'COMPLETED'
+        scanProgress.progress = 100
+        scanProgress.message = 'AI 分析完成'
+        message.success('AI 分析完成')
+        setTimeout(async () => {
+          scanning.value = false
+          await loadData()
+        }, 800)
+      }
+    } catch (e) {}
+  }, 8000)
+}
+
+function stopAiPhasePoll() {
+  if (aiPollTimer) {
+    clearInterval(aiPollTimer)
+    aiPollTimer = null
+  }
+}
+
 async function triggerIncrementalScan() {
   const projectId = route.params.id
   if (!projectId) return
+  stopAiPhasePoll()
   scanning.value = true
   scanProgress.stage = ''
   scanProgress.progress = 0
@@ -461,9 +585,14 @@ function cleanupSSE() {
     sseAbortController.abort()
     sseAbortController = null
   }
+  stopAiPhasePoll()
 }
 
-onMounted(loadData)
+onMounted(() => {
+  loadData()
+  resumeRunningScan()
+})
+onActivated(resumeRunningScan)
 onBeforeUnmount(cleanupSSE)
 </script>
 
@@ -513,6 +642,7 @@ onBeforeUnmount(cleanupSSE)
 
 /* 维度卡片 */
 .dim-card {
+  position: relative;
   background: #fff;
   border-radius: 12px;
   padding: 16px;
@@ -521,6 +651,63 @@ onBeforeUnmount(cleanupSSE)
   align-items: center;
   gap: 12px;
   height: 100%;
+  cursor: pointer;
+  transition: box-shadow 0.2s, transform 0.2s;
+}
+
+.dim-card:hover {
+  box-shadow: 0 4px 14px rgba(0,0,0,0.1);
+  transform: translateY(-2px);
+}
+
+.dim-hint-icon {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  font-size: 12px;
+  color: #bfbfbf;
+  transition: color 0.2s;
+}
+
+.dim-card:hover .dim-hint-icon {
+  color: #1677ff;
+}
+
+/* 扣分规则弹窗 */
+.rule-modal-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.rule-modal-score {
+  font-size: 32px;
+  font-weight: 800;
+}
+
+.rule-modal-score-unit {
+  font-size: 14px;
+  font-weight: 500;
+  margin-left: 2px;
+}
+
+.rule-modal-weight {
+  border: 1px solid;
+  border-radius: 4px;
+  padding: 1px 8px;
+  font-size: 12px;
+}
+
+.rule-modal-section h4 {
+  margin: 0 0 8px;
+  color: #1a1a2e;
+}
+
+.rule-modal-section p {
+  margin: 0;
+  color: #595959;
+  line-height: 1.7;
 }
 
 .dim-icon {
@@ -567,6 +754,17 @@ onBeforeUnmount(cleanupSSE)
 .trend-svg {
   width: 100%;
   height: 60px;
+}
+
+.trend-empty-title {
+  color: #8c8c8c;
+  font-size: 14px;
+}
+
+.trend-empty-hint {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #bfbfbf;
 }
 
 .trend-labels {
