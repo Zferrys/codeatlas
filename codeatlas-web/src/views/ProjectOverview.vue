@@ -17,11 +17,10 @@
                 :width="140"
                 :stroke-width="10"
                 :stroke-color="healthGradient"
-                :format="() => ''"
               >
                 <template #format>
                   <div class="health-ring-text">
-                    <span class="health-value">{{ healthScore ?? '--' }}</span>
+                    <span class="health-value">{{ displayScore }}</span>
                     <span class="health-unit">分</span>
                   </div>
                 </template>
@@ -81,6 +80,7 @@
                   {{ v.label }}
                 </span>
               </div>
+              <p class="trend-hint">按扫描时间从左到右展示最近 8 次扫描的违规数量，数值越低说明代码质量越好。</p>
             </div>
             <a-empty v-else :image-style="{ height: '40px' }">
               <template #description>
@@ -210,6 +210,10 @@
             <h4>评分规则</h4>
             <p>{{ ruleModalDim.rule }}</p>
           </div>
+          <div class="rule-modal-section total-section">
+            <h4>总分计算</h4>
+            <p>总分 = 架构合规 × 40% + 代码结构 × 30% + 代码质量 × 20% + 依赖健康 × 10%。</p>
+          </div>
         </div>
       </a-modal>
     </template>
@@ -257,7 +261,7 @@ const dimensions = computed(() => {
   return [
     { key: 'arch', label: '架构合规', score: pick(ds.architectureCompliance), weight: 40,
       icon: ApartmentOutlined, bg: '#f0e6ff', color: '#722ed1',
-      rule: '得分 = 100 − min(违规数 × 5 ÷ 类数, 40)。违规越少得分越高，扣分上限 40 分。' },
+      rule: '得分 = 100 − min(违规数 × 5, 40)：每个违规扣 5 分，累计扣分不超过 40 分；无违规为满分 100 分。' },
     { key: 'structure', label: '代码结构', score: pick(ds.codeStructure), weight: 30,
       icon: CodeOutlined, bg: '#e8f4ff', color: '#1890ff',
       rule: '得分 = 已识别分层的类数 ÷ 总类数 × 100。分层覆盖率越高得分越高。' },
@@ -289,6 +293,11 @@ const healthGradient = computed(() => {
   if (s >= 60) return { '0%': '#1890ff', '100%': '#69c0ff' }
   if (s >= 40) return { '0%': '#fa8c16', '100%': '#ffc069' }
   return { '0%': '#ff4d4f', '100%': '#ff7875' }
+})
+
+const displayScore = computed(() => {
+  if (healthScore.value === null || healthScore.value === undefined) return '--'
+  return Math.round(healthScore.value)
 })
 
 const trendViewWidth = computed(() => {
@@ -344,10 +353,10 @@ function formatTime(dateStr) {
   return d.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 
-async function loadData() {
+async function loadData(silent = false) {
   const projectId = route.params.id
   if (!projectId) return
-  loading.value = true
+  if (!silent) loading.value = true
   try {
     const [projectRes, scanRes, healthRes] = await Promise.all([
       api.get(`/projects/${projectId}`),
@@ -355,7 +364,9 @@ async function loadData() {
       api.get(`/projects/${projectId}/health-score`).catch(() => null)
     ])
     const project = projectRes.data.data
-    healthScore.value = project?.healthScore ?? 0
+    // 分数优先取 health-score 实时值（与扫描落库同一套计算口径），失败时回退项目字段
+    const liveScore = healthRes?.data?.data?.healthScore
+    healthScore.value = liveScore ?? project?.healthScore ?? 0
     totalClasses.value = project?.totalClasses || 0
     dimensionScores.value = healthRes?.data?.data?.dimensions || {}
 
@@ -377,7 +388,7 @@ async function loadData() {
   } catch (e) {
     // handled by interceptor
   } finally {
-    loading.value = false
+    if (!silent) loading.value = false
   }
 }
 
@@ -588,11 +599,21 @@ function cleanupSSE() {
   stopAiPhasePoll()
 }
 
+let skipFirstActivation = true
+
 onMounted(() => {
   loadData()
   resumeRunningScan()
 })
-onActivated(resumeRunningScan)
+// keep-alive 切回页面时静默刷新（首次激活与 onMounted 重复，跳过）
+onActivated(() => {
+  if (skipFirstActivation) {
+    skipFirstActivation = false
+    return
+  }
+  loadData(true)
+  resumeRunningScan()
+})
 onBeforeUnmount(cleanupSSE)
 </script>
 
@@ -704,6 +725,12 @@ onBeforeUnmount(cleanupSSE)
   color: #1a1a2e;
 }
 
+.rule-modal-section.total-section {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px dashed #f0f0f0;
+}
+
 .rule-modal-section p {
   margin: 0;
   color: #595959;
@@ -776,6 +803,13 @@ onBeforeUnmount(cleanupSSE)
 .trend-label-item {
   font-size: 10px;
   color: #bbb;
+}
+
+.trend-hint {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: #bfbfbf;
+  line-height: 1.6;
 }
 
 /* 通用 */

@@ -42,11 +42,12 @@
       <div class="legend-title">节点形状</div>
       <div class="legend-row"><span>◆ 八面体 — 接口</span></div>
       <div class="legend-row"><span>▲ 四面体 — 枚举</span></div>
-      <div class="legend-row"><span>● 球体 — 类 / 抽象类</span></div>
+      <div class="legend-row"><span>⬢ 二十面体 — 抽象类</span></div>
+      <div class="legend-row"><span>● 球体 — 类</span></div>
       <div class="legend-title" style="margin-top:6px">连线</div>
-      <div class="legend-row"><span class="legend-line" style="background:#334466"></span><span>依赖</span></div>
-      <div class="legend-row"><span class="legend-line" style="background:#1677ff"></span><span>继承</span></div>
-      <div class="legend-row"><span class="legend-line" style="background:#52c41a"></span><span>实现</span></div>
+      <div class="legend-row"><span class="legend-line dim" style="background:#334466"></span><span>依赖</span></div>
+      <div class="legend-row"><span class="legend-line bold" style="background:#ff7a45"></span><span>继承</span></div>
+      <div class="legend-row"><span class="legend-line swatch-implements"></span><span>实现</span></div>
       <a-divider style="margin:8px 0" />
       <div class="legend-row">
         <a-switch size="small" v-model:checked="heatmapMode" @change="toggleHeatmap" />
@@ -305,6 +306,7 @@ async function renderGraph(mapData) {
   const sphereGeo = new THREE.SphereGeometry(1, 32, 32)
   const octaGeo = new THREE.OctahedronGeometry(1.15)
   const tetraGeo = new THREE.TetrahedronGeometry(1.25)
+  const icosaGeo = new THREE.IcosahedronGeometry(1.05)
 
   // Create node meshes
   nodeMeshes = nodes.map((n, i) => {
@@ -320,9 +322,10 @@ async function renderGraph(mapData) {
       emissive: color,
       emissiveIntensity: 0.2
     })
-    // classType → 几何形状: 接口=八面体, 枚举=四面体, 其余=球体
+    // classType → 几何形状: 接口=八面体, 枚举=四面体, 抽象类=二十面体, 其余=球体
     const geometry = n.classType === 'INTERFACE' ? octaGeo
-      : n.classType === 'ENUM' ? tetraGeo : sphereGeo
+      : n.classType === 'ENUM' ? tetraGeo
+      : n.classType === 'ABSTRACT' ? icosaGeo : sphereGeo
     const mesh = new THREE.Mesh(geometry, material)
     mesh.scale.setScalar(importance)
     mesh.position.set(pos.x, pos.y, pos.z)
@@ -362,19 +365,27 @@ async function renderGraph(mapData) {
   nodeMeshMap = {}
   nodeMeshes.forEach(m => { nodeMap[m.userData.id] = m; nodeMeshMap[m.userData.id] = m })
 
-  // 边关系 → 颜色: 继承=蓝, 实现=绿, 依赖=深蓝(现状)
-  const EDGE_RELATION_COLORS = { dependency: 0x334466, extends: 0x1677ff, implements: 0x52c41a }
+  // 边关系 → 样式: 依赖弱化(暗、低透明)作为背景, 继承(亮橙)/实现(绿色虚线)高亮突出
+  const EDGE_RELATION_STYLES = {
+    dependency: { color: 0x334466, opacity: 0.14 },
+    extends: { color: 0xff7a45, opacity: 1.0 },
+    implements: { color: 0x52c41a, opacity: 1.0 }
+  }
 
   edgeLines = edges.map(e => {
     const src = nodeMap[e.source], tgt = nodeMap[e.target]
     if (!src || !tgt) return null
-    const baseColor = EDGE_RELATION_COLORS[e.type] || EDGE_RELATION_COLORS.dependency
+    const relation = e.type || 'dependency'
+    const st = EDGE_RELATION_STYLES[relation] || EDGE_RELATION_STYLES.dependency
     const points = [src.position.clone(), tgt.position.clone()]
     const geom = new THREE.BufferGeometry().setFromPoints(points)
-    const line = new THREE.Line(geom, new THREE.LineBasicMaterial({
-      color: baseColor, transparent: true, opacity: 0.4
-    }))
-    line.userData = { source: e.source, target: e.target, relation: e.type || 'dependency', baseColor }
+    // LineBasicMaterial 不支持虚线，实现边需用 LineDashedMaterial + computeLineDistances
+    const material = relation === 'implements'
+      ? new THREE.LineDashedMaterial({ color: st.color, transparent: true, opacity: st.opacity, dashSize: 0.6, gapSize: 0.4 })
+      : new THREE.LineBasicMaterial({ color: st.color, transparent: true, opacity: st.opacity })
+    const line = new THREE.Line(geom, material)
+    if (relation === 'implements') line.computeLineDistances()
+    line.userData = { source: e.source, target: e.target, relation, baseColor: st.color, baseOpacity: st.opacity }
     scene.add(line)
     return line
   }).filter(Boolean)
@@ -491,7 +502,7 @@ function resetHighlight() {
     if (!heatmapMode.value) m.material.color.set(m.userData.originalColor)
     m.children.forEach(c => { if (c.isMesh && c.geometry.type === 'TorusGeometry') c.material.opacity = 0.35 })
   })
-  edgeLines.forEach(l => { l.material.color.set(l.userData.baseColor); l.material.opacity = 0.4 })
+  edgeLines.forEach(l => { l.material.color.set(l.userData.baseColor); l.material.opacity = l.userData.baseOpacity ?? 0.14 })
 }
 
 function onKeyDown(e) {
@@ -700,6 +711,11 @@ onBeforeUnmount(() => {
 .legend-row { display: flex; align-items: center; gap: 6px; color: #aaa; font-size: 11px; margin: 3px 0; }
 .legend-dot { width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0; }
 .legend-line { width: 14px; height: 3px; border-radius: 2px; display: inline-block; flex-shrink: 0; }
+.legend-line.dim { opacity: 0.35; }
+.legend-line.bold { height: 4px; }
+.legend-line.swatch-implements {
+  background: repeating-linear-gradient(to right, #52c41a 0, #52c41a 4px, transparent 4px, transparent 7px);
+}
 .map3d-info-panel {
   position: absolute;
   top: 16px;

@@ -28,6 +28,7 @@ import com.codeatlas.server.service.AlertService;
 import com.codeatlas.server.service.ConstitutionRuleService;
 import com.codeatlas.server.service.Neo4jGraphService;
 import com.codeatlas.server.service.ScanService;
+import com.codeatlas.server.util.HealthScoreCalculator;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.annotation.Timed;
@@ -38,7 +39,6 @@ import org.springframework.cache.CacheManager;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 
-import java.math.BigDecimal;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
@@ -345,8 +345,9 @@ public class ScanServiceImpl implements ScanService {
 
         project.setTotalClasses(totalClasses);
         project.setTotalModules(1);
-        project.setHealthScore(calculateHealthScore(totalViolations, totalClasses,
-                scan.getTotalViolations() != null ? scan.getTotalViolations() : 0));
+        // 评分统一由 HealthScoreCalculator 计算（与 /health-score 展示口径一致）
+        List<ClassSummaryEntity> scoreClasses = classSummaryMapper.findByScanId(scan.getId());
+        project.setHealthScore(HealthScoreCalculator.compute(totalClasses, totalViolations, scoreClasses).getTotal());
         project.setLastScanId(scan.getId());
         projectMapper.updateStats(project);
 
@@ -467,14 +468,6 @@ public class ScanServiceImpl implements ScanService {
         } catch (JsonProcessingException e) {
             return "[]";
         }
-    }
-
-    private BigDecimal calculateHealthScore(int violations, int totalClasses, int knownViolations) {
-        if (totalClasses == 0) return BigDecimal.ZERO;
-        double violationPenalty = Math.min(violations * 5.0, 40.0);
-        double score = 100.0 - violationPenalty;
-        double finalScore = Math.max(0.0, Math.min(100.0, score));
-        return BigDecimal.valueOf(Math.round(finalScore * 100.0) / 100.0);
     }
 
     private ScanVO toVO(ScanRecord s) {

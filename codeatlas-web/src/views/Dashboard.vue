@@ -111,7 +111,7 @@
               :percent="project.healthScore"
               :width="52"
               :stroke-color="healthColor(project.healthScore)"
-              :format="p => p + '分'"
+              :format="p => Math.round(p) + '分'"
             />
             <span class="health-label">健康度</span>
           </div>

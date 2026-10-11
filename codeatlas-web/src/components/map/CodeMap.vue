@@ -25,9 +25,9 @@
       <span class="legend-item">▭ 抽象类（虚线框）</span>
       <span class="legend-item">◯ 枚举</span>
       <span class="legend-sep"></span>
-      <span class="legend-item"><i class="legend-line" style="border-color:#bfbfbf"></i> 依赖</span>
-      <span class="legend-item"><i class="legend-line" style="border-color:#1677ff"></i> 继承</span>
-      <span class="legend-item"><i class="legend-line dashed" style="border-color:#52c41a"></i> 实现</span>
+      <span class="legend-item"><i class="legend-line thin" style="border-color:#bfbfbf"></i> 依赖</span>
+      <span class="legend-item"><i class="legend-line bold" style="border-color:#fa541c"></i> 继承</span>
+      <span class="legend-item"><i class="legend-line dashed bold" style="border-color:#52c41a"></i> 实现</span>
     </div>
   </div>
 </template>
@@ -82,18 +82,19 @@ const legend = [
 // classType → G6 节点形状；null/其他默认 rect
 function nodeShape(classType) {
   switch (classType) {
-    case 'INTERFACE': return { type: 'diamond', size: [72, 56] }
+    case 'INTERFACE': return { type: 'diamond', size: [76, 60] }
     case 'ABSTRACT': return { type: 'rect', size: [90, 36], lineDash: [5, 3] }
-    case 'ENUM': return { type: 'ellipse', size: [80, 44] }
+    case 'ENUM': return { type: 'ellipse', size: [82, 46] }
     default: return { type: 'rect', size: [90, 36] }
   }
 }
 
 // 边关系 → 样式；后端 edge.type 值为 dependency/extends/implements
+// 依赖线弱化后退为背景，继承/实现用高对比粗线突出（一眼区分）
 const EDGE_STYLES = {
-  dependency: { stroke: '#bfbfbf', lineWidth: 0.8 },
-  extends: { stroke: '#1677ff', lineWidth: 1.6 },
-  implements: { stroke: '#52c41a', lineWidth: 1.6, lineDash: [4, 3] }
+  dependency: { stroke: '#d9d9d9', lineWidth: 0.6, opacity: 0.55 },
+  extends: { stroke: '#fa541c', lineWidth: 2.5, opacity: 1 },
+  implements: { stroke: '#52c41a', lineWidth: 2.5, lineDash: [6, 4], opacity: 1 }
 }
 
 function getNodeColor(layer) {
@@ -152,10 +153,13 @@ function renderGraph(data) {
   const edges = (data.edges || []).map(e => {
     const relation = e.type || 'dependency'
     const st = EDGE_STYLES[relation] || EDGE_STYLES.dependency
+    const isTyped = relation === 'extends' || relation === 'implements'
     const style = {
       stroke: st.stroke,
       lineWidth: st.lineWidth,
-      endArrow: { path: G6.Arrow.triangle(4, 6, 0), fill: st.stroke }
+      opacity: st.opacity ?? 1,
+      // 继承/实现用更大箭头强化方向感
+      endArrow: { path: isTyped ? G6.Arrow.triangle(5, 9, 0) : G6.Arrow.triangle(4, 6, 0), fill: st.stroke }
     }
     if (st.lineDash) style.lineDash = st.lineDash
     return {
@@ -268,7 +272,10 @@ function renderGraph(data) {
         }
       })
     })
-    graph.getEdges().forEach(e => graph.updateItem(e, { style: { opacity: 1 } }))
+    graph.getEdges().forEach(e => {
+      const st = EDGE_STYLES[e.getModel().relation] || EDGE_STYLES.dependency
+      graph.updateItem(e, { style: { opacity: st.opacity ?? 1 } })
+    })
     // 通知父组件清除选中节点，否则问答面板会一直沿用旧类上下文
     emit('node-click', null)
   })
@@ -476,6 +483,12 @@ onBeforeUnmount(() => {
   border-top: 2px solid;
   display: inline-block;
   vertical-align: middle;
+}
+.legend-line.thin {
+  border-top-width: 1px;
+}
+.legend-line.bold {
+  border-top-width: 3px;
 }
 .legend-line.dashed {
   border-top-style: dashed;
