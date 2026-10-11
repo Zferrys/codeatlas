@@ -179,13 +179,18 @@
       </a-button>
       <div v-if="qaAnswer" class="qa-answer-box">
         <div class="markdown-body" v-html="renderSimpleMd(qaAnswer)"></div>
+        <div v-if="qaVerification" class="qa-verify-line">
+          <a-tooltip :title="qaVerifyDetail">
+            <a-tag :color="qaVerifyColor" size="small">{{ qaVerifyText }}</a-tag>
+          </a-tooltip>
+        </div>
       </div>
     </a-modal>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, watch } from 'vue'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { ThunderboltOutlined, QuestionCircleOutlined } from '@ant-design/icons-vue'
@@ -282,17 +287,49 @@ const qaTarget = ref(null)
 const qaQuestion = ref('')
 const qaLoading = ref(false)
 const qaAnswer = ref('')
+const qaVerification = ref(null)
+
+const qaVerifyText = computed(() => {
+  const v = qaVerification.value
+  if (!v) return ''
+  const issues = (v.unsourced?.length || 0) + (v.relationMismatches?.length || 0)
+  if (v.corrected) return '证据校验：已自动修正'
+  if (issues > 0) return `证据校验：${issues} 项异常`
+  return '证据校验通过'
+})
+
+const qaVerifyColor = computed(() => {
+  const v = qaVerification.value
+  if (!v) return 'green'
+  if (v.corrected) return 'blue'
+  if ((v.unsourced?.length || 0) + (v.relationMismatches?.length || 0) > 0) return 'orange'
+  return 'green'
+})
+
+const qaVerifyDetail = computed(() => {
+  const v = qaVerification.value
+  if (!v) return ''
+  const parts = []
+  if (v.unsourced?.length) parts.push('未溯源引用: ' + v.unsourced.join('、'))
+  if (v.relationMismatches?.length) parts.push('关系声明存疑: ' + v.relationMismatches.join('、'))
+  if (!parts.length) {
+    parts.push(`已校验 ${v.classRefsChecked || 0} 个类引用、${v.relationClaimsChecked || 0} 条关系声明，均通过`)
+  }
+  return parts.join('；')
+})
 
 function openQaPanel() {
   qaTarget.value = selectedNode.value
   qaQuestion.value = ''
   qaAnswer.value = ''
+  qaVerification.value = null
   showQaModal.value = true
 }
 
 function switchToGlobalQa() {
   qaTarget.value = null
   qaAnswer.value = ''
+  qaVerification.value = null
 }
 
 async function doContextQa() {
@@ -307,6 +344,7 @@ async function doContextQa() {
       classFqn: qaTarget.value?.id || null
     })
     qaAnswer.value = res.data.data?.answer || '未获取到回答'
+    qaVerification.value = res.data.data?.verification || null
   } catch (e) {
     message.error('问答失败: ' + (e.response?.data?.message || '网络错误'))
   } finally {
@@ -394,6 +432,13 @@ function renderSimpleMd(content) {
   border-radius: 8px;
   max-height: 360px;
   overflow-y: auto;
+}
+
+.qa-verify-line {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px dashed #e0e4ff;
+  text-align: right;
 }
 .markdown-body { line-height: 1.7; font-size: 14px; color: #333; }
 .markdown-body :deep(h4) { margin: 12px 0 4px; }

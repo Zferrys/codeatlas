@@ -1,8 +1,10 @@
 package com.codeatlas.server.service;
 
+import com.codeatlas.common.util.AiPromptSanitizer;
 import com.codeatlas.engine.ai.*;
 import com.codeatlas.server.config.TokenBudgetManager;
 import com.codeatlas.server.entity.AiAuditLogEntity;
+import com.codeatlas.server.entity.ClassSummaryEntity;
 import com.codeatlas.server.entity.Project;
 import com.codeatlas.server.mapper.AiAuditLogMapper;
 import org.slf4j.Logger;
@@ -16,6 +18,7 @@ public class AgenticSearchService {
 
     private static final Logger log = LoggerFactory.getLogger(AgenticSearchService.class);
     private static final int MAX_ITERATIONS = 5;
+    private static final int CORRECTION_TOKEN_ESTIMATE = 3000;
 
     private final AiClient aiClient;
     private final ToolRegistry toolRegistry;
@@ -23,17 +26,20 @@ public class AgenticSearchService {
     private final ScanService scanService;
     private final TokenBudgetManager tokenBudgetManager;
     private final AiAuditLogMapper aiAuditLogMapper;
+    private final EvidenceVerifier evidenceVerifier;
 
     public AgenticSearchService(AiClient aiClient, ToolRegistry toolRegistry,
                                 ProjectService projectService, ScanService scanService,
                                 TokenBudgetManager tokenBudgetManager,
-                                AiAuditLogMapper aiAuditLogMapper) {
+                                AiAuditLogMapper aiAuditLogMapper,
+                                EvidenceVerifier evidenceVerifier) {
         this.aiClient = aiClient;
         this.toolRegistry = toolRegistry;
         this.projectService = projectService;
         this.scanService = scanService;
         this.tokenBudgetManager = tokenBudgetManager;
         this.aiAuditLogMapper = aiAuditLogMapper;
+        this.evidenceVerifier = evidenceVerifier;
     }
 
     /**
@@ -56,13 +62,22 @@ public class AgenticSearchService {
             return result;
         }
 
-        int totalClasses = 0;
+        List<ClassSummaryEntity> classSummaries = Collections.emptyList();
         try {
-            totalClasses = scanService.getClassSummaries(projectId).size();
+            List<ClassSummaryEntity> loaded = scanService.getClassSummaries(projectId);
+            if (loaded != null) classSummaries = loaded;
         } catch (Exception ignored) {}
+        int totalClasses = classSummaries.size();
+
+        // 输入净化：防止提示注入
+        String sanitizedQuestion = AiPromptSanitizer.sanitize(question);
+        if (sanitizedQuestion.isEmpty()) {
+            result.put("answer", "问题内容无效（净化后为空），请重新输入。");
+            return result;
+        }
 
         // token budget
-        int estimatedTokens = question.length() * 2 + 4000;
+        int estimatedTokens = sanitizedQuestion.length() * 2 + 4000;
         if (!tokenBudgetManager.tryConsume(estimatedTokens)) {
             result.put("answer", "本月 AI Token 配额已用完，请下月再试。");
             return result;
@@ -71,7 +86,7 @@ public class AgenticSearchService {
         // build conversation
         List<Message> messages = new ArrayList<>();
         messages.add(Message.system(buildSystemPrompt(project, totalClasses)));
-        messages.add(Message.user(question));
+        messages.add(Message.user(sanitizedQuestion));
 
         int iterations = 0;
         int totalTokenUsed = 0;
@@ -80,6 +95,7 @@ public class AgenticSearchService {
         long totalLatency = 0;
         boolean success = false;
         List<String> toolsCalled = new ArrayList<>();
+        List<String> evidence = new ArrayList<>();
 
         long startTime = System.currentTimeMillis();
 
@@ -129,6 +145,7 @@ public class AgenticSearchService {
                     toolsCalled.add(tc.getName());
 
                     String toolResult = toolRegistry.execute(tc, projectId);
+                    evidence.add(toolResult);
                     messages.add(Message.tool(tc.getId(), toolResult));
                 }
             } else {
@@ -166,6 +183,64 @@ public class AgenticSearchService {
 
         if (!result.containsKey("answer")) {
             result.put("answer", "分析未能在 " + MAX_ITERATIONS + " 轮内完成，请尝试更具体的问题。");
+        }
+
+        // 输出侧多源交叉验证 + 自动修正轮
+        if (success && result.get("answer") instanceof String && !classSummaries.isEmpty()) {
+            try {
+                EvidenceVerifier.VerificationReport report = evidenceVerifier.verify(
+                        (String) result.get("answer"), evidence, classSummaries);
+                boolean corrected = false;
+                int correctionRounds = 0;
+
+                if (report.needsCorrection()) {
+                    int anomalyBefore = report.anomalyCount();
+                    if (tokenBudgetManager.tryConsume(CORRECTION_TOKEN_ESTIMATE)) {
+                        correctionRounds = 1;
+                        try {
+                            List<Message> correctionMessages = new ArrayList<>(messages);
+                            correctionMessages.add(Message.assistant((String) result.get("answer")));
+                            correctionMessages.add(Message.user(evidenceVerifier.buildCorrectionPrompt(report)));
+                            AiRequest correctionRequest = new AiRequest();
+                            correctionRequest.setMessages(correctionMessages);
+                            correctionRequest.setTemperature(0.1);
+                            correctionRequest.setMaxTokens(2048);
+                            AiResponse correctionResponse = aiClient.chat(correctionRequest);
+                            if (correctionResponse != null && correctionResponse.getContent() != null
+                                    && !correctionResponse.getContent().isEmpty()) {
+                                totalTokenUsed += correctionResponse.getTokensUsed();
+                                totalPromptTokens += correctionResponse.getPromptTokens();
+                                totalCompletionTokens += correctionResponse.getCompletionTokens();
+                                totalLatency += correctionResponse.getLatencyMs();
+                                EvidenceVerifier.VerificationReport recheck = evidenceVerifier.verify(
+                                        correctionResponse.getContent(), evidence, classSummaries);
+                                if (recheck.anomalyCount() < anomalyBefore) {
+                                    result.put("answer", correctionResponse.getContent());
+                                    report = recheck;
+                                    corrected = true;
+                                    log.info("Evidence correction adopted: anomalies {} -> {}",
+                                            anomalyBefore, recheck.anomalyCount());
+                                } else {
+                                    log.warn("Evidence correction did not improve answer, keeping original");
+                                }
+                            }
+                        } catch (Exception ce) {
+                            log.warn("Evidence correction round failed: {}", ce.getMessage());
+                        }
+                    } else {
+                        log.warn("Evidence correction skipped: token budget exceeded");
+                    }
+                }
+
+                Map<String, Object> verification = report.toMap();
+                verification.put("corrected", corrected);
+                verification.put("correctionRounds", correctionRounds);
+                result.put("verification", verification);
+                log.info("Agentic search evidence verification: unsourced={}, relationMismatches={}, corrected={}",
+                        report.getUnsourced(), report.getRelationMismatches(), corrected);
+            } catch (Exception e) {
+                log.warn("Evidence verification failed (non-fatal): {}", e.getMessage());
+            }
         }
 
         result.put("iterations", iterations);

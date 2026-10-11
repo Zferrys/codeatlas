@@ -7,6 +7,7 @@ import com.codeatlas.engine.ai.Message;
 import com.codeatlas.engine.ai.ToolCall;
 import com.codeatlas.server.config.TokenBudgetManager;
 import com.codeatlas.server.entity.AiAuditLogEntity;
+import com.codeatlas.server.entity.ClassSummaryEntity;
 import com.codeatlas.server.entity.Project;
 import com.codeatlas.server.mapper.AiAuditLogMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -23,10 +24,12 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -58,14 +61,15 @@ class AgenticSearchServiceTest {
     @BeforeEach
     void setUp() {
         agenticSearchService = new AgenticSearchService(aiClient, toolRegistry,
-                projectService, scanService, tokenBudgetManager, aiAuditLogMapper);
+                projectService, scanService, tokenBudgetManager, aiAuditLogMapper,
+                new EvidenceVerifier());
 
         Project project = new Project();
         project.setName("TestProject");
         when(projectService.getProjectEntity(PROJECT_ID)).thenReturn(project);
         when(scanService.getClassSummaries(PROJECT_ID)).thenReturn(Collections.emptyList());
-        when(tokenBudgetManager.tryConsume(anyLong())).thenReturn(true);
-        when(toolRegistry.execute(any(ToolCall.class), anyLong()))
+        lenient().when(tokenBudgetManager.tryConsume(anyLong())).thenReturn(true);
+        lenient().when(toolRegistry.execute(any(ToolCall.class), anyLong()))
                 .thenAnswer(invocation -> "工具结果" + toolResultCounter.incrementAndGet());
     }
 
@@ -129,6 +133,95 @@ class AgenticSearchServiceTest {
         ArgumentCaptor<AiAuditLogEntity> auditCaptor = ArgumentCaptor.forClass(AiAuditLogEntity.class);
         verify(aiAuditLogMapper).insert(auditCaptor.capture());
         assertEquals(Boolean.FALSE, auditCaptor.getValue().getSuccess());
+    }
+
+    @Test
+    @DisplayName("答案含未溯源类引用时触发修正轮并采用修正版")
+    void search_unsourcedReferences_shouldTriggerCorrectionAndAdoptCorrectedAnswer() {
+        when(scanService.getClassSummaries(PROJECT_ID))
+                .thenReturn(Collections.singletonList(makeClass("com.demo.RealService", "RealService")));
+        when(toolRegistry.execute(any(ToolCall.class), anyLong()))
+                .thenReturn("找到 1 个匹配类:\n1. com.demo.RealService [SERVICE] 方法3 行40");
+        when(aiClient.chat(any(AiRequest.class)))
+                .thenReturn(toolCallResponse("call_1"))
+                .thenReturn(textResponse("GhostService 与 PhantomService 是核心类，RealService 也参与其中。"))
+                .thenReturn(textResponse("RealService 是核心服务类。"));
+
+        Map<String, Object> result = agenticSearchService.search(PROJECT_ID, "核心类有哪些？", USER_ID);
+
+        assertEquals("RealService 是核心服务类。", result.get("answer"));
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> verification = (Map<String, Object>) result.get("verification");
+        assertNotNull(verification, "验证报告必须挂到结果中");
+        assertEquals(Boolean.TRUE, verification.get("corrected"));
+        assertEquals(1, verification.get("correctionRounds"));
+        assertTrue(((List<?>) verification.get("unsourced")).isEmpty(), "修正后应无未溯源引用");
+
+        ArgumentCaptor<AiRequest> requestCaptor = ArgumentCaptor.forClass(AiRequest.class);
+        verify(aiClient, times(3)).chat(requestCaptor.capture());
+        AiRequest correctionRequest = requestCaptor.getAllValues().get(2);
+        assertNull(correctionRequest.getTools(), "修正轮请求不应携带工具");
+        assertEquals(0.1, correctionRequest.getTemperature());
+        List<Message> correctionMessages = correctionRequest.getMessages();
+        assertEquals("user", correctionMessages.get(correctionMessages.size() - 1).getRole());
+        assertTrue(correctionMessages.get(correctionMessages.size() - 1).getContent().contains("GhostService"),
+                "修正请求必须包含未溯源类名清单");
+    }
+
+    @Test
+    @DisplayName("答案类引用全部溯源时不做修正轮")
+    void search_allRefsSourced_shouldNotTriggerCorrection() {
+        when(scanService.getClassSummaries(PROJECT_ID))
+                .thenReturn(Collections.singletonList(makeClass("com.demo.RealService", "RealService")));
+        when(toolRegistry.execute(any(ToolCall.class), anyLong()))
+                .thenReturn("找到 1 个匹配类:\n1. com.demo.RealService [SERVICE] 方法3 行40");
+        when(aiClient.chat(any(AiRequest.class)))
+                .thenReturn(toolCallResponse("call_1"))
+                .thenReturn(textResponse("RealService 是核心服务类。"));
+
+        Map<String, Object> result = agenticSearchService.search(PROJECT_ID, "核心类有哪些？", USER_ID);
+
+        assertEquals("RealService 是核心服务类。", result.get("answer"));
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> verification = (Map<String, Object>) result.get("verification");
+        assertNotNull(verification);
+        assertEquals(Boolean.FALSE, verification.get("corrected"));
+        verify(aiClient, times(2)).chat(any(AiRequest.class));
+    }
+
+    @Test
+    @DisplayName("token 预算拒绝修正轮时保留原答案，correctionRounds 上报为 0")
+    void search_correctionBudgetRejected_shouldKeepAnswerAndReportZeroRounds() {
+        when(scanService.getClassSummaries(PROJECT_ID))
+                .thenReturn(Collections.singletonList(makeClass("com.demo.RealService", "RealService")));
+        when(toolRegistry.execute(any(ToolCall.class), anyLong()))
+                .thenReturn("找到 1 个匹配类:\n1. com.demo.RealService [SERVICE] 方法3 行40");
+        // 首次调用是入口预算闸门（放行），第二次是修正轮预算（拒绝）
+        when(tokenBudgetManager.tryConsume(anyLong())).thenReturn(true, false);
+        when(aiClient.chat(any(AiRequest.class)))
+                .thenReturn(toolCallResponse("call_1"))
+                .thenReturn(textResponse("GhostService 与 PhantomService 是核心类，RealService 也参与其中。"));
+
+        Map<String, Object> result = agenticSearchService.search(PROJECT_ID, "核心类有哪些？", USER_ID);
+
+        assertEquals("GhostService 与 PhantomService 是核心类，RealService 也参与其中。", result.get("answer"),
+                "预算拒绝时保留原答案");
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> verification = (Map<String, Object>) result.get("verification");
+        assertNotNull(verification);
+        assertEquals(Boolean.FALSE, verification.get("corrected"));
+        assertEquals(0, verification.get("correctionRounds"), "未实际发起修正轮时不应上报轮次");
+        verify(aiClient, times(2)).chat(any(AiRequest.class));
+    }
+
+    private ClassSummaryEntity makeClass(String fqn, String simpleName) {
+        ClassSummaryEntity entity = new ClassSummaryEntity();
+        entity.setFqn(fqn);
+        entity.setSimpleName(simpleName);
+        return entity;
     }
 
     private AiResponse toolCallResponse(String toolCallId) {

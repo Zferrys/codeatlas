@@ -537,6 +537,23 @@ public class Neo4jGraphService {
                     count++;
                 }
                 if (count == 0) sb.append("(无)\n");
+
+                var hierarchy = session.run(
+                        "MATCH (a:Class {fqn: $fqn})-[r:EXTENDS|IMPLEMENTS]->(b:Class) " +
+                        "WHERE b.projectId = $projectId " +
+                        "RETURN b.fqn AS fqn, b.simpleName AS name, type(r) AS rel " +
+                        "ORDER BY name LIMIT 20",
+                        Values.parameters("fqn", fqn, "projectId", projectId));
+                sb.append("继承/实现（").append(fqn).append(" 继承或实现的类型）:\n");
+                int relCount = 0;
+                while (hierarchy.hasNext()) {
+                    var record = hierarchy.next();
+                    sb.append("- ").append(record.get("name").asString())
+                            .append(" (").append(record.get("fqn").asString()).append(")")
+                            .append(" [").append("EXTENDS".equals(record.get("rel").asString()) ? "继承" : "实现").append("]\n");
+                    relCount++;
+                }
+                if (relCount == 0) sb.append("(无)\n");
             }
 
             if (incoming) {
@@ -556,6 +573,23 @@ public class Neo4jGraphService {
                     count++;
                 }
                 if (count == 0) sb.append("(无)\n");
+
+                var hierarchy = session.run(
+                        "MATCH (a:Class)-[r:EXTENDS|IMPLEMENTS]->(b:Class {fqn: $fqn}) " +
+                        "WHERE a.projectId = $projectId " +
+                        "RETURN a.fqn AS fqn, a.simpleName AS name, type(r) AS rel " +
+                        "ORDER BY name LIMIT 20",
+                        Values.parameters("fqn", fqn, "projectId", projectId));
+                sb.append("被继承/被实现（以下类继承或实现了 ").append(fqn).append("）:\n");
+                int relCount = 0;
+                while (hierarchy.hasNext()) {
+                    var record = hierarchy.next();
+                    sb.append("- ").append(record.get("name").asString())
+                            .append(" (").append(record.get("fqn").asString()).append(")")
+                            .append(" [").append("EXTENDS".equals(record.get("rel").asString()) ? "继承" : "实现").append("]\n");
+                    relCount++;
+                }
+                if (relCount == 0) sb.append("(无)\n");
             }
 
             return sb.toString();

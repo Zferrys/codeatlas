@@ -23,13 +23,16 @@ public class ImpactAnalysisService {
     private final AiAnalysisService aiAnalysisService;
     private final ProjectService projectService;
     private final ScanService scanService;
+    private final EvidenceVerifier evidenceVerifier;
 
     public ImpactAnalysisService(AiAnalysisService aiAnalysisService,
                                   ProjectService projectService,
-                                  ScanService scanService) {
+                                  ScanService scanService,
+                                  EvidenceVerifier evidenceVerifier) {
         this.aiAnalysisService = aiAnalysisService;
         this.projectService = projectService;
         this.scanService = scanService;
+        this.evidenceVerifier = evidenceVerifier;
     }
 
     /**
@@ -140,11 +143,66 @@ public class ImpactAnalysisService {
             Map<String, Object> result = new HashMap<>();
             result.put("question", question);
             result.put("classFqn", classFqn);
-            result.put("answer", response != null ? response.getContent() : "AI 服务暂不可用，请稍后重试");
+            if (response == null || response.getContent() == null || response.getContent().isEmpty()) {
+                result.put("answer", "AI 服务暂不可用，请稍后重试");
+                return result;
+            }
+
+            String answer = response.getContent();
+            // 输出侧证据验证：答案对照项目数据与本次注入的上下文
+            if (!classes.isEmpty()) {
+                try {
+                    List<String> evidence = Collections.singletonList(context.toString());
+                    EvidenceVerifier.VerificationReport report = evidenceVerifier.verify(answer, evidence, classes);
+                    boolean corrected = false;
+                    int correctionRounds = 0;
+                    if (report.needsCorrection()) {
+                        correctionRounds = 1;
+                        String correctedAnswer = runContextCorrection(prompt, answer, report);
+                        if (correctedAnswer != null && !correctedAnswer.isEmpty()) {
+                            EvidenceVerifier.VerificationReport recheck =
+                                    evidenceVerifier.verify(correctedAnswer, evidence, classes);
+                            if (recheck.anomalyCount() < report.anomalyCount()) {
+                                answer = correctedAnswer;
+                                report = recheck;
+                                corrected = true;
+                                log.info("Context QA evidence correction adopted for projectId={}", projectId);
+                            }
+                        }
+                    }
+                    Map<String, Object> verification = report.toMap();
+                    verification.put("corrected", corrected);
+                    verification.put("correctionRounds", correctionRounds);
+                    result.put("verification", verification);
+                } catch (Exception ve) {
+                    log.warn("Context QA evidence verification failed (non-fatal): {}", ve.getMessage());
+                }
+            }
+            result.put("answer", answer);
             return result;
         } catch (Exception e) {
             log.error("Context QA failed: {}", e.getMessage());
             throw new BusinessException(500, "AI 问答服务暂时不可用，请稍后重试");
+        }
+    }
+
+    /**
+     * 上下文问答修正轮：把证据校验异常清单回给模型，低温重写。
+     */
+    private String runContextCorrection(String originalPrompt, String answer,
+                                        EvidenceVerifier.VerificationReport report) {
+        try {
+            AiRequest correctionRequest = new AiRequest();
+            correctionRequest.setPrompt(originalPrompt + "\n\n## 你上一条回答\n" + answer
+                    + "\n\n## 修正请求\n" + evidenceVerifier.buildCorrectionPrompt(report));
+            correctionRequest.setSystemPrompt("你是一位资深软件架构师，正在帮助开发者理解代码库。基于提供的项目上下文准确回答问题。");
+            correctionRequest.setTemperature(0.1);
+            correctionRequest.setMaxTokens(2048);
+            AiResponse response = aiAnalysisService.callAiWithResilience(correctionRequest);
+            return response != null ? response.getContent() : null;
+        } catch (Exception e) {
+            log.warn("Context QA correction round failed: {}", e.getMessage());
+            return null;
         }
     }
 

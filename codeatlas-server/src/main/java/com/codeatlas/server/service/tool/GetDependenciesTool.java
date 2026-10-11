@@ -22,7 +22,7 @@ public class GetDependenciesTool implements Tool {
 
     @Override
     public String getDescription() {
-        return "查询指定类的直接依赖关系。direction 参数: outgoing（该类依赖谁）、incoming（谁依赖该类）、both（双向）。";
+        return "查询指定类的依赖与继承/实现关系。direction 参数: outgoing（该类依赖/继承谁）、incoming（谁依赖/继承该类）、both（双向）。";
     }
 
     @Override
