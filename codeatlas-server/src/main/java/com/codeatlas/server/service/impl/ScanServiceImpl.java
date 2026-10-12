@@ -458,6 +458,7 @@ public class ScanServiceImpl implements ScanService {
         entity.setLineCount(cls.getLineCount());
         entity.setAnnotations(toJson(cls.getAnnotations()));
         entity.setDependencies(toJson(cls.getDependencies()));
+        entity.setMethodNames(toJson(cls.getMethodNames()));
         return entity;
     }
 

@@ -65,3 +65,25 @@ CREATE TABLE IF NOT EXISTS `system_config` (
     `updated_at`   TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE UNIQUE INDEX IF NOT EXISTS uk_system_config_key ON `system_config` (`config_key`);
+
+CREATE TABLE IF NOT EXISTS `class_summary` (
+    `id`               BIGINT AUTO_INCREMENT PRIMARY KEY,
+    `scan_id`          BIGINT       NOT NULL,
+    `project_id`       BIGINT       NOT NULL,
+    `fqn`              VARCHAR(500) NOT NULL,
+    `simple_name`      VARCHAR(200) NOT NULL,
+    `package_name`     VARCHAR(400),
+    `class_type`       VARCHAR(20)  NOT NULL,
+    `layer`            VARCHAR(50),
+    `public_methods`   INT          DEFAULT 0,
+    `total_methods`    INT          DEFAULT 0,
+    `line_count`       INT          DEFAULT 0,
+    `complexity_score` DECIMAL(8,2) DEFAULT 0,
+    `annotations`      TEXT,
+    `dependencies`     TEXT,
+    `method_names`     TEXT,
+    `module_name`      VARCHAR(200),
+    `created_at`       TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_class_summary_scan_id ON `class_summary` (`scan_id`);
+CREATE INDEX IF NOT EXISTS idx_class_summary_project_id ON `class_summary` (`project_id`);

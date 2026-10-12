@@ -19,16 +19,17 @@ public interface ClassSummaryMapper {
             @Result(property = "publicMethods", column = "public_methods"),
             @Result(property = "totalMethods", column = "total_methods"),
             @Result(property = "lineCount", column = "line_count"),
+            @Result(property = "methodNames", column = "method_names"),
             @Result(property = "moduleName", column = "module_name"),
             @Result(property = "createdAt", column = "created_at")
     })
     ClassSummaryEntity findByProjectIdAndFqn(@Param("projectId") Long projectId, @Param("fqn") String fqn);
 
     @Insert("INSERT INTO class_summary (scan_id, project_id, fqn, simple_name, package_name, " +
-            "class_type, layer, public_methods, total_methods, line_count, annotations, dependencies, module_name) " +
+            "class_type, layer, public_methods, total_methods, line_count, annotations, dependencies, method_names, module_name) " +
             "VALUES (#{scanId}, #{projectId}, #{fqn}, #{simpleName}, #{packageName}, " +
             "#{classType}, #{layer}, #{publicMethods}, #{totalMethods}, #{lineCount}, " +
-            "#{annotations}, #{dependencies}, #{moduleName})")
+            "#{annotations}, #{dependencies}, #{methodNames}, #{moduleName})")
     @Options(useGeneratedKeys = true, keyProperty = "id")
     int insert(ClassSummaryEntity entity);
 
@@ -42,6 +43,7 @@ public interface ClassSummaryMapper {
             @Result(property = "publicMethods", column = "public_methods"),
             @Result(property = "totalMethods", column = "total_methods"),
             @Result(property = "lineCount", column = "line_count"),
+            @Result(property = "methodNames", column = "method_names"),
             @Result(property = "moduleName", column = "module_name"),
             @Result(property = "createdAt", column = "created_at")
     })
@@ -57,6 +59,7 @@ public interface ClassSummaryMapper {
             @Result(property = "publicMethods", column = "public_methods"),
             @Result(property = "totalMethods", column = "total_methods"),
             @Result(property = "lineCount", column = "line_count"),
+            @Result(property = "methodNames", column = "method_names"),
             @Result(property = "moduleName", column = "module_name"),
             @Result(property = "createdAt", column = "created_at")
     })
@@ -64,11 +67,11 @@ public interface ClassSummaryMapper {
 
     @Insert("<script>" +
             "INSERT INTO class_summary (scan_id, project_id, fqn, simple_name, package_name, " +
-            "class_type, layer, public_methods, total_methods, line_count, annotations, dependencies, module_name) VALUES " +
+            "class_type, layer, public_methods, total_methods, line_count, annotations, dependencies, method_names, module_name) VALUES " +
             "<foreach collection='list' item='item' separator=','>" +
             "(#{item.scanId}, #{item.projectId}, #{item.fqn}, #{item.simpleName}, #{item.packageName}, " +
             "#{item.classType}, #{item.layer}, #{item.publicMethods}, #{item.totalMethods}, #{item.lineCount}, " +
-            "#{item.annotations}, #{item.dependencies}, #{item.moduleName})" +
+            "#{item.annotations}, #{item.dependencies}, #{item.methodNames}, #{item.moduleName})" +
             "</foreach>" +
             "</script>")
     int insertBatch(@Param("list") List<ClassSummaryEntity> list);
@@ -85,6 +88,7 @@ public interface ClassSummaryMapper {
             @Result(property = "publicMethods", column = "public_methods"),
             @Result(property = "totalMethods", column = "total_methods"),
             @Result(property = "lineCount", column = "line_count"),
+            @Result(property = "methodNames", column = "method_names"),
             @Result(property = "moduleName", column = "module_name"),
             @Result(property = "createdAt", column = "created_at")
     })

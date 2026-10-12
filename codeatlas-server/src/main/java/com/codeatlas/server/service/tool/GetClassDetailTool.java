@@ -23,7 +23,7 @@ public class GetClassDetailTool implements Tool {
 
     @Override
     public String getDescription() {
-        return "获取指定类的详细信息，包括分层、方法数、行数、注解列表、依赖列表。参数 fqn 为类的全限定名。";
+        return "获取指定类的详细信息，包括分层、方法数、方法名列表、行数、注解列表、依赖列表。参数 fqn 为类的全限定名。";
     }
 
     @Override
@@ -67,6 +67,10 @@ public class GetClassDetailTool implements Tool {
 
         if (cls.getAnnotations() != null && !cls.getAnnotations().isEmpty() && !"[]".equals(cls.getAnnotations())) {
             sb.append("- 注解: ").append(cls.getAnnotations()).append("\n");
+        }
+
+        if (cls.getMethodNames() != null && !cls.getMethodNames().isEmpty() && !"[]".equals(cls.getMethodNames())) {
+            sb.append("- 方法列表: ").append(cls.getMethodNames()).append("\n");
         }
 
         if (cls.getDependencies() != null && !cls.getDependencies().isEmpty() && !"[]".equals(cls.getDependencies())) {

@@ -289,6 +289,10 @@ public class ImpactAnalysisService {
         sb.append("- 方法数: ").append(cls.getTotalMethods()).append("\n");
         sb.append("- public 方法数: ").append(cls.getPublicMethods()).append("\n");
         sb.append("- 行数: ").append(cls.getLineCount()).append("\n");
+        List<String> methodNames = aiAnalysisService.parseDeps(cls.getMethodNames());
+        if (!methodNames.isEmpty()) {
+            sb.append("- 方法列表: ").append(String.join(", ", methodNames)).append("\n");
+        }
         return sb.toString();
     }
 

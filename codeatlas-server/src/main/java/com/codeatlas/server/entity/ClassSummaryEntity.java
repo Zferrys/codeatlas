@@ -19,6 +19,7 @@ public class ClassSummaryEntity {
     private Integer lineCount;
     private String annotations;
     private String dependencies;
+    private String methodNames;
     private String moduleName;
     private LocalDateTime createdAt;
 
