@@ -51,10 +51,7 @@ public class SearchClassesTool implements Tool {
             return "(无结果) 请提供 keyword 参数";
         }
 
-        List<ClassSummaryEntity> raw = classSummaryMapper.searchByKeyword(keyword.trim(), 100);
-        List<ClassSummaryEntity> results = raw.stream()
-                .filter(c -> projectId.equals(c.getProjectId()))
-                .collect(java.util.stream.Collectors.toList());
+        List<ClassSummaryEntity> results = classSummaryMapper.searchByKeyword(projectId, keyword.trim(), 100);
         if (results.isEmpty()) {
             return "(无结果) 未找到包含 \"" + keyword + "\" 的类，尝试换一个关键词";
         }

@@ -217,10 +217,10 @@ public class ReportService {
         if (scan != null) {
             sb.append("<h3>扫描统计</h3>");
             sb.append("<table><tr><th>指标</th><th>值</th></tr>");
-            sb.append("<tr><td>总类数</td><td>").append(scan.getTotalClasses()).append("</td></tr>");
-            sb.append("<tr><td>总行数</td><td>").append(scan.getTotalLines()).append("</td></tr>");
-            sb.append("<tr><td>违规数</td><td>").append(scan.getTotalViolations()).append("</td></tr>");
-            sb.append("<tr><td>扫描耗时</td><td>").append(scan.getDurationMs() / 1000.0).append("秒</td></tr>");
+            sb.append("<tr><td>总类数</td><td>").append(orZero(scan.getTotalClasses())).append("</td></tr>");
+            sb.append("<tr><td>总行数</td><td>").append(orZero(scan.getTotalLines())).append("</td></tr>");
+            sb.append("<tr><td>违规数</td><td>").append(orZero(scan.getTotalViolations())).append("</td></tr>");
+            sb.append("<tr><td>扫描耗时</td><td>").append(orZero(scan.getDurationMs()) / 1000.0).append("秒</td></tr>");
             sb.append("</table>");
         }
 
@@ -245,6 +245,11 @@ public class ReportService {
 
         sb.append("</body></html>");
         return sb.toString();
+    }
+
+    /** 进行中/中断的扫描这些统计列可为 NULL，统一兜底为 0，避免导出时拆箱 NPE */
+    private static long orZero(Number value) {
+        return value != null ? value.longValue() : 0L;
     }
 
     private String escapeHtml(String text) {

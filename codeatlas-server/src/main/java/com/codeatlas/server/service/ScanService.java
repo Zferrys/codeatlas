@@ -25,5 +25,5 @@ public interface ScanService {
     List<ClassSummaryEntity> getClassSummaries(Long projectId);
 
     /** 获取项目最新扫描状态 + AI 分析是否在进行中 */
-    Map<String, Object> getScanStatus(Long projectId);
+    Map<String, Object> getScanStatus(Long projectId, Long userId);
 }

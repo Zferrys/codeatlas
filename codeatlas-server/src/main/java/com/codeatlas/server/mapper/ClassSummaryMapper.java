@@ -49,7 +49,9 @@ public interface ClassSummaryMapper {
     })
     List<ClassSummaryEntity> findByScanId(Long scanId);
 
-    @Select("SELECT * FROM class_summary WHERE project_id = #{projectId} ORDER BY scan_id DESC, id ASC")
+    @Select("SELECT cs.* FROM class_summary cs WHERE cs.project_id = #{projectId} "
+            + "AND cs.scan_id = (SELECT MAX(cs2.scan_id) FROM class_summary cs2 WHERE cs2.project_id = #{projectId}) "
+            + "ORDER BY cs.id ASC")
     @Results({
             @Result(property = "scanId", column = "scan_id"),
             @Result(property = "projectId", column = "project_id"),
@@ -76,9 +78,11 @@ public interface ClassSummaryMapper {
             "</script>")
     int insertBatch(@Param("list") List<ClassSummaryEntity> list);
 
-    @Select("SELECT * FROM class_summary WHERE fqn LIKE CONCAT('%', #{keyword}, '%') "
-            + "OR simple_name LIKE CONCAT('%', #{keyword}, '%') "
-            + "ORDER BY scan_id DESC LIMIT #{limit}")
+    /** 项目内关键词搜索：SQL 侧限定 project_id 与最新扫描，避免跨项目挤占 LIMIT 名额 */
+    @Select("SELECT cs.* FROM class_summary cs WHERE cs.project_id = #{projectId} "
+            + "AND cs.scan_id = (SELECT MAX(cs2.scan_id) FROM class_summary cs2 WHERE cs2.project_id = #{projectId}) "
+            + "AND (cs.fqn LIKE CONCAT('%', #{keyword}, '%') OR cs.simple_name LIKE CONCAT('%', #{keyword}, '%')) "
+            + "ORDER BY cs.id ASC LIMIT #{limit}")
     @Results({
             @Result(property = "scanId", column = "scan_id"),
             @Result(property = "projectId", column = "project_id"),
@@ -92,10 +96,15 @@ public interface ClassSummaryMapper {
             @Result(property = "moduleName", column = "module_name"),
             @Result(property = "createdAt", column = "created_at")
     })
-    List<ClassSummaryEntity> searchByKeyword(@Param("keyword") String keyword, @Param("limit") int limit);
+    List<ClassSummaryEntity> searchByKeyword(@Param("projectId") Long projectId,
+                                             @Param("keyword") String keyword,
+                                             @Param("limit") int limit);
 
     @Delete("DELETE FROM class_summary WHERE scan_id = #{scanId}")
     int deleteByScanId(Long scanId);
+
+    @Delete("DELETE FROM class_summary WHERE project_id = #{projectId}")
+    int deleteByProjectId(Long projectId);
 
     @Select("SELECT layer, COUNT(*) as cnt FROM class_summary WHERE scan_id = #{scanId} GROUP BY layer")
     List<Map<String, Object>> countLayerByScanId(Long scanId);

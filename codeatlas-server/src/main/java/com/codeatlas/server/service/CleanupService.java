@@ -171,6 +171,20 @@ public class CleanupService {
             return;
         }
 
+        // ZIP_UPLOAD 项目的源码就存放在 uploads 目录内：仍被项目引用的目录不能清理，
+        // 否则项目重扫/增量扫描会因源码丢失而失败
+        List<String> referencedPaths = new ArrayList<>();
+        try {
+            for (Project p : projectMapper.findAll()) {
+                if ("ZIP_UPLOAD".equals(p.getSourceType()) && p.getSourceUrl() != null) {
+                    referencedPaths.add(Path.of(p.getSourceUrl()).toAbsolutePath().normalize().toString());
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Failed to load referenced upload paths, skip upload cleanup: {}", e.getMessage());
+            return;
+        }
+
         int count = 0;
         long freedBytes = 0;
         Instant cutoff = Instant.now().minus(7, ChronoUnit.DAYS);
@@ -180,6 +194,17 @@ public class CleanupService {
 
         for (File f : files) {
             try {
+                String candidate = f.toPath().toAbsolutePath().normalize().toString();
+                boolean referenced = false;
+                for (String ref : referencedPaths) {
+                    if (ref.equals(candidate) || ref.startsWith(candidate + File.separator)) {
+                        referenced = true;
+                        break;
+                    }
+                }
+                if (referenced) {
+                    continue;
+                }
                 BasicFileAttributes attrs = Files.readAttributes(f.toPath(), BasicFileAttributes.class);
                 Instant lastModified = attrs.lastModifiedTime().toInstant();
                 if (lastModified.isBefore(cutoff)) {

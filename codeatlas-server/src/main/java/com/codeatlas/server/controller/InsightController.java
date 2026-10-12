@@ -9,6 +9,7 @@ import com.codeatlas.server.entity.Project;
 import com.codeatlas.server.entity.ScanRecord;
 import com.codeatlas.server.security.CodeAtlasUserDetails;
 import com.codeatlas.server.service.InsightService;
+import com.codeatlas.server.service.ProjectAccessChecker;
 import com.codeatlas.server.service.ProjectService;
 import com.codeatlas.server.service.ScanService;
 import com.codeatlas.server.util.HealthScoreCalculator;
@@ -29,12 +30,14 @@ public class InsightController {
     private final InsightService insightService;
     private final ProjectService projectService;
     private final ScanService scanService;
+    private final ProjectAccessChecker projectAccessChecker;
 
     public InsightController(InsightService insightService, ProjectService projectService,
-                             ScanService scanService) {
+                             ScanService scanService, ProjectAccessChecker projectAccessChecker) {
         this.insightService = insightService;
         this.projectService = projectService;
         this.scanService = scanService;
+        this.projectAccessChecker = projectAccessChecker;
     }
 
     @GetMapping("/insights")
@@ -46,6 +49,7 @@ public class InsightController {
             @AuthenticationPrincipal CodeAtlasUserDetails principal,
             @RequestParam(defaultValue = "1") int page,
             @RequestParam(defaultValue = "20") int size) {
+        projectAccessChecker.check(projectId, principal.getUserId());
         PageResult<InsightEntity> pageResult;
         if (type != null && !type.isEmpty()) {
             pageResult = insightService.getInsightsByType(projectId, type, page, size);
@@ -63,9 +67,7 @@ public class InsightController {
     public ApiResponse<Map<String, Object>> getHealthScore(@PathVariable Long projectId,
                                                             @AuthenticationPrincipal CodeAtlasUserDetails principal) {
         Project project = projectService.getProjectEntity(projectId);
-        if (project == null) {
-            return ApiResponse.error(404, "项目不存在");
-        }
+        projectAccessChecker.check(project, projectId, principal.getUserId());
 
         Map<String, Object> result = new HashMap<>();
         result.put("projectId", projectId);

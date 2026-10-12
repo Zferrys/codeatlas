@@ -1,10 +1,12 @@
 package com.codeatlas.server.controller;
 
 import com.codeatlas.common.dto.ApiResponse;
+import com.codeatlas.server.security.CodeAtlasUserDetails;
 import com.codeatlas.server.service.ClassService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -25,8 +27,9 @@ public class ClassController {
     @Operation(summary = "获取类详情")
     @PreAuthorize("isAuthenticated()")
     public ApiResponse<Map<String, Object>> getClassDetail(@PathVariable Long projectId,
-                                                            @PathVariable String fqn) {
-        Map<String, Object> detail = classService.getClassDetail(projectId, fqn);
+                                                            @PathVariable String fqn,
+                                                            @AuthenticationPrincipal CodeAtlasUserDetails principal) {
+        Map<String, Object> detail = classService.getClassDetail(projectId, fqn, principal.getUserId());
         if (detail == null) {
             return ApiResponse.error(404, "类不存在: " + fqn);
         }
@@ -38,7 +41,8 @@ public class ClassController {
     @PreAuthorize("isAuthenticated()")
     public ApiResponse<List<Map<String, Object>>> searchClasses(@PathVariable Long projectId,
                                                                   @RequestParam String q,
-                                                                  @RequestParam(defaultValue = "20") int limit) {
-        return ApiResponse.success(classService.searchClasses(projectId, q, limit));
+                                                                  @RequestParam(defaultValue = "20") int limit,
+                                                                  @AuthenticationPrincipal CodeAtlasUserDetails principal) {
+        return ApiResponse.success(classService.searchClasses(projectId, q, limit, principal.getUserId()));
     }
 }

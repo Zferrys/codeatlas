@@ -15,11 +15,11 @@ public interface ConstitutionRuleService {
 
     PageResult<ConstitutionRuleEntity> getAllRulesPaged(Long projectId, int page, int size);
 
-    ConstitutionRuleEntity toggleRule(Long ruleId, boolean enabled);
+    ConstitutionRuleEntity toggleRule(Long projectId, Long ruleId, boolean enabled, Long userId);
 
     /** 更新规则定义并自动清理旧违规 */
     void updateRuleDefinition(Long ruleId, String newDefinition);
 
     /** 删除规则（仅项目级规则可删除） */
-    void deleteRule(Long ruleId);
+    void deleteRule(Long projectId, Long ruleId, Long userId);
 }

@@ -7,10 +7,13 @@ import com.codeatlas.common.constant.ErrorCode;
 import com.codeatlas.server.annotation.AuditLog;
 import com.codeatlas.server.dto.response.ConstitutionRuleVO;
 import com.codeatlas.server.entity.ConstitutionRuleEntity;
+import com.codeatlas.server.security.CodeAtlasUserDetails;
 import com.codeatlas.server.service.ConstitutionRuleService;
+import com.codeatlas.server.service.ProjectAccessChecker;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -22,9 +25,12 @@ import java.util.stream.Collectors;
 public class ConstitutionRuleController {
 
     private final ConstitutionRuleService ruleService;
+    private final ProjectAccessChecker projectAccessChecker;
 
-    public ConstitutionRuleController(ConstitutionRuleService ruleService) {
+    public ConstitutionRuleController(ConstitutionRuleService ruleService,
+                                      ProjectAccessChecker projectAccessChecker) {
         this.ruleService = ruleService;
+        this.projectAccessChecker = projectAccessChecker;
     }
 
     @GetMapping
@@ -34,7 +40,9 @@ public class ConstitutionRuleController {
             @PathVariable Long projectId,
             @RequestParam(defaultValue = "true") boolean enabledOnly,
             @RequestParam(defaultValue = "1") int page,
-            @RequestParam(defaultValue = "20") int size) {
+            @RequestParam(defaultValue = "20") int size,
+            @AuthenticationPrincipal CodeAtlasUserDetails principal) {
+        projectAccessChecker.check(projectId, principal.getUserId());
         PageResult<ConstitutionRuleEntity> pageResult;
         if (enabledOnly) {
             pageResult = ruleService.getRulesPaged(projectId, page, size);
@@ -52,8 +60,9 @@ public class ConstitutionRuleController {
     @AuditLog(action = "TOGGLE_RULE", targetType = "RULE", targetIdExpression = "#ruleId", detail = "启用/禁用规则")
     public ApiResponse<ConstitutionRuleVO> toggleRule(@PathVariable Long projectId,
                                                        @PathVariable Long ruleId,
-                                                       @RequestParam boolean enabled) {
-        ConstitutionRuleEntity entity = ruleService.toggleRule(ruleId, enabled);
+                                                       @RequestParam boolean enabled,
+                                                       @AuthenticationPrincipal CodeAtlasUserDetails principal) {
+        ConstitutionRuleEntity entity = ruleService.toggleRule(projectId, ruleId, enabled, principal.getUserId());
         if (entity == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND, "规则不存在");
         }
@@ -65,8 +74,9 @@ public class ConstitutionRuleController {
     @PreAuthorize("hasAnyRole('ADMIN','ARCHITECT')")
     @AuditLog(action = "DELETE_RULE", targetType = "RULE", targetIdExpression = "#ruleId", detail = "删除规则")
     public ApiResponse<Void> deleteRule(@PathVariable Long projectId,
-                                         @PathVariable Long ruleId) {
-        ruleService.deleteRule(ruleId);
+                                         @PathVariable Long ruleId,
+                                         @AuthenticationPrincipal CodeAtlasUserDetails principal) {
+        ruleService.deleteRule(projectId, ruleId, principal.getUserId());
         return ApiResponse.success(null);
     }
 }

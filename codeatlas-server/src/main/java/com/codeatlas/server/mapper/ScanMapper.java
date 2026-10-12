@@ -29,6 +29,10 @@ public interface ScanMapper {
     @Select("SELECT * FROM scan WHERE project_id = #{projectId} AND id < #{excludeId} AND status = 'COMPLETED' ORDER BY created_at DESC LIMIT 1")
     ScanRecord findLatestCompletedBefore(@Param("projectId") Long projectId, @Param("excludeId") Long excludeId);
 
+    /** 启动自愈用：进程重启后残留的 RUNNING 扫描不可能再被推进 */
+    @Select("SELECT * FROM scan WHERE status = 'RUNNING'")
+    List<ScanRecord> findRunningScans();
+
     @Insert("INSERT INTO scan (project_id, commit_hash, branch, status, total_classes, total_lines, "
             + "total_violations, duration_ms, error_message, started_at, completed_at, created_at) "
             + "VALUES (#{projectId}, #{commitHash}, #{branch}, #{status}, #{totalClasses}, #{totalLines}, "
@@ -45,4 +49,7 @@ public interface ScanMapper {
             + "<foreach collection='list' item='id' open='(' separator=',' close=')'>#{id}</foreach> "
             + "GROUP BY project_id</script>")
     List<Map<String, Object>> countGroupByProjectIds(List<Long> projectIds);
+
+    @Delete("DELETE FROM scan WHERE project_id = #{projectId}")
+    int deleteByProjectId(Long projectId);
 }

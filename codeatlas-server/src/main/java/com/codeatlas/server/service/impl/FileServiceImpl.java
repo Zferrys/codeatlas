@@ -26,6 +26,10 @@ public class FileServiceImpl implements FileService {
 
     private static final Set<String> ALLOWED_EXTENSIONS = Set.of(".zip", ".tar.gz");
     private static final long MAX_FILE_SIZE = 100L * 1024 * 1024; // 100MB
+    /** Zip 炸弹防护：解压条目数上限 */
+    private static final int MAX_ENTRY_COUNT = 10_000;
+    /** Zip 炸弹防护：解压后总字节上限 */
+    private static final long MAX_UNCOMPRESSED_BYTES = 500L * 1024 * 1024; // 500MB
 
     private final ProjectService projectService;
     private final ScanService scanService;
@@ -136,7 +140,14 @@ public class FileServiceImpl implements FileService {
     private void extractZip(MultipartFile file, Path destDir) throws IOException {
         try (ZipInputStream zis = new ZipInputStream(new BufferedInputStream(file.getInputStream()))) {
             ZipEntry entry;
+            int entryCount = 0;
+            long totalBytes = 0;
+            byte[] buffer = new byte[8192];
             while ((entry = zis.getNextEntry()) != null) {
+                if (++entryCount > MAX_ENTRY_COUNT) {
+                    throw new BusinessException(ErrorCode.BAD_REQUEST,
+                            "ZIP 条目数超过限制（最大 " + MAX_ENTRY_COUNT + " 个）");
+                }
                 Path entryPath = destDir.resolve(entry.getName());
                 // 防 ZIP 路径穿越攻击
                 if (!entryPath.normalize().startsWith(destDir.normalize())) {
@@ -147,7 +158,20 @@ public class FileServiceImpl implements FileService {
                     Files.createDirectories(entryPath);
                 } else {
                     Files.createDirectories(entryPath.getParent());
-                    Files.copy(zis, entryPath, StandardCopyOption.REPLACE_EXISTING);
+                    // 按实际写入字节累计，防止压缩比异常（Zip 炸弹）耗尽磁盘
+                    try (OutputStream os = Files.newOutputStream(entryPath,
+                            StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING)) {
+                        int read;
+                        while ((read = zis.read(buffer)) != -1) {
+                            totalBytes += read;
+                            if (totalBytes > MAX_UNCOMPRESSED_BYTES) {
+                                throw new BusinessException(ErrorCode.BAD_REQUEST,
+                                        "ZIP 解压后总大小超过限制（最大 "
+                                                + (MAX_UNCOMPRESSED_BYTES / 1024 / 1024) + " MB）");
+                            }
+                            os.write(buffer, 0, read);
+                        }
+                    }
                 }
                 zis.closeEntry();
             }

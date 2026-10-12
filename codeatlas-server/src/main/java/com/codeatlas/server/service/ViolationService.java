@@ -7,9 +7,9 @@ import java.util.List;
 
 public interface ViolationService {
 
-    PageResult<ViolationEntity> getViolations(Long projectId, int page, int size);
+    PageResult<ViolationEntity> getViolations(Long projectId, int page, int size, Long userId);
 
-    List<ViolationEntity> getViolationsByScanId(Long scanId);
+    List<ViolationEntity> getViolationsByScanId(Long scanId, Long userId);
 
-    void resolveViolation(Long violationId);
+    void resolveViolation(Long projectId, Long violationId, Long userId);
 }

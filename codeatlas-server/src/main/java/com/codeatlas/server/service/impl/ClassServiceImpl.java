@@ -3,6 +3,7 @@ package com.codeatlas.server.service.impl;
 import com.codeatlas.server.entity.ClassSummaryEntity;
 import com.codeatlas.server.mapper.ClassSummaryMapper;
 import com.codeatlas.server.service.ClassService;
+import com.codeatlas.server.service.ProjectAccessChecker;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
@@ -12,13 +13,16 @@ import java.util.stream.Collectors;
 public class ClassServiceImpl implements ClassService {
 
     private final ClassSummaryMapper classSummaryMapper;
+    private final ProjectAccessChecker projectAccessChecker;
 
-    public ClassServiceImpl(ClassSummaryMapper classSummaryMapper) {
+    public ClassServiceImpl(ClassSummaryMapper classSummaryMapper, ProjectAccessChecker projectAccessChecker) {
         this.classSummaryMapper = classSummaryMapper;
+        this.projectAccessChecker = projectAccessChecker;
     }
 
     @Override
-    public Map<String, Object> getClassDetail(Long projectId, String fqn) {
+    public Map<String, Object> getClassDetail(Long projectId, String fqn, Long userId) {
+        projectAccessChecker.check(projectId, userId);
         ClassSummaryEntity target = classSummaryMapper.findByProjectIdAndFqn(projectId, fqn);
         if (target == null) {
             return null;
@@ -40,10 +44,10 @@ public class ClassServiceImpl implements ClassService {
     }
 
     @Override
-    public List<Map<String, Object>> searchClasses(Long projectId, String keyword, int limit) {
-        List<ClassSummaryEntity> entities = classSummaryMapper.searchByKeyword(keyword, limit);
+    public List<Map<String, Object>> searchClasses(Long projectId, String keyword, int limit, Long userId) {
+        projectAccessChecker.check(projectId, userId);
+        List<ClassSummaryEntity> entities = classSummaryMapper.searchByKeyword(projectId, keyword, limit);
         return entities.stream()
-                .filter(e -> e.getProjectId().equals(projectId))
                 .map(e -> {
                     Map<String, Object> item = new LinkedHashMap<>();
                     item.put("id", e.getId());

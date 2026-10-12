@@ -10,12 +10,16 @@ import com.codeatlas.server.entity.Project;
 import com.codeatlas.server.entity.ProjectMember;
 import com.codeatlas.server.entity.User;
 import com.codeatlas.server.mapper.ClassSummaryMapper;
+import com.codeatlas.server.mapper.ConstitutionRuleMapper;
 import com.codeatlas.server.mapper.InsightMapper;
+import com.codeatlas.server.mapper.MapViewSnapshotMapper;
 import com.codeatlas.server.mapper.ProjectMapper;
 import com.codeatlas.server.mapper.ProjectMemberMapper;
 import com.codeatlas.server.mapper.ScanMapper;
 import com.codeatlas.server.mapper.UserMapper;
+import com.codeatlas.server.mapper.ViolationMapper;
 import com.codeatlas.server.service.ProjectService;
+import com.codeatlas.server.util.SourceUrlValidator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -46,11 +50,17 @@ public class ProjectServiceImpl implements ProjectService {
     private final ClassSummaryMapper classSummaryMapper;
     private final UserMapper userMapper;
     private final WorkspaceConfig workspaceConfig;
+    private final ViolationMapper violationMapper;
+    private final MapViewSnapshotMapper mapViewSnapshotMapper;
+    private final ConstitutionRuleMapper constitutionRuleMapper;
 
     public ProjectServiceImpl(ProjectMapper projectMapper, ProjectMemberMapper projectMemberMapper,
                               ScanMapper scanMapper, InsightMapper insightMapper,
                               ClassSummaryMapper classSummaryMapper, UserMapper userMapper,
-                              WorkspaceConfig workspaceConfig) {
+                              WorkspaceConfig workspaceConfig,
+                              ViolationMapper violationMapper,
+                              MapViewSnapshotMapper mapViewSnapshotMapper,
+                              ConstitutionRuleMapper constitutionRuleMapper) {
         this.projectMapper = projectMapper;
         this.projectMemberMapper = projectMemberMapper;
         this.scanMapper = scanMapper;
@@ -58,6 +68,9 @@ public class ProjectServiceImpl implements ProjectService {
         this.classSummaryMapper = classSummaryMapper;
         this.userMapper = userMapper;
         this.workspaceConfig = workspaceConfig;
+        this.violationMapper = violationMapper;
+        this.mapViewSnapshotMapper = mapViewSnapshotMapper;
+        this.constitutionRuleMapper = constitutionRuleMapper;
     }
 
     @Override
@@ -70,21 +83,25 @@ public class ProjectServiceImpl implements ProjectService {
         String sourceType = StringUtils.hasText(request.getSourceType())
                 ? request.getSourceType() : "GIT_URL";
 
+        if (!"GIT_URL".equals(sourceType) && !"ZIP_UPLOAD".equals(sourceType)) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "不支持的源码类型");
+        }
+
+        String resolvedSourceUrl = request.getSourceUrl();
         if ("GIT_URL".equals(sourceType)) {
-            String url = request.getSourceUrl();
-            if (!StringUtils.hasText(url)) {
-                throw new BusinessException(ErrorCode.BAD_REQUEST, "Git 仓库 URL 不能为空");
-            }
-            if (!url.matches("^https?://[^\\s]+$")) {
-                throw new BusinessException(ErrorCode.BAD_REQUEST, "Git URL 格式不正确，示例：https://github.com/user/repo.git");
-            }
+            SourceUrlValidator.validateGitUrl(resolvedSourceUrl);
+        } else {
+            // 上传流程写入的本地路径必须真实存在且落在工作区 uploads 目录内
+            resolvedSourceUrl = SourceUrlValidator
+                    .resolveLocalPathInside(workspaceConfig.getUploadsDir(), resolvedSourceUrl)
+                    .toString();
         }
 
         Project project = new Project();
         project.setName(request.getName());
         project.setDescription(request.getDescription());
         project.setSourceType(sourceType);
-        project.setSourceUrl(request.getSourceUrl());
+        project.setSourceUrl(resolvedSourceUrl);
         project.setDefaultBranch("main");
         project.setLanguage("Java");
         project.setTotalClasses(0);
@@ -173,6 +190,14 @@ public class ProjectServiceImpl implements ProjectService {
         } catch (Exception e) {
             log.warn("Failed to clean workspace files for projectId={}: {}", projectId, e.getMessage());
         }
+        // 级联清理子表（无外键约束，需显式删除，避免孤儿数据）
+        violationMapper.deleteByProjectId(projectId);
+        classSummaryMapper.deleteByProjectId(projectId);
+        scanMapper.deleteByProjectId(projectId);
+        insightMapper.deleteByProjectId(projectId);
+        projectMemberMapper.deleteByProjectId(projectId);
+        mapViewSnapshotMapper.deleteByProjectId(projectId);
+        constitutionRuleMapper.deleteByProjectId(projectId);
         projectMapper.deleteById(projectId);
         log.info("Project deleted: id={}, userId={}", projectId, userId);
     }

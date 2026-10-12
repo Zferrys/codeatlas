@@ -27,8 +27,10 @@ import com.codeatlas.server.service.AiAnalysisService;
 import com.codeatlas.server.service.AlertService;
 import com.codeatlas.server.service.ConstitutionRuleService;
 import com.codeatlas.server.service.Neo4jGraphService;
+import com.codeatlas.server.service.ProjectAccessChecker;
 import com.codeatlas.server.service.ScanService;
 import com.codeatlas.server.util.HealthScoreCalculator;
+import com.codeatlas.server.util.SourceUrlValidator;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.annotation.Timed;
@@ -78,6 +80,7 @@ public class ScanServiceImpl implements ScanService {
     private final CacheManager cacheManager;
     private final AlertService alertService;
     private final CodeAtlasMetrics metrics;
+    private final ProjectAccessChecker projectAccessChecker;
 
     public ScanServiceImpl(ScanMapper scanMapper, ProjectMapper projectMapper,
                            ClassSummaryMapper classSummaryMapper,
@@ -92,7 +95,8 @@ public class ScanServiceImpl implements ScanService {
                            WorkspaceConfig workspaceConfig,
                            CacheManager cacheManager,
                            AlertService alertService,
-                           CodeAtlasMetrics metrics) {
+                           CodeAtlasMetrics metrics,
+                           ProjectAccessChecker projectAccessChecker) {
         this.scanMapper = scanMapper;
         this.projectMapper = projectMapper;
         this.classSummaryMapper = classSummaryMapper;
@@ -108,6 +112,7 @@ public class ScanServiceImpl implements ScanService {
         this.cacheManager = cacheManager;
         this.alertService = alertService;
         this.metrics = metrics;
+        this.projectAccessChecker = projectAccessChecker;
     }
 
     @Override
@@ -118,6 +123,7 @@ public class ScanServiceImpl implements ScanService {
 
     @Override
     public ScanVO triggerIncrementalScan(Long projectId, Long userId) {
+        projectAccessChecker.check(projectId, userId);
         ScanRecord previous = scanMapper.findLatestByProjectId(projectId);
         if (previous == null || !"COMPLETED".equals(previous.getStatus())) {
             throw new BusinessException(ErrorCode.SCAN_NOT_FOUND, "没有已完成的扫描，请先执行全量扫描");
@@ -127,9 +133,7 @@ public class ScanServiceImpl implements ScanService {
 
     private ScanVO doTriggerScan(Long projectId, Long userId, boolean incremental) {
         Project project = projectMapper.findById(projectId);
-        if (project == null) {
-            throw new BusinessException(ErrorCode.NOT_FOUND, "项目不存在");
-        }
+        projectAccessChecker.check(project, projectId, userId);
 
         ScanRecord latest = scanMapper.findLatestByProjectId(projectId);
         if (latest != null && "RUNNING".equals(latest.getStatus())) {
@@ -137,6 +141,7 @@ public class ScanServiceImpl implements ScanService {
         }
 
         if ("GIT_URL".equals(project.getSourceType()) && project.getSourceUrl() != null) {
+            SourceUrlValidator.validateGitUrl(project.getSourceUrl());
             long estimatedBytes = gitService.estimateRepoSize(project.getSourceUrl());
             if (estimatedBytes > MAX_CLONE_ESTIMATE_BYTES) {
                 throw new BusinessException(ErrorCode.FILE_TOO_LARGE,
@@ -194,7 +199,8 @@ public class ScanServiceImpl implements ScanService {
                 scan.setBranch(gitResult.getBranch());
             } else {
                 if (project.getSourceUrl() != null) {
-                    workDir = Path.of(project.getSourceUrl());
+                    workDir = SourceUrlValidator.resolveLocalPathInside(
+                            workspaceConfig.getUploadsDir(), project.getSourceUrl());
                 }
             }
 
@@ -327,7 +333,11 @@ public class ScanServiceImpl implements ScanService {
 
         long duration = System.currentTimeMillis() - startTime;
 
-        if (!"FAILED".equals(scan.getStatus())) {
+        if ("FAILED".equals(scan.getStatus())) {
+            // 失败扫描可能已写入部分类摘要/违规，清理避免污染"最新扫描"数据口径
+            classSummaryMapper.deleteByScanId(scan.getId());
+            violationMapper.deleteByScanId(scan.getId());
+        } else {
             scan.setStatus("COMPLETED");
         }
         scan.setTotalClasses(totalClasses);
@@ -343,13 +353,16 @@ public class ScanServiceImpl implements ScanService {
             log.debug("Failed to evict mapData cache for projectId={}: {}", projectId, e.getMessage());
         }
 
-        project.setTotalClasses(totalClasses);
-        project.setTotalModules(1);
-        // 评分统一由 HealthScoreCalculator 计算（与 /health-score 展示口径一致）
-        List<ClassSummaryEntity> scoreClasses = classSummaryMapper.findByScanId(scan.getId());
-        project.setHealthScore(HealthScoreCalculator.compute(totalClasses, totalViolations, scoreClasses).getTotal());
-        project.setLastScanId(scan.getId());
-        projectMapper.updateStats(project);
+        // 仅成功扫描才刷新项目级统计；失败时保留上一次成功扫描的统计与健康分，避免清零
+        if ("COMPLETED".equals(scan.getStatus())) {
+            project.setTotalClasses(totalClasses);
+            project.setTotalModules(1);
+            // 评分统一由 HealthScoreCalculator 计算（与 /health-score 展示口径一致）
+            List<ClassSummaryEntity> scoreClasses = classSummaryMapper.findByScanId(scan.getId());
+            project.setHealthScore(HealthScoreCalculator.compute(totalClasses, totalViolations, scoreClasses).getTotal());
+            project.setLastScanId(scan.getId());
+            projectMapper.updateStats(project);
+        }
 
         if ("COMPLETED".equals(scan.getStatus()) && totalClasses > 0) {
             checkMemory(projectId, scan.getId(), "AI_ANALYSIS");
@@ -400,6 +413,7 @@ public class ScanServiceImpl implements ScanService {
 
     @Override
     public PageResult<ScanVO> getScanHistory(Long projectId, Long userId, int page, int size) {
+        projectAccessChecker.check(projectId, userId);
         long total = scanMapper.countByProjectId(projectId);
         int offset = (page - 1) * size;
         List<ScanRecord> scans = scanMapper.findByProjectIdPaged(projectId, offset, size);
@@ -409,6 +423,7 @@ public class ScanServiceImpl implements ScanService {
 
     @Override
     public ScanVO getLatestScan(Long projectId, Long userId) {
+        projectAccessChecker.check(projectId, userId);
         ScanRecord scan = scanMapper.findLatestByProjectId(projectId);
         return scan != null ? toVO(scan) : null;
     }
@@ -428,7 +443,8 @@ public class ScanServiceImpl implements ScanService {
     }
 
     @Override
-    public Map<String, Object> getScanStatus(Long projectId) {
+    public Map<String, Object> getScanStatus(Long projectId, Long userId) {
+        projectAccessChecker.check(projectId, userId);
         Map<String, Object> status = new HashMap<>();
         ScanRecord latest = scanMapper.findLatestByProjectId(projectId);
         if (latest != null) {

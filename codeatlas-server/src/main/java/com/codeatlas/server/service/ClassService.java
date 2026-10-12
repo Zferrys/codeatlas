@@ -5,7 +5,7 @@ import java.util.Map;
 
 public interface ClassService {
 
-    Map<String, Object> getClassDetail(Long projectId, String fqn);
+    Map<String, Object> getClassDetail(Long projectId, String fqn, Long userId);
 
-    List<Map<String, Object>> searchClasses(Long projectId, String keyword, int limit);
+    List<Map<String, Object>> searchClasses(Long projectId, String keyword, int limit, Long userId);
 }

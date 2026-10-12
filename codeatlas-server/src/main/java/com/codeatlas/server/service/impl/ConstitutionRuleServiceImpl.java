@@ -7,6 +7,7 @@ import com.codeatlas.server.entity.ConstitutionRuleEntity;
 import com.codeatlas.server.mapper.ConstitutionRuleMapper;
 import com.codeatlas.server.mapper.ViolationMapper;
 import com.codeatlas.server.service.ConstitutionRuleService;
+import com.codeatlas.server.service.ProjectAccessChecker;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.cache.annotation.CacheEvict;
@@ -23,10 +24,13 @@ public class ConstitutionRuleServiceImpl implements ConstitutionRuleService {
 
     private final ConstitutionRuleMapper mapper;
     private final ViolationMapper violationMapper;
+    private final ProjectAccessChecker projectAccessChecker;
 
-    public ConstitutionRuleServiceImpl(ConstitutionRuleMapper mapper, ViolationMapper violationMapper) {
+    public ConstitutionRuleServiceImpl(ConstitutionRuleMapper mapper, ViolationMapper violationMapper,
+                                       ProjectAccessChecker projectAccessChecker) {
         this.mapper = mapper;
         this.violationMapper = violationMapper;
+        this.projectAccessChecker = projectAccessChecker;
     }
 
     @Override
@@ -59,11 +63,16 @@ public class ConstitutionRuleServiceImpl implements ConstitutionRuleService {
     @Override
     @Transactional
     @CacheEvict(value = "rules", allEntries = true)
-    public ConstitutionRuleEntity toggleRule(Long ruleId, boolean enabled) {
+    public ConstitutionRuleEntity toggleRule(Long projectId, Long ruleId, boolean enabled, Long userId) {
+        projectAccessChecker.check(projectId, userId);
         ConstitutionRuleEntity rule = mapper.findById(ruleId);
         if (rule == null) {
             log.warn("Rule not found: id={}", ruleId);
             return null;
+        }
+        // 项目级规则必须归属路径中的项目；全局规则（project_id 为空）允许按既有语义切换
+        if (rule.getProjectId() != null && !rule.getProjectId().equals(projectId)) {
+            throw new BusinessException(ErrorCode.NOT_FOUND, "规则不存在");
         }
         rule.setIsEnabled(enabled);
         mapper.toggleEnabled(rule);
@@ -79,6 +88,7 @@ public class ConstitutionRuleServiceImpl implements ConstitutionRuleService {
 
     @Override
     @Transactional
+    @CacheEvict(value = "rules", allEntries = true)
     public void updateRuleDefinition(Long ruleId, String newDefinition) {
         ConstitutionRuleEntity rule = mapper.findById(ruleId);
         if (rule == null) {
@@ -98,13 +108,18 @@ public class ConstitutionRuleServiceImpl implements ConstitutionRuleService {
 
     @Override
     @Transactional
-    public void deleteRule(Long ruleId) {
+    @CacheEvict(value = "rules", allEntries = true)
+    public void deleteRule(Long projectId, Long ruleId, Long userId) {
+        projectAccessChecker.check(projectId, userId);
         ConstitutionRuleEntity rule = mapper.findById(ruleId);
         if (rule == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND, "规则不存在");
         }
         if (rule.getProjectId() == null) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "内置规则不可删除");
+        }
+        if (!rule.getProjectId().equals(projectId)) {
+            throw new BusinessException(ErrorCode.NOT_FOUND, "规则不存在");
         }
         violationMapper.resolveAllByRuleId(ruleId);
         mapper.delete(ruleId);

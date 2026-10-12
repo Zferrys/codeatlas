@@ -119,13 +119,22 @@ public class RateLimitInterceptor implements HandlerInterceptor {
     }
 
     private String getClientIp(HttpServletRequest request) {
-        String xForwardedFor = request.getHeader("X-Forwarded-For");
-        if (xForwardedFor != null && !xForwardedFor.isEmpty()) {
-            return xForwardedFor.split(",")[0].trim();
-        }
+        // 信任链：X-Real-IP 由 nginx proxy_set_header 覆盖写入（客户端伪造值会被覆盖），最可靠；
+        // X-Forwarded-For 是追加式（nginx 把直连地址追加在末尾），取最后一段——客户端伪造值只会出现在左侧。
         String xRealIp = request.getHeader("X-Real-IP");
-        if (xRealIp != null && !xRealIp.isEmpty()) {
-            return xRealIp;
+        if (xRealIp != null && !xRealIp.trim().isEmpty()) {
+            return xRealIp.trim();
+        }
+        String xForwardedFor = request.getHeader("X-Forwarded-For");
+        if (xForwardedFor != null && !xForwardedFor.trim().isEmpty()) {
+            String[] parts = xForwardedFor.split(",");
+            // 畸形头（如 ","）split 后可能为空数组，落回 remoteAddr（fail-closed）
+            if (parts.length > 0) {
+                String lastSegment = parts[parts.length - 1].trim();
+                if (!lastSegment.isEmpty()) {
+                    return lastSegment;
+                }
+            }
         }
         return request.getRemoteAddr();
     }

@@ -3,6 +3,7 @@ package com.codeatlas.server.service.impl;
 import com.codeatlas.server.entity.MapViewSnapshot;
 import com.codeatlas.server.mapper.MapViewSnapshotMapper;
 import com.codeatlas.server.service.MapViewService;
+import com.codeatlas.server.service.ProjectAccessChecker;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
@@ -11,9 +12,11 @@ import java.util.*;
 public class MapViewServiceImpl implements MapViewService {
 
     private final MapViewSnapshotMapper mapper;
+    private final ProjectAccessChecker projectAccessChecker;
 
-    public MapViewServiceImpl(MapViewSnapshotMapper mapper) {
+    public MapViewServiceImpl(MapViewSnapshotMapper mapper, ProjectAccessChecker projectAccessChecker) {
         this.mapper = mapper;
+        this.projectAccessChecker = projectAccessChecker;
     }
 
     @Override
@@ -21,6 +24,7 @@ public class MapViewServiceImpl implements MapViewService {
         if (viewState == null) {
             throw new IllegalArgumentException("viewState 不能为空");
         }
+        projectAccessChecker.check(projectId, userId);
         MapViewSnapshot snapshot = new MapViewSnapshot();
         snapshot.setProjectId(projectId);
         snapshot.setUserId(userId);

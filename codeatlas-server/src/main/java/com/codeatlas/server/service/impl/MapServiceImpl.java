@@ -1,7 +1,5 @@
 package com.codeatlas.server.service.impl;
 
-import com.codeatlas.common.constant.ErrorCode;
-import com.codeatlas.common.exception.BusinessException;
 import com.codeatlas.server.dto.response.GraphVO;
 import com.codeatlas.server.entity.Project;
 import com.codeatlas.server.entity.ScanRecord;
@@ -9,9 +7,12 @@ import com.codeatlas.server.mapper.ProjectMapper;
 import com.codeatlas.server.mapper.ScanMapper;
 import com.codeatlas.server.service.MapService;
 import com.codeatlas.server.service.Neo4jGraphService;
+import com.codeatlas.server.service.ProjectAccessChecker;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.cache.annotation.Cacheable;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 
 import java.util.Collections;
@@ -24,22 +25,30 @@ public class MapServiceImpl implements MapService {
     private final ProjectMapper projectMapper;
     private final ScanMapper scanMapper;
     private final Neo4jGraphService neo4jGraphService;
+    private final ProjectAccessChecker projectAccessChecker;
+
+    /** 自注入以走缓存代理：归属校验必须先于缓存命中执行，不能被 @Cacheable 短路 */
+    @Lazy
+    @Autowired
+    private MapServiceImpl self;
 
     public MapServiceImpl(ProjectMapper projectMapper, ScanMapper scanMapper,
-                          Neo4jGraphService neo4jGraphService) {
+                          Neo4jGraphService neo4jGraphService,
+                          ProjectAccessChecker projectAccessChecker) {
         this.projectMapper = projectMapper;
         this.scanMapper = scanMapper;
         this.neo4jGraphService = neo4jGraphService;
+        this.projectAccessChecker = projectAccessChecker;
     }
 
     @Override
-    @Cacheable(value = "mapData", key = "#projectId", unless = "#result == null")
     public GraphVO getProjectMap(Long projectId, Long userId) {
-        Project project = projectMapper.findById(projectId);
-        if (project == null) {
-            throw new BusinessException(ErrorCode.NOT_FOUND, "项目不存在");
-        }
+        projectAccessChecker.check(projectId, userId);
+        return self.getProjectMapCached(projectId);
+    }
 
+    @Cacheable(value = "mapData", key = "#projectId", unless = "#result == null")
+    public GraphVO getProjectMapCached(Long projectId) {
         ScanRecord latestScan = scanMapper.findLatestByProjectId(projectId);
         if (latestScan == null || !"COMPLETED".equals(latestScan.getStatus())) {
             GraphVO empty = new GraphVO();
@@ -67,9 +76,7 @@ public class MapServiceImpl implements MapService {
     @Override
     public GraphVO getProjectMapPaged(Long projectId, String level, int page, int size, Long userId) {
         Project project = projectMapper.findById(projectId);
-        if (project == null) {
-            throw new BusinessException(ErrorCode.NOT_FOUND, "项目不存在");
-        }
+        projectAccessChecker.check(project, projectId, userId);
 
         ScanRecord latestScan = scanMapper.findLatestByProjectId(projectId);
         if (latestScan == null || !"COMPLETED".equals(latestScan.getStatus())) {
@@ -95,9 +102,7 @@ public class MapServiceImpl implements MapService {
     @Override
     public GraphVO getSubgraph(Long projectId, String fqn, int depth, Long userId) {
         Project project = projectMapper.findById(projectId);
-        if (project == null) {
-            throw new BusinessException(ErrorCode.NOT_FOUND, "项目不存在");
-        }
+        projectAccessChecker.check(project, projectId, userId);
 
         int actualDepth = Math.max(1, Math.min(depth, 5));
         try {

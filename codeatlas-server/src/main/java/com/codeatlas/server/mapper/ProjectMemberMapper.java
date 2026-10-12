@@ -17,6 +17,9 @@ public interface ProjectMemberMapper {
     @Delete("DELETE FROM project_member WHERE project_id = #{projectId} AND user_id = #{userId}")
     int delete(@Param("projectId") Long projectId, @Param("userId") Long userId);
 
+    @Delete("DELETE FROM project_member WHERE project_id = #{projectId}")
+    int deleteByProjectId(Long projectId);
+
     @Select("SELECT * FROM project_member WHERE project_id = #{projectId} AND user_id = #{userId}")
     ProjectMember findByProjectAndUser(@Param("projectId") Long projectId, @Param("userId") Long userId);
 

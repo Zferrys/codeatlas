@@ -56,8 +56,9 @@ public class ScanController {
     @GetMapping("/status")
     @PreAuthorize("isAuthenticated()")
     @Operation(summary = "扫描状态")
-    public ApiResponse<Map<String, Object>> getScanStatus(@PathVariable Long projectId) {
-        return ApiResponse.success(scanService.getScanStatus(projectId));
+    public ApiResponse<Map<String, Object>> getScanStatus(@PathVariable Long projectId,
+                                                          @AuthenticationPrincipal CodeAtlasUserDetails principal) {
+        return ApiResponse.success(scanService.getScanStatus(projectId, principal.getUserId()));
     }
 
     @PostMapping("/increment")

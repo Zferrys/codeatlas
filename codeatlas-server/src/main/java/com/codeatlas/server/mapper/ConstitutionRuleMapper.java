@@ -51,4 +51,8 @@ public interface ConstitutionRuleMapper {
 
     @Delete("DELETE FROM constitution_rule WHERE id = #{id}")
     int delete(Long id);
+
+    /** 仅删除项目级规则；全局规则（project_id 为空）不受影响 */
+    @Delete("DELETE FROM constitution_rule WHERE project_id = #{projectId}")
+    int deleteByProjectId(Long projectId);
 }

@@ -9,6 +9,7 @@ import com.codeatlas.server.service.AgenticSearchService;
 import com.codeatlas.server.service.AiAnalysisService;
 import com.codeatlas.server.service.ImpactAnalysisService;
 import com.codeatlas.server.service.InsightService;
+import com.codeatlas.server.service.ProjectAccessChecker;
 import com.codeatlas.server.service.ProjectService;
 import com.codeatlas.server.service.ScanService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -31,19 +32,22 @@ public class AiController {
     private final ProjectService projectService;
     private final ScanService scanService;
     private final AgenticSearchService agenticSearchService;
+    private final ProjectAccessChecker projectAccessChecker;
 
     public AiController(AiAnalysisService aiAnalysisService,
                         ImpactAnalysisService impactAnalysisService,
                         InsightService insightService,
                         ProjectService projectService,
                         ScanService scanService,
-                        AgenticSearchService agenticSearchService) {
+                        AgenticSearchService agenticSearchService,
+                        ProjectAccessChecker projectAccessChecker) {
         this.aiAnalysisService = aiAnalysisService;
         this.impactAnalysisService = impactAnalysisService;
         this.insightService = insightService;
         this.projectService = projectService;
         this.scanService = scanService;
         this.agenticSearchService = agenticSearchService;
+        this.projectAccessChecker = projectAccessChecker;
     }
 
     @GetMapping("/story")
@@ -51,6 +55,7 @@ public class AiController {
     @PreAuthorize("isAuthenticated()")
     public ApiResponse<Map<String, Object>> getStory(@PathVariable Long projectId,
                                                       @AuthenticationPrincipal CodeAtlasUserDetails principal) {
+        projectAccessChecker.check(projectId, principal.getUserId());
         InsightEntity story = insightService.getLatestArchStory(projectId);
         if (story == null) {
             return ApiResponse.success(null);
@@ -70,9 +75,7 @@ public class AiController {
     public ApiResponse<Map<String, Object>> generateStory(@PathVariable Long projectId,
                                                           @AuthenticationPrincipal CodeAtlasUserDetails principal) {
         Project project = projectService.getProjectEntity(projectId);
-        if (project == null) {
-            return ApiResponse.error(404, "项目不存在");
-        }
+        projectAccessChecker.check(project, projectId, principal.getUserId());
         ScanRecord scan = scanService.getLatestScanEntity(projectId);
         if (scan == null) {
             return ApiResponse.error(400, "请先触发一次扫描");
@@ -103,6 +106,7 @@ public class AiController {
             return ApiResponse.error(400, "targetClass 不能为空");
         }
 
+        projectAccessChecker.check(projectId, principal.getUserId());
         Map<String, Object> result = impactAnalysisService.analyzeImpact(
                 projectId, targetClass, changeType, targetMethod, description);
         return ApiResponse.success(result);
@@ -120,6 +124,8 @@ public class AiController {
         if (question == null || question.trim().isEmpty()) {
             return ApiResponse.error(400, "question 不能为空");
         }
+
+        projectAccessChecker.check(projectId, principal.getUserId());
 
         // 未指定类名 → Agentic Search（AI 自动搜索代码库）
         if (classFqn == null || classFqn.trim().isEmpty()) {

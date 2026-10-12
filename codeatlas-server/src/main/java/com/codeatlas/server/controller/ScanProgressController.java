@@ -2,6 +2,7 @@ package com.codeatlas.server.controller;
 
 import com.codeatlas.server.event.ScanProgressEvent;
 import com.codeatlas.server.security.CodeAtlasUserDetails;
+import com.codeatlas.server.service.ProjectAccessChecker;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -28,9 +29,11 @@ public class ScanProgressController {
 
     private static final Logger log = LoggerFactory.getLogger(ScanProgressController.class);
     private final ObjectMapper objectMapper;
+    private final ProjectAccessChecker projectAccessChecker;
 
-    public ScanProgressController(ObjectMapper objectMapper) {
+    public ScanProgressController(ObjectMapper objectMapper, ProjectAccessChecker projectAccessChecker) {
         this.objectMapper = objectMapper;
+        this.projectAccessChecker = projectAccessChecker;
     }
 
     /** projectId → 该项目的 SseEmitter 列表 */
@@ -49,6 +52,7 @@ public class ScanProgressController {
     @PreAuthorize("isAuthenticated()")
     public SseEmitter streamProgress(@PathVariable Long projectId,
                                      @AuthenticationPrincipal CodeAtlasUserDetails principal) {
+        projectAccessChecker.check(projectId, principal.getUserId());
         SseEmitter emitter = new SseEmitter(30 * 60 * 1000L); // 30 min timeout
         emitters.computeIfAbsent(projectId, k -> new CopyOnWriteArrayList<>()).add(emitter);
 

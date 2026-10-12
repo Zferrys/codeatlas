@@ -16,6 +16,9 @@ public interface MapViewSnapshotMapper {
     @Delete("DELETE FROM map_view_snapshot WHERE id = #{id} AND user_id = #{userId}")
     int deleteByIdAndUser(@Param("id") Long id, @Param("userId") Long userId);
 
+    @Delete("DELETE FROM map_view_snapshot WHERE project_id = #{projectId}")
+    int deleteByProjectId(Long projectId);
+
     @Select("SELECT * FROM map_view_snapshot WHERE id = #{id}")
     MapViewSnapshot findById(Long id);
 

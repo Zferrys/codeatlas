@@ -4,10 +4,12 @@ import com.codeatlas.common.dto.ApiResponse;
 import com.codeatlas.common.dto.PageResult;
 import com.codeatlas.server.dto.response.ViolationVO;
 import com.codeatlas.server.entity.ViolationEntity;
+import com.codeatlas.server.security.CodeAtlasUserDetails;
 import com.codeatlas.server.service.ViolationService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -30,8 +32,9 @@ public class ViolationController {
     public ApiResponse<PageResult<ViolationVO>> getViolations(
             @PathVariable Long projectId,
             @RequestParam(defaultValue = "1") int page,
-            @RequestParam(defaultValue = "20") int size) {
-        PageResult<ViolationEntity> pageResult = violationService.getViolations(projectId, page, size);
+            @RequestParam(defaultValue = "20") int size,
+            @AuthenticationPrincipal CodeAtlasUserDetails principal) {
+        PageResult<ViolationEntity> pageResult = violationService.getViolations(projectId, page, size, principal.getUserId());
         List<ViolationVO> records = pageResult.getRecords().stream()
                 .map(ViolationVO::from).collect(Collectors.toList());
         return ApiResponse.success(new PageResult<>(records, pageResult.getTotal(), page, size));
@@ -41,8 +44,9 @@ public class ViolationController {
     @PreAuthorize("hasAnyRole('ADMIN','ARCHITECT','DEVELOPER')")
     @Operation(summary = "标记违规为已解决")
     public ApiResponse<Void> resolveViolation(@PathVariable Long projectId,
-                                               @PathVariable Long violationId) {
-        violationService.resolveViolation(violationId);
+                                               @PathVariable Long violationId,
+                                               @AuthenticationPrincipal CodeAtlasUserDetails principal) {
+        violationService.resolveViolation(projectId, violationId, principal.getUserId());
         return ApiResponse.success(null);
     }
 }

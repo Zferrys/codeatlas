@@ -1,6 +1,7 @@
 package com.codeatlas.server.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.jsontype.BasicPolymorphicTypeValidator;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.springframework.boot.autoconfigure.cache.RedisCacheManagerBuilderCustomizer;
 import org.springframework.cache.annotation.EnableCaching;
@@ -21,10 +22,16 @@ public class CacheConfig {
     public CacheConfig() {
         ObjectMapper mapper = new ObjectMapper();
         mapper.registerModule(new JavaTimeModule());
-        // 必须启用 Default Typing，否则缓存反序列化时类型丢失，Entity 会变成 LinkedHashMap
-        mapper.activateDefaultTyping(
-                mapper.getPolymorphicTypeValidator(),
-                ObjectMapper.DefaultTyping.NON_FINAL);
+        // 需要 Default Typing 才能让 Entity/GraphVO 缓存往返不丢类型；
+        // 但类型化反序列化必须收窄白名单（仅放行应用自身与 JDK 容器/时间/数值类型），
+        // 不能沿用默认的全量放行，否则 Redis 中任意类型 id 都会参与反序列化
+        BasicPolymorphicTypeValidator typeValidator = BasicPolymorphicTypeValidator.builder()
+                .allowIfSubType("com.codeatlas.")
+                .allowIfSubType("java.util.")
+                .allowIfSubType("java.time.")
+                .allowIfSubType("java.math.")
+                .build();
+        mapper.activateDefaultTyping(typeValidator, ObjectMapper.DefaultTyping.NON_FINAL);
         this.serializer = new GenericJackson2JsonRedisSerializer(mapper);
     }
 

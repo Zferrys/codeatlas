@@ -12,6 +12,9 @@ import com.codeatlas.server.mapper.ScanMapper;
 import com.codeatlas.server.mapper.InsightMapper;
 import com.codeatlas.server.mapper.ClassSummaryMapper;
 import com.codeatlas.server.mapper.UserMapper;
+import com.codeatlas.server.mapper.ViolationMapper;
+import com.codeatlas.server.mapper.MapViewSnapshotMapper;
+import com.codeatlas.server.mapper.ConstitutionRuleMapper;
 import com.codeatlas.server.service.impl.ProjectServiceImpl;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -47,13 +50,20 @@ class ProjectServiceImplTest {
     private UserMapper userMapper;
     @Mock
     private WorkspaceConfig workspaceConfig;
+    @Mock
+    private ViolationMapper violationMapper;
+    @Mock
+    private MapViewSnapshotMapper mapViewSnapshotMapper;
+    @Mock
+    private ConstitutionRuleMapper constitutionRuleMapper;
 
     private ProjectServiceImpl projectService;
 
     @BeforeEach
     void setUp() {
         projectService = new ProjectServiceImpl(projectMapper, projectMemberMapper,
-                scanMapper, insightMapper, classSummaryMapper, userMapper, workspaceConfig);
+                scanMapper, insightMapper, classSummaryMapper, userMapper, workspaceConfig,
+                violationMapper, mapViewSnapshotMapper, constitutionRuleMapper);
     }
 
     @Test
