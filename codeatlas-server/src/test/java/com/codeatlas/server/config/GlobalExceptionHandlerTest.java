@@ -107,4 +107,13 @@ class GlobalExceptionHandlerTest {
                 .andExpect(status().isUnsupportedMediaType())
                 .andExpect(jsonPath("$.code").value(ErrorCode.BAD_REQUEST.getCode()));
     }
+
+    @Test
+    @DisplayName("BusinessException(BAD_REQUEST) 返回真实 HTTP 400 而非 200")
+    void shouldHandleBusinessExceptionWithBadRequestAsHttp400() throws Exception {
+        mockMvc.perform(get("/api/v1/probe/business"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(ErrorCode.BAD_REQUEST.getCode()))
+                .andExpect(jsonPath("$.message").value("本地源码路径无效或不存在"));
+    }
 }

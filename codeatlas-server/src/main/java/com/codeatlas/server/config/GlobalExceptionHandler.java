@@ -128,6 +128,9 @@ public class GlobalExceptionHandler {
     }
 
     private HttpStatus mapHttpStatus(int code) {
+        // 400 是业务校验错误的通用码，必须映射为真实 HTTP 400：
+        // 前端 axios 按 HTTP 状态判断成败，若返回 200 则校验失败会被当成成功（如触发扫描时路径无效被静默吞掉）
+        if (code == ErrorCode.BAD_REQUEST.getCode()) return HttpStatus.BAD_REQUEST;
         if (code == ErrorCode.UNAUTHORIZED.getCode()) return HttpStatus.UNAUTHORIZED;
         if (code == ErrorCode.FORBIDDEN.getCode()) return HttpStatus.FORBIDDEN;
         if (code == ErrorCode.NOT_FOUND.getCode()) return HttpStatus.NOT_FOUND;

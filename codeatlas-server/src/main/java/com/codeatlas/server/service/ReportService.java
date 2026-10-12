@@ -8,6 +8,7 @@ import com.codeatlas.server.entity.ViolationEntity;
 import com.codeatlas.server.entity.InsightEntity;
 import com.codeatlas.server.entity.ClassSummaryEntity;
 import com.codeatlas.server.mapper.*;
+import com.codeatlas.server.util.MarkdownRenderer;
 import com.itextpdf.kernel.font.PdfFont;
 import com.itextpdf.kernel.font.PdfFontFactory;
 import com.itextpdf.kernel.pdf.PdfDocument;
@@ -55,7 +56,10 @@ public class ReportService {
         Project project = projectMapper.findById(projectId);
         checkProjectAccess(project, projectId, userId);
         ScanRecord scan = scanMapper.findLatestByProjectId(projectId);
-        List<ViolationEntity> violations = violationMapper.findByProjectId(projectId);
+        // 与扫描统计同口径：只取最新一次扫描的违规，避免历史扫描累积导致重复与数字矛盾
+        List<ViolationEntity> violations = scan != null
+                ? violationMapper.findByScanId(scan.getId())
+                : Collections.emptyList();
         InsightEntity archStory = insightService.getLatestArchStory(projectId);
 
         try (ByteArrayOutputStream baos = new ByteArrayOutputStream()) {
@@ -128,7 +132,7 @@ public class ReportService {
                 if (story.length() > 6000) {
                     story = story.substring(0, 6000) + "\n\n...（内容过长，已截断，完整叙事请查看 HTML 报告）";
                 }
-                document.add(new Paragraph(story).setFontSize(10).setFont(cnFont));
+                addNarrativeToPdf(document, story, cnFont);
             }
 
             document.close();
@@ -140,15 +144,19 @@ public class ReportService {
     }
 
     private PdfFont loadChineseFont() {
+        // .ttc 是字体集合，iText 必须用 "路径,索引" 语法加载（裸路径报 Type of font not recognized）；
+        // Noto CJK 集合的索引 2 = SC 简体中文（索引 0 是日文字形）
         String[] fontPaths = {
-            "C:/Windows/Fonts/msyh.ttc",
-            "C:/Windows/Fonts/simsun.ttc",
+            "C:/Windows/Fonts/msyh.ttc,0",
+            "C:/Windows/Fonts/simsun.ttc,0",
             "C:/Windows/Fonts/simhei.ttf",
-            "/System/Library/Fonts/PingFang.ttc",
-            "/System/Library/Fonts/STHeiti Light.ttc",
-            "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
-            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-            "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc"
+            "/System/Library/Fonts/PingFang.ttc,0",
+            "/System/Library/Fonts/STHeiti Light.ttc,0",
+            "/usr/share/fonts/noto/NotoSansCJK-Regular.ttc,2",
+            "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc,2",
+            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc,2",
+            "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc,2",
+            "/usr/share/fonts/wqy-zenhei/wqy-zenhei.ttc,0"
         };
         for (String path : fontPaths) {
             try {
@@ -165,6 +173,29 @@ public class ReportService {
         } catch (Exception e) {
             throw new RuntimeException("无法创建 PDF 字体", e);
         }
+    }
+
+    /** iText 无 HTML 渲染能力，叙事按行做轻量格式化：标题加粗、列表加符号、去掉 Markdown 标记 */
+    private void addNarrativeToPdf(Document document, String story, PdfFont font) {
+        for (String rawLine : story.split("\n", -1)) {
+            String line = rawLine.strip();
+            if (line.isEmpty()) {
+                continue;
+            }
+            if (line.startsWith("#")) {
+                document.add(new Paragraph(stripInlineMarkers(line.replaceFirst("^#+\\s*", "")))
+                        .setFontSize(12).setBold().setFont(font));
+            } else if (line.startsWith("- ") || line.startsWith("* ")) {
+                document.add(new Paragraph("• " + stripInlineMarkers(line.substring(2)))
+                        .setFontSize(10).setFont(font));
+            } else {
+                document.add(new Paragraph(stripInlineMarkers(line)).setFontSize(10).setFont(font));
+            }
+        }
+    }
+
+    private String stripInlineMarkers(String line) {
+        return line.replace("**", "").replace("`", "");
     }
 
     private void addCell(Table table, String text, PdfFont font, boolean isLabel) {
@@ -199,14 +230,21 @@ public class ReportService {
         Project project = projectMapper.findById(projectId);
         checkProjectAccess(project, projectId, userId);
         ScanRecord scan = scanMapper.findLatestByProjectId(projectId);
-        List<ViolationEntity> violations = violationMapper.findByProjectId(projectId);
+        // 与扫描统计同口径：只取最新一次扫描的违规，避免历史扫描累积导致重复与数字矛盾
+        List<ViolationEntity> violations = scan != null
+                ? violationMapper.findByScanId(scan.getId())
+                : Collections.emptyList();
         InsightEntity archStory = insightService.getLatestArchStory(projectId);
 
         StringBuilder sb = new StringBuilder();
         sb.append("<html><head><meta charset='UTF-8'><title>CodeAtlas 报告</title>");
-        sb.append("<style>body{font-family:Arial;margin:40px;}h1{color:#1a365d;}");
+        sb.append("<style>body{font-family:-apple-system,'Segoe UI','Microsoft YaHei','PingFang SC',sans-serif;margin:40px;line-height:1.6;color:#2d3748;}h1{color:#1a365d;}");
         sb.append("table{border-collapse:collapse;width:100%;}td,th{border:1px solid #ddd;padding:8px;}");
-        sb.append(".severity-BLOCKER{color:red;}.severity-ERROR{color:orange;}</style></head><body>");
+        sb.append(".severity-BLOCKER{color:red;}.severity-ERROR{color:orange;}");
+        sb.append(".severity-WARN{color:#d48806;}.severity-INFO{color:#8c8c8c;}");
+        sb.append(".narrative h2,.narrative h3,.narrative h4{color:#1a365d;}");
+        sb.append("code{background:#f5f5f5;padding:1px 4px;border-radius:3px;}");
+        sb.append("</style></head><body>");
 
         sb.append("<h1>CodeAtlas — 架构分析报告</h1>");
         sb.append("<h2>项目: ").append(escapeHtml(project != null ? project.getName() : "N/A")).append("</h2>");
@@ -240,7 +278,7 @@ public class ReportService {
 
         if (archStory != null && archStory.getContent() != null) {
             sb.append("<h3>架构叙事</h3>");
-            sb.append("<pre style='white-space:pre-wrap;'>").append(escapeHtml(archStory.getContent())).append("</pre>");
+            sb.append("<div class='narrative'>").append(MarkdownRenderer.toHtml(archStory.getContent())).append("</div>");
         }
 
         sb.append("</body></html>");

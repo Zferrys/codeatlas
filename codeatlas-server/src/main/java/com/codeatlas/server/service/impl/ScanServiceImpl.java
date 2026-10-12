@@ -149,6 +149,10 @@ public class ScanServiceImpl implements ScanService {
                         " MB (网络克隆上限 " + (MAX_CLONE_ESTIMATE_BYTES / (1024 * 1024)) +
                         " MB)。请先 git clone 到本地，再使用本地路径扫描");
             }
+        } else if (project.getSourceUrl() != null) {
+            // 本地路径同样在触发时同步校验：若留到异步任务里才失败，FAILED 事件会先于前端 SSE 连接建立，
+            // 前端收不到终态而永久卡在"扫描中"（对齐 GIT_URL 的同步校验模式）
+            SourceUrlValidator.resolveLocalPathInside(workspaceConfig.getUploadsDir(), project.getSourceUrl());
         }
 
         ScanRecord scan = new ScanRecord();

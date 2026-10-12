@@ -401,18 +401,23 @@ async function triggerScan() {
   scanProgress.progress = 0
   scanProgress.message = ''
   try {
-    await api.post(`/projects/${projectId}/scans`)
-    subscribeScanProgress(projectId)
+    const res = await api.post(`/projects/${projectId}/scans`)
+    subscribeScanProgress(projectId, res.data?.data?.id)
   } catch (e) {
     scanning.value = false
   }
 }
 
-async function subscribeScanProgress(projectId) {
+async function subscribeScanProgress(projectId, scanId) {
   const token = localStorage.getItem('codeatlas_token')
   sseAbortController = new AbortController()
+  // 携带 scanId：若扫描在连接建立前就已失败/完成，服务端会回放这一次扫描的终态事件，
+  // 避免前端永远等不到终止事件而卡在"扫描中"
+  const progressUrl = scanId
+    ? `/api/v1/projects/${projectId}/scans/progress?scanId=${scanId}`
+    : `/api/v1/projects/${projectId}/scans/progress`
   try {
-    const response = await fetch(`/api/v1/projects/${projectId}/scans/progress`, {
+    const response = await fetch(progressUrl, {
       headers: { Authorization: `Bearer ${token}` },
       signal: sseAbortController.signal
     })
@@ -493,7 +498,7 @@ async function resumeRunningScan() {
         scanProgress.progress = 1
         scanProgress.message = '正在恢复扫描进度...'
       }
-      subscribeScanProgress(projectId)
+      subscribeScanProgress(projectId, data.scanId)
     } else if (data.aiAnalysisRunning) {
       scanning.value = true
       startAiPhasePoll(projectId)
@@ -556,8 +561,8 @@ async function triggerIncrementalScan() {
   scanProgress.progress = 0
   scanProgress.message = ''
   try {
-    await api.post(`/projects/${projectId}/scans/increment`)
-    subscribeScanProgress(projectId)
+    const res = await api.post(`/projects/${projectId}/scans/increment`)
+    subscribeScanProgress(projectId, res.data?.data?.id)
   } catch (e) {
     scanning.value = false
     message.error('增量扫描触发失败')

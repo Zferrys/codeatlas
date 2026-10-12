@@ -23,7 +23,8 @@ RUN mvn package -DskipTests -B -q
 
 # ---- 运行镜像 ----
 FROM eclipse-temurin:17-jre-alpine
-RUN apk add --no-cache tini curl
+# font-noto-cjk：PDF 报告渲染中文字体（ReportService 按 /usr/share/fonts/noto/NotoSansCJK-Regular.ttc,2 加载）
+RUN apk add --no-cache tini curl font-noto-cjk
 WORKDIR /app
 RUN addgroup --system codeatlas && adduser --system --ingroup codeatlas codeatlas
 COPY --from=backend-builder /app/codeatlas-server/target/*.jar app.jar

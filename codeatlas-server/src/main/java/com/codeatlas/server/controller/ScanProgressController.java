@@ -51,6 +51,7 @@ public class ScanProgressController {
     @GetMapping(value = "/progress", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     @PreAuthorize("isAuthenticated()")
     public SseEmitter streamProgress(@PathVariable Long projectId,
+                                     @RequestParam(required = false) Long scanId,
                                      @AuthenticationPrincipal CodeAtlasUserDetails principal) {
         projectAccessChecker.check(projectId, principal.getUserId());
         SseEmitter emitter = new SseEmitter(30 * 60 * 1000L); // 30 min timeout
@@ -60,23 +61,30 @@ public class ScanProgressController {
         emitter.onTimeout(() -> removeEmitter(projectId, emitter));
         emitter.onError(e -> removeEmitter(projectId, emitter));
 
+        boolean terminalReplayed = false;
         // 发送连接确认
         try {
             emitter.send(SseEmitter.event()
                     .name("connected")
                     .data("{\"projectId\":" + projectId + "}"));
             // 回放最近一次进度快照，客户端刷新/重连后立即恢复到当前阶段；
-            // 终态（COMPLETED/FAILED）不复放：陈旧终态对恢复无意义，还会让偶然连上的订阅者误判为"刚完成"
+            // 非终态一律回放；终态仅在订阅方携带同一次扫描的 scanId 时回放（见 shouldReplay），
+            // 让"连接建立前就已失败/完成"的扫描也能把终态送达订阅者
             ScanProgressEvent snapshot = latestEvents.get(projectId);
-            if (snapshot != null
-                    && !"COMPLETED".equals(snapshot.getStage())
-                    && !"FAILED".equals(snapshot.getStage())) {
+            if (snapshot != null && shouldReplay(snapshot, scanId)) {
                 emitter.send(SseEmitter.event()
                         .name("progress")
                         .data(objectMapper.writeValueAsString(snapshot)));
+                terminalReplayed = isTerminal(snapshot.getStage());
             }
         } catch (IOException e) {
             removeEmitter(projectId, emitter);
+        }
+
+        if (terminalReplayed) {
+            emitter.complete();
+            removeEmitter(projectId, emitter);
+            return emitter;
         }
 
         // SSE 心跳：每 15s 发送注释行，防止中间件/代理因空闲断开连接
@@ -90,6 +98,21 @@ public class ScanProgressController {
         heartbeats.put(emitter, heartbeat);
 
         return emitter;
+    }
+
+    /**
+     * 快照回放判定：非终态快照回放用于恢复当前阶段；终态快照只回放给显式携带
+     * 同一次扫描 scanId 的订阅者——无 scanId 的偶然订阅者收到陈旧终态会误判为"刚完成"
+     */
+    static boolean shouldReplay(ScanProgressEvent snapshot, Long requestedScanId) {
+        if (!isTerminal(snapshot.getStage())) {
+            return true;
+        }
+        return requestedScanId != null && requestedScanId.equals(snapshot.getScanId());
+    }
+
+    static boolean isTerminal(String stage) {
+        return "COMPLETED".equals(stage) || "FAILED".equals(stage);
     }
 
     @Async("scanExecutor")
