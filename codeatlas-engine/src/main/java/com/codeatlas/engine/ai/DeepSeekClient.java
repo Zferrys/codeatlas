@@ -155,9 +155,9 @@ public class DeepSeekClient implements AiClient {
     public boolean healthCheck() {
         try {
             AiRequest req = new AiRequest();
-            req.setPrompt("Hi");
-            // 推理模型在极小预算下会把 token 全花在 reasoning 上、正文为空（空正文按失败处理），
-            // 健康探针必须留足预算，否则会把可用模型误判为不可用
+            // 强制要求正文回复（探测的是「模型能应答」而非内容）；推理模型在极小预算下会把 token
+            // 全花在 reasoning 上、正文为空（空正文按失败处理），探针必须留足预算，否则误判模型不可用
+            req.setPrompt("Reply with the single word: OK");
             req.setMaxTokens(256);
             chat(req);
             return true;
