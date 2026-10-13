@@ -83,7 +83,10 @@ jobs:
           cache: maven
 
       - name: Validate Flyway Migrations
-        run: mvn flyway:migrate flyway:validate -pl codeatlas-server -Dflyway.url=jdbc:mysql://127.0.0.1:3306/codeatlas -Dflyway.user=root -Dflyway.password="$CI_MYSQL_PASSWORD"
+        # flyway 目标需解析 server 的项目依赖（构建迁移 classpath），而全新 runner 的 ~/.m2 没有同仓 SNAPSHOT → 先全量安装同仓模块
+        run: |
+          mvn install -DskipTests
+          mvn flyway:migrate flyway:validate -pl codeatlas-server -Dflyway.url=jdbc:mysql://127.0.0.1:3306/codeatlas -Dflyway.user=root -Dflyway.password="$CI_MYSQL_PASSWORD"
 
   frontend-build:
     runs-on: ubuntu-latest
