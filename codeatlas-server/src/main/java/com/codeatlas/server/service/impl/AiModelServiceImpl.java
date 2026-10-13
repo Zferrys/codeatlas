@@ -59,7 +59,8 @@ public class AiModelServiceImpl implements AiModelService {
     /** 模型清单缓存有效期，避免频繁打开管理页反复请求服务商接口 */
     private static final long MODEL_LIST_CACHE_MS = 60_000L;
     private static final long MODEL_LIST_TIMEOUT_SECONDS = 5L;
-    private static final int TEST_MAX_TOKENS = 16;
+    /** 推理模型的 reasoning 与正文共享预算，测试请求也需留足推理开销 */
+    private static final int TEST_MAX_TOKENS = 512;
 
     private final Map<String, String> providerKeys;
     private final Map<String, String> providerBaseUrls;

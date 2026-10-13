@@ -20,7 +20,7 @@ export default {
     currentProject: '当前项目',
     overview: '项目概览',
     codeMap: '类关系图谱',
-    archStory: '架构解读',
+    archStory: '分析报告',
     rules: '宪法规则',
     violations: '违规列表',
     insights: '智能问答',

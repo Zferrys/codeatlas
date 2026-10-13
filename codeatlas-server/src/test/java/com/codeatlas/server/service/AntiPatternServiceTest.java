@@ -72,8 +72,8 @@ class AntiPatternServiceTest {
     }
 
     @Test
-    @DisplayName("成功路径：maxTokens=3072、type=ANTI_PATTERN、审计阶段=ANTI_PATTERN_DETECT")
-    void analyzeAntiPatterns_success_shouldUse3072AndSaveInsight() {
+    @DisplayName("成功路径：maxTokens=8192、type=ANTI_PATTERN、审计阶段=ANTI_PATTERN_DETECT")
+    void analyzeAntiPatterns_success_shouldUse8192AndSaveInsight() {
         Project project = new Project();
         project.setName("Demo");
         when(projectService.getProjectEntity(PROJECT_ID)).thenReturn(project);
@@ -109,7 +109,7 @@ class AntiPatternServiceTest {
 
         ArgumentCaptor<AiRequest> requestCaptor = ArgumentCaptor.forClass(AiRequest.class);
         verify(aiAnalysisService).callAiWithResilience(requestCaptor.capture());
-        assertEquals(3072, requestCaptor.getValue().getMaxTokens());
+        assertEquals(8192, requestCaptor.getValue().getMaxTokens());
         assertTrue(requestCaptor.getValue().getSystemPrompt().contains("反模式"));
 
         verify(aiAnalysisService).saveAiAuditLog(eq("mock-model"), eq("ANTI_PATTERN_DETECT"),

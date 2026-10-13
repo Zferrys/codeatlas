@@ -95,7 +95,7 @@ public class AiController {
         }
         InsightEntity insight = aiAnalysisService.analyzeArchitecture(projectId, scan.getId());
         if (insight == null) {
-            return ApiResponse.error(500, "AI 分析失败，请确认已配置 AI API Key");
+            return ApiResponse.error(500, "AI 分析失败：模型未返回有效内容或服务暂不可用，请稍后重试");
         }
         Map<String, Object> result = new HashMap<>();
         result.put("id", insight.getId());
@@ -208,7 +208,7 @@ public class AiController {
     private ApiResponse<Map<String, Object>> generateInsight(Supplier<InsightEntity> analysis) {
         InsightEntity insight = analysis.get();
         if (insight == null) {
-            return ApiResponse.error(500, "AI 分析失败，请确认已配置 AI API Key 或 Token 配额充足");
+            return ApiResponse.error(500, "AI 分析失败：服务未就绪或返回为空，请稍后重试");
         }
         Map<String, Object> result = new HashMap<>();
         result.put("id", insight.getId());

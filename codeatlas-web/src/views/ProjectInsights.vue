@@ -1,424 +1,411 @@
 <template>
-  <div class="insights-page">
-    <!-- AI 处理中状态 -->
-    <div v-if="aiProcessing" class="state-wrap" style="text-align:center; padding: 80px 0;">
-      <a-spin size="large">
-        <template #tip>
-          <span style="font-size: 15px;">AI 正在分析中，请稍候...</span>
+  <div class="qa-page">
+    <div class="qa-container">
+      <!-- 提问卡 -->
+      <a-card class="qa-ask-card" :bordered="false">
+        <template #title>
+          <span class="card-title"><QuestionCircleOutlined /> 向代码库提问</span>
         </template>
-      </a-spin>
-      <p style="color: #999; font-size: 13px; margin-top: 16px;">扫描完成后 AI 会自动生成洞察，通常需要 1-3 分钟</p>
+        <p class="ask-hint">
+          AI 会自动搜索代码库中的相关类来回答问题，并对回答做证据校验。问题中包含关键词（功能名、类名）效果更好。
+        </p>
+        <a-textarea
+          v-model:value="question"
+          placeholder="例如：支付相关的代码有哪些？项目中最核心的 Service 类是哪个？数据持久化用了哪些技术？"
+          :rows="3"
+          :maxlength="500"
+          show-count
+          @pressEnter="onPressEnter"
+        />
+        <div class="ask-actions">
+          <a-button type="primary" :loading="asking" :disabled="!question.trim()" @click="ask">
+            {{ asking ? 'AI 搜索与分析中...' : '提问' }}
+          </a-button>
+          <span class="ask-tip">Enter 发送，Shift+Enter 换行 · 通常需要 10–60 秒</span>
+        </div>
+
+        <div v-if="asking" class="answer-loading">
+          <a-spin size="small" />
+          <span>AI 正在搜索代码库并组织回答，请稍候...</span>
+        </div>
+        <div v-else-if="answer" class="answer-box">
+          <div class="markdown-body" v-html="renderMarkdown(answer)"></div>
+          <div v-if="askVerify" class="verify-line">
+            <a-tooltip :title="askVerify.detail">
+              <a-tag :color="askVerify.color" size="small">{{ askVerify.text }}</a-tag>
+            </a-tooltip>
+            <span class="verify-saved">回答已保存到下方对话历史</span>
+          </div>
+        </div>
+      </a-card>
+
+      <!-- 统一对话历史（全局问答 / 类问答 / 影响模拟） -->
+      <a-card class="qa-history-card" :bordered="false">
+        <template #title>
+          <div class="history-head">
+            <span class="card-title"><HistoryOutlined /> 对话历史</span>
+            <a-radio-group v-model:value="historyFilter" size="small" button-style="solid">
+              <a-radio-button value="all">全部</a-radio-button>
+              <a-radio-button value="GLOBAL">全局问答</a-radio-button>
+              <a-radio-button value="CLASS">类问答</a-radio-button>
+              <a-radio-button value="IMPACT">影响模拟</a-radio-button>
+            </a-radio-group>
+          </div>
+        </template>
+        <template #extra>
+          <span class="history-count">{{ filteredHistory.length }} / {{ history.length }} 条</span>
+        </template>
+
+        <a-skeleton v-if="historyLoading" active :paragraph="{ rows: 3 }" />
+        <a-empty v-else-if="filteredHistory.length === 0" description="暂无对话历史">
+          <template #description>
+            <p v-if="history.length === 0">在智能问答提问、或在类关系图谱中做影响模拟后，记录会自动保存在这里统一管理</p>
+            <p v-else>当前筛选下没有记录</p>
+          </template>
+        </a-empty>
+        <div v-else class="history-list">
+          <div v-for="item in filteredHistory" :key="item.id" class="history-item">
+            <div class="history-item-main" @click="openHistory(item)">
+              <div class="history-item-top">
+                <a-tag :color="scopeColor(item.scope)" size="small">{{ scopeLabel(item.scope) }}</a-tag>
+                <a-tag v-if="item.contextFqn" color="purple" size="small">{{ shortName(item.contextFqn) }}</a-tag>
+                <span class="history-question">{{ item.question }}</span>
+              </div>
+              <div class="history-preview">{{ previewText(item.answer) }}</div>
+            </div>
+            <div class="history-item-side">
+              <span class="history-time">{{ formatDate(item.createdAt) }}</span>
+              <a-button type="text" size="small" @click.stop="openHistory(item)">查看</a-button>
+              <a-popconfirm title="删除这条历史记录？" ok-text="删除" cancel-text="取消" @confirm="removeHistory(item.id)">
+                <a-button type="text" size="small" danger @click.stop>
+                  <template #icon><DeleteOutlined /></template>
+                </a-button>
+              </a-popconfirm>
+            </div>
+          </div>
+        </div>
+      </a-card>
     </div>
 
-    <!-- 加载态 -->
-    <a-spin v-else :spinning="loading" tip="AI 正在分析...">
-      <a-skeleton v-if="loading" active :paragraph="{ rows: 6 }" />
-
-      <div v-else-if="error" class="state-wrap">
-        <a-result status="error" title="加载失败" :sub-title="error">
-          <template #extra>
-            <a-button type="primary" @click="fetchInsights">重试</a-button>
-          </template>
-        </a-result>
-      </div>
-
-      <div v-else-if="insights.length === 0" class="state-wrap">
-        <a-empty description="暂无 AI 洞察">
-          <template #description>
-            <p>触发一次扫描后，AI 将自动分析代码并生成洞察</p>
-            <p style="color: #999; font-size: 12px;">也可手动触发以下分析</p>
-          </template>
-          <div class="insights-actions" style="justify-content: center; margin-top: 8px;">
-            <a-button size="small" :loading="generating === 'pattern'" @click="generateAi('pattern')">架构模式识别</a-button>
-            <a-button size="small" :loading="generating === 'anti-pattern'" @click="generateAi('anti-pattern')">反模式检测</a-button>
-            <a-button size="small" :loading="generating === 'constitution-check'" @click="generateAi('constitution-check')">规约检查</a-button>
-          </div>
-        </a-empty>
-      </div>
-
-      <template v-else>
-        <div class="insights-toolbar">
-          <a-radio-group v-model:value="activeType" option-type="button" size="small" @change="onTypeChange">
-            <a-radio-button value="all">全部</a-radio-button>
-            <a-radio-button value="ARCH_STORY">架构叙事</a-radio-button>
-            <a-radio-button value="ANTI_PATTERN">反模式</a-radio-button>
-            <a-radio-button value="PATTERN">设计模式</a-radio-button>
-            <a-radio-button value="CONSTITUTION_CHECK">规约检查</a-radio-button>
-            <a-radio-button value="IMPACT">影响分析</a-radio-button>
-            <a-radio-button value="QA">问答</a-radio-button>
-          </a-radio-group>
-          <div class="insights-actions">
-            <a-button size="small" :loading="generating === 'pattern'" @click="generateAi('pattern')">架构模式识别</a-button>
-            <a-button size="small" :loading="generating === 'anti-pattern'" @click="generateAi('anti-pattern')">反模式检测</a-button>
-            <a-button size="small" :loading="generating === 'constitution-check'" @click="generateAi('constitution-check')">规约检查</a-button>
-          </div>
-          <span class="insight-count">共 {{ filteredInsights.length }} 条</span>
-        </div>
-
-        <a-row :gutter="[16, 16]">
-          <a-col v-for="item in filteredInsights" :key="item.id" :xs="24" :sm="12" :lg="8">
-            <a-card hoverable class="insight-card" @click="openDetail(item)">
-              <template #title>
-                <div class="card-title-row">
-                  <span class="card-type-icon" :style="{ background: typeColor(item.type) }">
-                    {{ typeIcon(item.type) }}
-                  </span>
-                  <span class="card-title-text">{{ item.title }}</span>
-                </div>
-              </template>
-              <template #extra>
-                <a-tag :color="typeColor(item.type)" size="small">{{ typeLabel(item.type) }}</a-tag>
-              </template>
-
-              <div class="insight-preview">
-                {{ renderPreview(item.content) }}
-              </div>
-
-              <div class="insight-confidence">
-                <span class="confidence-label">置信度</span>
-                <div class="confidence-bar-track">
-                  <div
-                    class="confidence-bar-fill"
-                    :style="{ width: formatConfidence(item.confidence), background: confidenceColor(item.confidence) }"
-                  ></div>
-                </div>
-                <span class="confidence-value" :style="{ color: confidenceColor(item.confidence) }">
-                  {{ formatConfidence(item.confidence) }}
-                </span>
-              </div>
-
-              <div class="insight-time">
-                <ClockCircleOutlined style="font-size:12px;color:#bbb" />
-                {{ formatDate(item.createdAt) }}
-              </div>
-            </a-card>
-          </a-col>
-        </a-row>
-      </template>
-    </a-spin>
-
+    <!-- 历史详情弹窗 -->
     <a-modal
-      v-model:open="modalVisible"
-      :title="selectedInsight?.title || '洞察详情'"
-      width="820px"
+      v-model:open="detailVisible"
+      :title="detailItem?.question || '历史详情'"
+      width="760px"
       :footer="null"
-      @afterClose="onModalClose"
     >
-      <div class="insight-detail" v-if="selectedInsight">
-        <div class="insight-meta">
-          <a-tag :color="typeColor(selectedInsight.type)">{{ typeLabel(selectedInsight.type) }}</a-tag>
-          <span>
-            置信度
-            <strong :style="{ color: confidenceColor(selectedInsight.confidence) }">
-              {{ formatConfidence(selectedInsight.confidence) }}
-            </strong>
-          </span>
-          <span><ClockCircleOutlined /> {{ formatDate(selectedInsight.createdAt) }}</span>
-          <span v-if="selectedInsight.relatedClass">相关类: <code>{{ selectedInsight.relatedClass }}</code></span>
+      <div v-if="detailItem" class="history-detail">
+        <div class="detail-meta">
+          <a-tag :color="scopeColor(detailItem.scope)">{{ scopeLabel(detailItem.scope) }}</a-tag>
+          <a-tag v-if="detailItem.contextFqn" color="purple">{{ detailItem.contextFqn }}</a-tag>
+          <span class="detail-time">{{ formatDate(detailItem.createdAt) }}</span>
         </div>
-        <div class="insight-content markdown-body" v-html="renderMarkdown(selectedInsight.content || '')"></div>
+        <div v-if="detailImpactSnapshot" class="impact-snapshot">
+          变更类型：{{ detailImpactSnapshot.changeType || '—' }}
+          <span class="snapshot-sep">|</span>
+          目标方法：{{ detailImpactSnapshot.targetMethod || '—' }}
+          <span class="snapshot-sep">|</span>
+          影响类数：{{ detailImpactSnapshot.totalImpacted || 0 }}
+        </div>
+        <div v-if="detailVerify" class="verify-line">
+          <a-tooltip :title="detailVerify.detail">
+            <a-tag :color="detailVerify.color" size="small">{{ detailVerify.text }}</a-tag>
+          </a-tooltip>
+        </div>
+        <div class="markdown-body" v-html="renderMarkdown(detailItem.answer || '')"></div>
       </div>
     </a-modal>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { ref, computed, watch, onMounted, onActivated } from 'vue'
 import { useRoute } from 'vue-router'
-import { marked } from 'marked'
-import { markedHighlight } from 'marked-highlight'
-import DOMPurify from 'dompurify'
-import hljs from 'highlight.js'
-import 'highlight.js/styles/github.css'
 import { message } from 'ant-design-vue'
-import { ClockCircleOutlined } from '@ant-design/icons-vue'
+import { QuestionCircleOutlined, HistoryOutlined, DeleteOutlined } from '@ant-design/icons-vue'
 import api from '../api'
-
-marked.use(markedHighlight({
-  langPrefix: 'hljs language-',
-  highlight(code, lang) {
-    if (lang && hljs.getLanguage(lang)) {
-      return hljs.highlight(code, { language: lang }).value
-    }
-    return hljs.highlightAuto(code).value
-  }
-}))
+import { renderMarkdown } from '../utils/markdown'
 
 const route = useRoute()
 const projectId = computed(() => route.params.id)
 
-const loading = ref(false)
-const error = ref(null)
-const insights = ref([])
-const activeType = ref('all')
-const selectedInsight = ref(null)
-const modalVisible = ref(false)
-const aiProcessing = ref(false)
-const generating = ref(null)
-let pollTimer = null
+const question = ref('')
+const asking = ref(false)
+const answer = ref('')
+const verification = ref(null)
 
-watch(selectedInsight, (val) => {
-  modalVisible.value = val !== null
+const history = ref([])
+const historyLoading = ref(false)
+const historyFilter = ref('all')
+
+const detailVisible = ref(false)
+const detailItem = ref(null)
+
+watch(projectId, () => {
+  answer.value = ''
+  verification.value = null
+  detailVisible.value = false
+  detailItem.value = null
+  loadHistory()
 })
 
-const filteredInsights = computed(() => {
-  if (activeType.value === 'all') return insights.value
-  return insights.value.filter(i => i.type === activeType.value)
+let firstActivation = true
+onMounted(loadHistory)
+onActivated(() => {
+  // keep-alive 下切回本页时刷新历史；首次激活已由 onMounted 加载，避免重复请求
+  if (firstActivation) {
+    firstActivation = false
+    return
+  }
+  loadHistory()
 })
 
-onMounted(() => checkAiStatus())
-onBeforeUnmount(() => stopPolling())
-
-async function checkAiStatus() {
-  try {
-    const res = await api.get(`/projects/${projectId.value}/scans/status`)
-    const data = res.data.data
-    if (data && data.aiAnalysisRunning) {
-      aiProcessing.value = true
-      startPolling()
-    } else {
-      fetchInsights()
-    }
-  } catch (e) {
-    fetchInsights()
+async function ask() {
+  const q = question.value.trim()
+  if (!q) {
+    message.warning('请输入问题')
+    return
   }
-}
-
-function startPolling() {
-  stopPolling()
-  pollTimer = setInterval(async () => {
-    try {
-      const res = await api.get(`/projects/${projectId.value}/insights`)
-      const list = res.data.data?.records || []
-      if (list.length > 0) {
-        insights.value = list
-        aiProcessing.value = false
-        stopPolling()
-      }
-    } catch (e) {
-      // silent retry
-    }
-  }, 5000)
-}
-
-function stopPolling() {
-  if (pollTimer) {
-    clearInterval(pollTimer)
-    pollTimer = null
-  }
-}
-
-async function fetchInsights() {
-  loading.value = true
-  error.value = null
+  asking.value = true
+  answer.value = ''
+  verification.value = null
   try {
-    const res = await api.get(`/projects/${projectId.value}/insights`)
-    insights.value = res.data.data?.records || []
+    const res = await api.post(`/projects/${projectId.value}/ai/context-qa`, { question: q })
+    answer.value = res.data.data?.answer || '未获取到回答'
+    verification.value = res.data.data?.verification || null
+    await loadHistory()
   } catch (e) {
-    error.value = e.response?.data?.message || '加载 AI 洞察失败'
+    // 错误提示由响应拦截器统一弹出，此处不再重复
   } finally {
-    loading.value = false
+    asking.value = false
   }
 }
 
-async function generateAi(kind) {
-  generating.value = kind
+function onPressEnter(e) {
+  if (!e.shiftKey) {
+    e.preventDefault()
+    if (!asking.value) ask()
+  }
+}
+
+async function loadHistory() {
+  historyLoading.value = true
   try {
-    const res = await api.post(`/projects/${projectId.value}/ai/${kind}`)
-    if (res.data.code === 200) {
-      message.success('生成完成')
-      activeType.value = 'all'
-      await fetchInsights()
-    } else {
-      message.error(res.data.message || 'AI 分析失败')
-    }
+    const [globalRes, classRes, impactRes] = await Promise.all([
+      api.get(`/projects/${projectId.value}/chat-history`, { params: { scope: 'GLOBAL' } }),
+      api.get(`/projects/${projectId.value}/chat-history`, { params: { scope: 'CLASS' } }),
+      api.get(`/projects/${projectId.value}/chat-history`, { params: { scope: 'IMPACT' } })
+    ])
+    const items = [
+      ...(globalRes.data.data || []),
+      ...(classRes.data.data || []),
+      ...(impactRes.data.data || [])
+    ]
+    items.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
+    history.value = items
   } catch (e) {
-    message.error(e.response?.data?.message || 'AI 服务不可用')
+    history.value = []
   } finally {
-    generating.value = null
+    historyLoading.value = false
   }
 }
 
-function onTypeChange() {
-  selectedInsight.value = null
+function openHistory(item) {
+  detailItem.value = item
+  detailVisible.value = true
 }
 
-function openDetail(item) {
-  selectedInsight.value = item
+async function removeHistory(id) {
+  try {
+    await api.delete(`/projects/${projectId.value}/chat-history/${id}`)
+    message.success('已删除')
+    if (detailItem.value?.id === id) {
+      detailVisible.value = false
+      detailItem.value = null
+    }
+    await loadHistory()
+  } catch (e) {
+    // 错误提示由响应拦截器统一弹出，此处不再重复
+  }
 }
 
-function onModalClose() {
-  selectedInsight.value = null
+const filteredHistory = computed(() => {
+  if (historyFilter.value === 'all') return history.value
+  return history.value.filter(i => i.scope === historyFilter.value)
+})
+
+const askVerify = computed(() => verifySummary(verification.value))
+const detailVerify = computed(() => (detailItem.value ? verifySummary(detailItem.value.verification) : null))
+const detailImpactSnapshot = computed(() => {
+  if (!detailItem.value || detailItem.value.scope !== 'IMPACT') return null
+  return parseJson(detailItem.value.verification)
+})
+
+function parseJson(str) {
+  if (!str) return null
+  try {
+    return JSON.parse(str)
+  } catch (e) {
+    return null
+  }
 }
 
-function renderPreview(content) {
+// QA 记录带证据校验字段（unsourced/relationMismatches 等）；IMPACT 的 verification 列存的是结果快照，不算校验数据
+function isQaVerification(v) {
+  return !!v && ('unsourced' in v || 'relationMismatches' in v || 'corrected' in v || 'classRefsChecked' in v)
+}
+
+function verifySummary(v) {
+  const parsed = typeof v === 'string' ? parseJson(v) : v
+  if (!isQaVerification(parsed)) return null
+  const issues = (parsed.unsourced?.length || 0) + (parsed.relationMismatches?.length || 0)
+  let text
+  let color
+  if (parsed.corrected) {
+    text = '证据校验：已自动修正'
+    color = 'blue'
+  } else if (issues > 0) {
+    text = `证据校验：${issues} 项异常`
+    color = 'orange'
+  } else {
+    text = '证据校验通过'
+    color = 'green'
+  }
+  const parts = []
+  if (parsed.unsourced?.length) parts.push('未溯源引用: ' + parsed.unsourced.join('、'))
+  if (parsed.relationMismatches?.length) parts.push('关系声明存疑: ' + parsed.relationMismatches.join('、'))
+  if (!parts.length) {
+    parts.push(`已校验 ${parsed.classRefsChecked || 0} 个类引用、${parsed.relationClaimsChecked || 0} 条关系声明，均通过`)
+  }
+  return { text, color, detail: parts.join('；') }
+}
+
+function scopeLabel(scope) {
+  return { GLOBAL: '全局问答', CLASS: '类问答', IMPACT: '影响模拟' }[scope] || scope
+}
+
+function scopeColor(scope) {
+  return { GLOBAL: 'blue', CLASS: 'purple', IMPACT: 'orange' }[scope] || 'default'
+}
+
+function shortName(fqn) {
+  if (!fqn) return ''
+  const parts = String(fqn).split('.')
+  return parts[parts.length - 1]
+}
+
+function previewText(content) {
   if (!content) return ''
-  const text = content.replace(/<[^>]*>/g, '').replace(/[#*`>_{}]/g, '')
-  return text.substring(0, 140) + (text.length > 140 ? '...' : '')
+  const text = content
+    .replace(/<[^>]*>/g, '')
+    .replace(/[#*`>_{}[\]()!|-]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  return text.substring(0, 120) + (text.length > 120 ? '...' : '')
 }
 
-function renderMarkdown(content) {
-  if (!content) return ''
-  return DOMPurify.sanitize(marked(content))
-}
-
-function typeIcon(type) {
-  const map = {
-    'ARCH_STORY': 'A',
-    'ANTI_PATTERN': '!',
-    'PATTERN': 'P',
-    'CONSTITUTION_CHECK': 'C',
-    'IMPACT': 'I',
-    'QA': '?'
-  }
-  return map[type] || '·'
-}
-
-function typeColor(type) {
-  const map = {
-    'ARCH_STORY': '#1890ff',
-    'ANTI_PATTERN': '#ff4d4f',
-    'PATTERN': '#52c41a',
-    'CONSTITUTION_CHECK': '#13c2c2',
-    'IMPACT': '#fa8c16',
-    'QA': '#722ed1'
-  }
-  return map[type] || '#666'
-}
-
-function typeLabel(type) {
-  const map = {
-    'ARCH_STORY': '架构叙事',
-    'ANTI_PATTERN': '反模式',
-    'PATTERN': '设计模式',
-    'CONSTITUTION_CHECK': '规约检查',
-    'IMPACT': '影响分析',
-    'QA': '问答'
-  }
-  return map[type] || type
-}
-
-function confidenceColor(val) {
-  if (val == null) return '#d9d9d9'
-  const n = Number(val)
-  if (n >= 0.85) return '#52c41a'
-  if (n >= 0.7) return '#1890ff'
-  if (n >= 0.5) return '#fa8c16'
-  return '#ff4d4f'
-}
-
-function formatConfidence(val) {
-  if (val == null) return '0%'
-  return (Number(val) * 100).toFixed(0) + '%'
-}
-
-function formatDate(date) {
-  if (!date) return ''
-  const d = new Date(date)
-  return d.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+function formatDate(t) {
+  if (!t) return ''
+  const d = new Date(t)
+  return d.toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 </script>
 
 <style scoped>
-.insights-page { padding: 0; }
-.state-wrap { padding: 40px 0; }
-.insights-toolbar {
-  display: flex;
+.qa-page { padding: 0; }
+.qa-container { max-width: 960px; margin: 0 auto; }
+.qa-ask-card, .qa-history-card { border-radius: 12px; margin-bottom: 16px; }
+.card-title {
+  font-size: 15px;
+  font-weight: 600;
+  display: inline-flex;
   align-items: center;
-  justify-content: space-between;
-  margin-bottom: 20px;
-  flex-wrap: wrap;
   gap: 8px;
 }
-.insight-count { font-size: 13px; color: #999; }
-.insights-actions { display: flex; gap: 8px; }
-.insight-card {
-  border-radius: 12px;
-  height: 100%;
-  transition: transform 0.2s, box-shadow 0.2s;
-}
-.insight-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 6px 20px rgba(0,0,0,0.08);
-}
-.card-title-row {
+.ask-hint { color: #888; font-size: 13px; margin-bottom: 12px; }
+.ask-actions { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
+.ask-tip { color: #bbb; font-size: 12px; }
+.answer-loading {
   display: flex;
   align-items: center;
   gap: 10px;
-}
-.card-type-icon {
-  width: 28px;
-  height: 28px;
-  border-radius: 6px;
-  color: #fff;
+  margin-top: 20px;
+  padding: 20px;
+  background: #fafafa;
+  border-radius: 8px;
+  color: #888;
   font-size: 13px;
-  font-weight: 700;
+}
+.answer-box {
+  margin-top: 20px;
+  padding: 20px 24px;
+  background: #fafafa;
+  border-radius: 8px;
+  border: 1px solid #f0f0f0;
+}
+.verify-line {
   display: flex;
   align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
+  gap: 12px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed #e8e8e8;
 }
-.card-title-text {
+.verify-saved { color: #bbb; font-size: 12px; }
+.history-head { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.history-count { color: #999; font-size: 13px; }
+.history-list { display: flex; flex-direction: column; }
+.history-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 8px;
+  border-bottom: 1px solid #f5f5f5;
+  transition: background 0.15s;
+}
+.history-item:hover { background: #fafafa; }
+.history-item:last-child { border-bottom: none; }
+.history-item-main { flex: 1; min-width: 0; cursor: pointer; }
+.history-item-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.history-question {
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 500;
+  color: #333;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.insight-preview {
-  color: #666;
-  font-size: 13px;
-  line-height: 1.6;
-  height: 44px;
+.history-preview {
+  font-size: 12px;
+  color: #999;
   overflow: hidden;
-  margin-bottom: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.insight-confidence {
+.history-item-side { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+.history-time { font-size: 12px; color: #bbb; margin-right: 4px; }
+.history-detail .detail-meta {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 8px;
-}
-.confidence-label { font-size: 12px; color: #999; flex-shrink: 0; }
-.confidence-bar-track {
-  flex: 1;
-  height: 4px;
-  background: #f0f0f0;
-  border-radius: 2px;
-  overflow: hidden;
-}
-.confidence-bar-fill {
-  height: 100%;
-  border-radius: 2px;
-  transition: width 0.4s ease;
-}
-.confidence-value { font-size: 12px; font-weight: 600; flex-shrink: 0; }
-.insight-time {
-  font-size: 12px;
-  color: #bbb;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-.insight-detail .insight-meta {
-  display: flex;
-  gap: 16px;
-  align-items: center;
-  margin-bottom: 16px;
-  padding-bottom: 12px;
-  border-bottom: 1px solid #f0f0f0;
-  color: #888;
-  font-size: 13px;
+  margin-bottom: 12px;
   flex-wrap: wrap;
 }
-.insight-meta code {
-  background: #f5f5f5;
-  padding: 1px 6px;
-  border-radius: 3px;
-  font-size: 12px;
-  color: #1677ff;
+.detail-time { color: #bbb; font-size: 12px; }
+.impact-snapshot {
+  font-size: 13px;
+  color: #666;
+  background: #fafafa;
+  border-radius: 6px;
+  padding: 8px 12px;
+  margin-bottom: 12px;
 }
-.insight-content { padding: 8px 0; }
+.snapshot-sep { color: #ddd; margin: 0 8px; }
 .markdown-body { line-height: 1.8; font-size: 14px; color: #333; }
 .markdown-body :deep(h1) { font-size: 22px; font-weight: 600; margin-top: 24px; }
 .markdown-body :deep(h2) { font-size: 18px; font-weight: 600; margin-top: 24px; color: #1a1a2e; }

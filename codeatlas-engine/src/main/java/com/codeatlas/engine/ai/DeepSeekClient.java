@@ -71,7 +71,17 @@ public class DeepSeekClient implements AiClient {
                 }
 
                 String responseBody = response.body() != null ? response.body().string() : "";
-                return parseResponse(responseBody, System.currentTimeMillis() - start);
+                AiResponse parsed = parseResponse(responseBody, System.currentTimeMillis() - start);
+                // 推理模型的 reasoning 与正文共享 max_tokens，预算被推理耗尽时正文为空但仍返回 HTTP 200。
+                // 空正文（含纯空白）必须视为失败，否则调用链会把空结果当成功、静默吞掉多模型降级。
+                if ((parsed.getContent() == null || parsed.getContent().trim().isEmpty()) && !parsed.hasToolCalls()) {
+                    log.error("DeepSeek returned empty content: model={}, finishReason={}, maxTokens={}, completionTokens={}, reasoningTokens={}",
+                            model, parsed.getFinishReason(), request.getMaxTokens(),
+                            parsed.getCompletionTokens(), parsed.getReasoningTokens());
+                    throw new RuntimeException("DeepSeek returned empty content (finishReason="
+                            + parsed.getFinishReason() + ", completionTokens=" + parsed.getCompletionTokens() + ")");
+                }
+                return parsed;
             }
         } catch (IOException e) {
             log.error("DeepSeek API call failed", e);
@@ -146,7 +156,9 @@ public class DeepSeekClient implements AiClient {
         try {
             AiRequest req = new AiRequest();
             req.setPrompt("Hi");
-            req.setMaxTokens(10);
+            // 推理模型在极小预算下会把 token 全花在 reasoning 上、正文为空（空正文按失败处理），
+            // 健康探针必须留足预算，否则会把可用模型误判为不可用
+            req.setMaxTokens(256);
             chat(req);
             return true;
         } catch (Exception e) {
@@ -284,11 +296,13 @@ public class DeepSeekClient implements AiClient {
         int tokensUsed = 0;
         int promptTokens = 0;
         int completionTokens = 0;
+        int reasoningTokens = 0;
         JsonNode usage = root.path("usage");
         if (!usage.isMissingNode()) {
             promptTokens = usage.path("prompt_tokens").asInt(0);
             completionTokens = usage.path("completion_tokens").asInt(0);
             tokensUsed = usage.path("total_tokens").asInt(0);
+            reasoningTokens = usage.path("completion_tokens_details").path("reasoning_tokens").asInt(0);
         }
 
         AiResponse response = new AiResponse();
@@ -296,6 +310,7 @@ public class DeepSeekClient implements AiClient {
         response.setTokensUsed(tokensUsed);
         response.setPromptTokens(promptTokens);
         response.setCompletionTokens(completionTokens);
+        response.setReasoningTokens(reasoningTokens);
         response.setLatencyMs(latencyMs);
         response.setSources(Collections.emptyList());
         if (!toolCalls.isEmpty()) {

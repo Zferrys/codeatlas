@@ -79,6 +79,6 @@ public class AntiPatternService extends AbstractInsightAnalysisService {
 
     @Override
     protected int maxTokens() {
-        return 3072;
+        return 8192;
     }
 }

@@ -113,7 +113,7 @@ public class AgenticSearchService {
             request.setMessages(messages);
             request.setTools(toolRegistry.getToolDefs());
             request.setTemperature(0.3);
-            request.setMaxTokens(2048);
+            request.setMaxTokens(4096);
 
             AiResponse response;
             try {
@@ -178,7 +178,7 @@ public class AgenticSearchService {
             AiRequest finalRequest = new AiRequest();
             finalRequest.setMessages(messages);
             finalRequest.setTemperature(0.3);
-            finalRequest.setMaxTokens(2048);
+            finalRequest.setMaxTokens(4096);
             try {
                 AiResponse finalResponse = aiClient.chat(finalRequest);
                 if (finalResponse != null) {
@@ -219,7 +219,7 @@ public class AgenticSearchService {
                             AiRequest correctionRequest = new AiRequest();
                             correctionRequest.setMessages(correctionMessages);
                             correctionRequest.setTemperature(0.1);
-                            correctionRequest.setMaxTokens(2048);
+                            correctionRequest.setMaxTokens(4096);
                             AiResponse correctionResponse = aiClient.chat(correctionRequest);
                             if (correctionResponse != null && correctionResponse.getContent() != null
                                     && !correctionResponse.getContent().isEmpty()) {

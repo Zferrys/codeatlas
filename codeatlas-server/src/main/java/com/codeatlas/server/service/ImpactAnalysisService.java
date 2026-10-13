@@ -107,7 +107,7 @@ public class ImpactAnalysisService {
                         request.setSystemPrompt(
                                 "你是一位资深软件架构师。分析代码变更的影响范围，评估风险，给出建议。用中文回答，保留类名/方法名原文。");
                         request.setTemperature(0.3);
-                        request.setMaxTokens(2048);
+                        request.setMaxTokens(4096);
 
                         AiResponse response = aiAnalysisService.callAiWithResilience(request);
                         if (response != null) {
@@ -204,7 +204,7 @@ public class ImpactAnalysisService {
             request.setPrompt(prompt);
             request.setSystemPrompt("你是一位资深软件架构师，正在帮助开发者理解代码库。基于提供的项目上下文准确回答问题。");
             request.setTemperature(0.3);
-            request.setMaxTokens(2048);
+            request.setMaxTokens(4096);
 
             AiResponse response = aiAnalysisService.callAiWithResilience(request);
             if (response == null || response.getContent() == null || response.getContent().isEmpty()) {
@@ -267,7 +267,7 @@ public class ImpactAnalysisService {
                     + "\n\n## 修正请求\n" + evidenceVerifier.buildCorrectionPrompt(report));
             correctionRequest.setSystemPrompt("你是一位资深软件架构师，正在帮助开发者理解代码库。基于提供的项目上下文准确回答问题。");
             correctionRequest.setTemperature(0.1);
-            correctionRequest.setMaxTokens(2048);
+            correctionRequest.setMaxTokens(4096);
             AiResponse response = aiAnalysisService.callAiWithResilience(correctionRequest);
             return response != null ? response.getContent() : null;
         } catch (Exception e) {

@@ -1,5 +1,7 @@
 package com.codeatlas.server.service;
 
+import com.codeatlas.common.constant.ErrorCode;
+import com.codeatlas.common.exception.AiException;
 import com.codeatlas.common.exception.BusinessException;
 import com.codeatlas.engine.ai.AiClient;
 import com.codeatlas.engine.ai.AiRequest;
@@ -145,13 +147,15 @@ class ArchitecturePatternServiceTest {
     }
 
     @Test
-    @DisplayName("Token 预算耗尽时返回 null 并落失败审计")
-    void analyzePatterns_budgetExceeded_shouldAuditAndReturnNull() {
+    @DisplayName("Token 预算耗尽时抛预算异常并落失败审计")
+    void analyzePatterns_budgetExceeded_shouldAuditAndThrow() {
         stubProjectScanClasses();
         when(aiClient.getModelName()).thenReturn("mock-model");
         when(tokenBudgetManager.tryConsume(anyLong())).thenReturn(false);
 
-        assertNull(service.analyzePatterns(PROJECT_ID, USER_ID));
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> service.analyzePatterns(PROJECT_ID, USER_ID));
+        assertEquals(ErrorCode.AI_TOKEN_BUDGET_EXCEEDED.getCode(), ex.getCode());
 
         verify(aiAnalysisService).saveAiAuditLog(eq("mock-model"), eq("PATTERN_ANALYSIS"),
                 eq(PROJECT_ID), eq(USER_ID), eq(0L), eq(0L), eq(0L), eq(0L),
@@ -161,14 +165,35 @@ class ArchitecturePatternServiceTest {
     }
 
     @Test
-    @DisplayName("AI 全部熔断（响应为 null）时返回 null 并落失败审计")
-    void analyzePatterns_nullResponse_shouldAuditAndReturnNull() {
+    @DisplayName("AI 全部熔断（响应为 null）时抛 AI 异常并落失败审计")
+    void analyzePatterns_nullResponse_shouldAuditAndThrow() {
         stubProjectScanClasses();
         when(aiClient.getModelName()).thenReturn("mock-model");
         when(tokenBudgetManager.tryConsume(anyLong())).thenReturn(true);
         when(aiAnalysisService.callAiWithResilience(any(AiRequest.class))).thenReturn(null);
 
-        assertNull(service.analyzePatterns(PROJECT_ID, USER_ID));
+        AiException ex = assertThrows(AiException.class,
+                () -> service.analyzePatterns(PROJECT_ID, USER_ID));
+        assertEquals(ErrorCode.AI_API_INTERNAL_ERROR.getCode(), ex.getCode());
+
+        verify(aiAnalysisService).saveAiAuditLog(eq("mock-model"), eq("PATTERN_ANALYSIS"),
+                eq(PROJECT_ID), eq(USER_ID), eq(0L), eq(0L), eq(0L), eq(0L),
+                eq("All AI models exhausted or no content"), eq(false));
+        verify(insightService, never()).saveInsight(any(InsightEntity.class));
+    }
+
+    @Test
+    @DisplayName("响应内容为空（推理截断形态）时同样抛 AI 异常并落失败审计")
+    void analyzePatterns_emptyContent_shouldAuditAndThrow() {
+        stubProjectScanClasses();
+        when(aiClient.getModelName()).thenReturn("mock-model");
+        when(tokenBudgetManager.tryConsume(anyLong())).thenReturn(true);
+        when(aiAnalysisService.callAiWithResilience(any(AiRequest.class)))
+                .thenReturn(aiResponse("", 2048));
+
+        AiException ex = assertThrows(AiException.class,
+                () -> service.analyzePatterns(PROJECT_ID, USER_ID));
+        assertEquals(ErrorCode.AI_API_INTERNAL_ERROR.getCode(), ex.getCode());
 
         verify(aiAnalysisService).saveAiAuditLog(eq("mock-model"), eq("PATTERN_ANALYSIS"),
                 eq(PROJECT_ID), eq(USER_ID), eq(0L), eq(0L), eq(0L), eq(0L),
@@ -205,7 +230,7 @@ class ArchitecturePatternServiceTest {
         ArgumentCaptor<AiRequest> requestCaptor = ArgumentCaptor.forClass(AiRequest.class);
         verify(aiAnalysisService).callAiWithResilience(requestCaptor.capture());
         AiRequest request = requestCaptor.getValue();
-        assertEquals(2048, request.getMaxTokens());
+        assertEquals(8192, request.getMaxTokens());
         assertEquals(0.3, request.getTemperature());
         assertTrue(request.getSystemPrompt().contains("架构模式"));
 

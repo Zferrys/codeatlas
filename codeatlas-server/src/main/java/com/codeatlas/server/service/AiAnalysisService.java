@@ -142,7 +142,7 @@ public class AiAnalysisService {
             log.info("Large project detected: {} classes > {}, triggering chunked analysis for projectId={}",
                     classes.size(), MAX_CLASSES_PER_CHUNK, projectId);
             finalContent = analyzeWithChunking(project, scan, classes);
-            if (finalContent == null) {
+            if (finalContent == null || finalContent.isEmpty()) {
                 log.warn("Chunked AI analysis failed for projectId={}", projectId);
                 return null;
             }
@@ -170,13 +170,13 @@ public class AiAnalysisService {
             request.setPrompt(sanitizedPrompt);
             request.setSystemPrompt("你是一位资深软件架构师。请分析代码库并用中文生成深入、准确的架构叙事报告。所有结论必须引用具体的类和包。专业术语保留英文，类名/包名保留原文。");
             request.setTemperature(0.3);
-            request.setMaxTokens(4096);
+            request.setMaxTokens(8192);
 
             AiResponse response = self.callAiWithResilience(request);
-            if (response == null) {
+            if (response == null || response.getContent() == null || response.getContent().isEmpty()) {
                 log.warn("AI analysis failed after retries for projectId={}, scanId={}", projectId, scanId);
                 self.saveAiAuditLog(aiClient.getModelName(), "ARCHITECTURE_STORY", projectId, null,
-                        0, 0, 0, 0, "All AI models exhausted or circuit breaker open", false);
+                        0, 0, 0, 0, "All AI models exhausted or no content", false);
                 return null;
             }
             log.info("AI analysis completed: projectId={}, tokens={}, latency={}ms",
@@ -200,9 +200,10 @@ public class AiAnalysisService {
                 retryReq.setPrompt(finalContent);
                 retryReq.setSystemPrompt("你是一位资深软件架构师。请分析代码库并用中文生成深入、准确的架构叙事报告。");
                 retryReq.setTemperature(0.1);
-                retryReq.setMaxTokens(4096);
+                retryReq.setMaxTokens(8192);
                 AiResponse retryResponse = self.callAiWithResilience(retryReq);
-                if (retryResponse != null && !hallucinationChecker.check(retryResponse.getContent(), classes).hasHallucination()) {
+                if (retryResponse != null && retryResponse.getContent() != null && !retryResponse.getContent().isEmpty()
+                        && !hallucinationChecker.check(retryResponse.getContent(), classes).hasHallucination()) {
                     finalContent = retryResponse.getContent();
                     totalTokens += retryResponse.getTokensUsed();
                     log.info("Hallucination retry successful for projectId={}", projectId);
@@ -366,7 +367,7 @@ public class AiAnalysisService {
             req.setPrompt(prompt);
             req.setSystemPrompt(systemPrompt);
             req.setTemperature(0.3);
-            req.setMaxTokens(1024);
+            req.setMaxTokens(4096);
 
             AiResponse resp = self.callAiWithResilience(req);
             if (resp != null) {
@@ -395,7 +396,7 @@ public class AiAnalysisService {
         summaryReq.setPrompt(summaryPrompt);
         summaryReq.setSystemPrompt("你是一位资深软件架构师。请整合以下模块分析结果，生成一份专业的架构叙事报告。使用中文。");
         summaryReq.setTemperature(0.3);
-        summaryReq.setMaxTokens(4096);
+        summaryReq.setMaxTokens(8192);
 
         AiResponse summaryResp = self.callAiWithResilience(summaryReq);
         if (summaryResp != null) {

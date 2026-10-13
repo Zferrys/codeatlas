@@ -1,5 +1,7 @@
 package com.codeatlas.server.service;
 
+import com.codeatlas.common.constant.ErrorCode;
+import com.codeatlas.common.exception.AiException;
 import com.codeatlas.common.exception.BusinessException;
 import com.codeatlas.engine.ai.AiClient;
 import com.codeatlas.engine.ai.AiRequest;
@@ -87,7 +89,7 @@ public abstract class AbstractInsightAnalysisService {
             log.warn("AI token monthly budget exceeded, rejecting {} for projectId={}",
                     logLabel().toLowerCase(Locale.ROOT), projectId);
             saveAudit(projectId, userId, null, "Monthly token budget exceeded", false);
-            return null;
+            throw new BusinessException(ErrorCode.AI_TOKEN_BUDGET_EXCEEDED);
         }
 
         AiRequest request = new AiRequest();
@@ -100,7 +102,8 @@ public abstract class AbstractInsightAnalysisService {
         if (response == null || response.getContent() == null || response.getContent().isEmpty()) {
             saveAudit(projectId, userId, null, "All AI models exhausted or no content", false);
             log.warn("{} failed for projectId={}", logLabel(), projectId);
-            return null;
+            throw new AiException(ErrorCode.AI_API_INTERNAL_ERROR,
+                    "AI 模型多次尝试均未返回有效内容，请稍后重试");
         }
         saveAudit(projectId, userId, response, null, true);
 
@@ -197,7 +200,11 @@ public abstract class AbstractInsightAnalysisService {
     /** 落库成功日志标签（如 "Pattern insight"） */
     protected abstract String insightLogLabel();
 
+    /**
+     * 推理模型的 reasoning 与正文共享该预算，预算需覆盖推理开销再留给正文，
+     * 否则会出现"正文为空但 HTTP 200"的截断（上限而非实际花费，调大无额外成本）。
+     */
     protected int maxTokens() {
-        return 2048;
+        return 8192;
     }
 }
