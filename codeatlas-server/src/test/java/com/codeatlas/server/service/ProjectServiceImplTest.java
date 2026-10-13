@@ -73,7 +73,8 @@ class ProjectServiceImplTest {
         request.setName("TestProject");
         request.setDescription("A test project");
         request.setSourceType("GIT_URL");
-        request.setSourceUrl("https://github.com/test/test.git");
+        // 用 example.com：部分开发机 hosts 把 github.com 劫持到 127.0.0.1，会被 SourceUrlValidator 判为内网拒绝
+        request.setSourceUrl("https://example.com/test/test.git");
 
         doAnswer(invocation -> {
             Project p = invocation.getArgument(0);
@@ -106,7 +107,7 @@ class ProjectServiceImplTest {
         CreateProjectRequest request = new CreateProjectRequest();
         request.setName("Test");
         request.setSourceType(null);
-        request.setSourceUrl("https://github.com/test/default.git");
+        request.setSourceUrl("https://example.com/test/default.git");
 
         ProjectVO result = projectService.createProject(request, 1L);
 

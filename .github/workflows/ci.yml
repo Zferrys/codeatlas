@@ -35,10 +35,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           java-version: '17'
           distribution: 'temurin'
@@ -73,28 +73,26 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           java-version: '17'
           distribution: 'temurin'
           cache: maven
 
       - name: Validate Flyway Migrations
-        run: mvn flyway:validate -pl codeatlas-server -Dflyway.url=jdbc:mysql://127.0.0.1:3306/codeatlas -Dflyway.user=root -Dflyway.password="$CI_MYSQL_PASSWORD"
-        env:
-          CI_MYSQL_PASSWORD: ${{ env.CI_MYSQL_PASSWORD }}
+        run: mvn flyway:migrate flyway:validate -pl codeatlas-server -Dflyway.url=jdbc:mysql://127.0.0.1:3306/codeatlas -Dflyway.user=root -Dflyway.password="$CI_MYSQL_PASSWORD"
 
   frontend-build:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: '20'
           cache: npm
@@ -108,19 +106,21 @@ jobs:
 
   dependency-check:
     runs-on: ubuntu-latest
+    # NVD 库下载慢且无 API key 易限流，新 CVE 会随机刷红无代码变更的提交 → 扫描照跑但不拦门
+    continue-on-error: true
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           java-version: '17'
           distribution: 'temurin'
           cache: maven
 
       - name: OWASP Dependency Check
-        run: mvn dependency-check:check -pl codeatlas-server
+        run: mvn install -DskipTests dependency-check:check
 
   docker-build:
     runs-on: ubuntu-latest
@@ -129,13 +129,13 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
       - name: Build Docker Image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: .
           push: false
