@@ -254,7 +254,7 @@ public class AiAnalysisService {
         return null;
     }
 
-    private Map<String, String> buildPromptVariables(Project project, ScanRecord scan, List<ClassSummaryEntity> classes) {
+    public Map<String, String> buildPromptVariables(Project project, ScanRecord scan, List<ClassSummaryEntity> classes) {
         Map<String, String> vars = new HashMap<>();
         vars.put("projectName", project.getName());
         vars.put("language", project.getLanguage() != null ? project.getLanguage() : "Java");
@@ -421,7 +421,7 @@ public class AiAnalysisService {
         }
     }
 
-    private BigDecimal calculateConfidenceSimple(String content, List<ClassSummaryEntity> classes) {
+    public BigDecimal calculateConfidenceSimple(String content, List<ClassSummaryEntity> classes) {
         if (content == null || content.isEmpty()) {
             return BigDecimal.valueOf(0.50);
         }

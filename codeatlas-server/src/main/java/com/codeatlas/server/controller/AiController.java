@@ -7,6 +7,9 @@ import com.codeatlas.server.entity.ScanRecord;
 import com.codeatlas.server.security.CodeAtlasUserDetails;
 import com.codeatlas.server.service.AgenticSearchService;
 import com.codeatlas.server.service.AiAnalysisService;
+import com.codeatlas.server.service.AntiPatternService;
+import com.codeatlas.server.service.ArchitecturePatternService;
+import com.codeatlas.server.service.ConstitutionCheckService;
 import com.codeatlas.server.service.ImpactAnalysisService;
 import com.codeatlas.server.service.InsightService;
 import com.codeatlas.server.service.ProjectAccessChecker;
@@ -20,6 +23,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.function.Supplier;
 
 @RestController
 @RequestMapping("/api/v1/projects/{projectId}/ai")
@@ -32,6 +36,9 @@ public class AiController {
     private final ProjectService projectService;
     private final ScanService scanService;
     private final AgenticSearchService agenticSearchService;
+    private final ArchitecturePatternService architecturePatternService;
+    private final AntiPatternService antiPatternService;
+    private final ConstitutionCheckService constitutionCheckService;
     private final ProjectAccessChecker projectAccessChecker;
 
     public AiController(AiAnalysisService aiAnalysisService,
@@ -40,6 +47,9 @@ public class AiController {
                         ProjectService projectService,
                         ScanService scanService,
                         AgenticSearchService agenticSearchService,
+                        ArchitecturePatternService architecturePatternService,
+                        AntiPatternService antiPatternService,
+                        ConstitutionCheckService constitutionCheckService,
                         ProjectAccessChecker projectAccessChecker) {
         this.aiAnalysisService = aiAnalysisService;
         this.impactAnalysisService = impactAnalysisService;
@@ -47,6 +57,9 @@ public class AiController {
         this.projectService = projectService;
         this.scanService = scanService;
         this.agenticSearchService = agenticSearchService;
+        this.architecturePatternService = architecturePatternService;
+        this.antiPatternService = antiPatternService;
+        this.constitutionCheckService = constitutionCheckService;
         this.projectAccessChecker = projectAccessChecker;
     }
 
@@ -108,7 +121,7 @@ public class AiController {
 
         projectAccessChecker.check(projectId, principal.getUserId());
         Map<String, Object> result = impactAnalysisService.analyzeImpact(
-                projectId, targetClass, changeType, targetMethod, description);
+                projectId, targetClass, changeType, targetMethod, description, principal.getUserId());
         return ApiResponse.success(result);
     }
 
@@ -134,7 +147,87 @@ public class AiController {
         }
 
         // 指定了类名 → 精确上下文匹配（兼容原有行为）
-        Map<String, Object> result = impactAnalysisService.contextualQa(projectId, question, classFqn);
+        Map<String, Object> result = impactAnalysisService.contextualQa(projectId, question, classFqn, principal.getUserId());
         return ApiResponse.success(result);
+    }
+
+    @GetMapping("/pattern")
+    @Operation(summary = "获取最新架构模式识别")
+    @PreAuthorize("isAuthenticated()")
+    public ApiResponse<Map<String, Object>> getPattern(@PathVariable Long projectId,
+                                                       @AuthenticationPrincipal CodeAtlasUserDetails principal) {
+        projectAccessChecker.check(projectId, principal.getUserId());
+        return ApiResponse.success(latestInsightMap(projectId, "PATTERN"));
+    }
+
+    @PostMapping("/pattern")
+    @Operation(summary = "生成/刷新架构模式识别")
+    @PreAuthorize("hasAnyRole('ADMIN','ARCHITECT','DEVELOPER')")
+    public ApiResponse<Map<String, Object>> generatePattern(@PathVariable Long projectId,
+                                                            @AuthenticationPrincipal CodeAtlasUserDetails principal) {
+        projectAccessChecker.check(projectId, principal.getUserId());
+        return generateInsight(() -> architecturePatternService.analyzePatterns(projectId, principal.getUserId()));
+    }
+
+    @GetMapping("/anti-pattern")
+    @Operation(summary = "获取最新反模式检测")
+    @PreAuthorize("isAuthenticated()")
+    public ApiResponse<Map<String, Object>> getAntiPattern(@PathVariable Long projectId,
+                                                           @AuthenticationPrincipal CodeAtlasUserDetails principal) {
+        projectAccessChecker.check(projectId, principal.getUserId());
+        return ApiResponse.success(latestInsightMap(projectId, "ANTI_PATTERN"));
+    }
+
+    @PostMapping("/anti-pattern")
+    @Operation(summary = "生成/刷新反模式检测")
+    @PreAuthorize("hasAnyRole('ADMIN','ARCHITECT','DEVELOPER')")
+    public ApiResponse<Map<String, Object>> generateAntiPattern(@PathVariable Long projectId,
+                                                                @AuthenticationPrincipal CodeAtlasUserDetails principal) {
+        projectAccessChecker.check(projectId, principal.getUserId());
+        return generateInsight(() -> antiPatternService.analyzeAntiPatterns(projectId, principal.getUserId()));
+    }
+
+    @GetMapping("/constitution-check")
+    @Operation(summary = "获取最新规约合规检查")
+    @PreAuthorize("isAuthenticated()")
+    public ApiResponse<Map<String, Object>> getConstitutionCheck(@PathVariable Long projectId,
+                                                                 @AuthenticationPrincipal CodeAtlasUserDetails principal) {
+        projectAccessChecker.check(projectId, principal.getUserId());
+        return ApiResponse.success(latestInsightMap(projectId, "CONSTITUTION_CHECK"));
+    }
+
+    @PostMapping("/constitution-check")
+    @Operation(summary = "生成/刷新规约合规检查")
+    @PreAuthorize("hasAnyRole('ADMIN','ARCHITECT','DEVELOPER')")
+    public ApiResponse<Map<String, Object>> generateConstitutionCheck(@PathVariable Long projectId,
+                                                                      @AuthenticationPrincipal CodeAtlasUserDetails principal) {
+        projectAccessChecker.check(projectId, principal.getUserId());
+        return generateInsight(() -> constitutionCheckService.analyzeConstitution(projectId, principal.getUserId()));
+    }
+
+    private ApiResponse<Map<String, Object>> generateInsight(Supplier<InsightEntity> analysis) {
+        InsightEntity insight = analysis.get();
+        if (insight == null) {
+            return ApiResponse.error(500, "AI 分析失败，请确认已配置 AI API Key 或 Token 配额充足");
+        }
+        Map<String, Object> result = new HashMap<>();
+        result.put("id", insight.getId());
+        result.put("title", insight.getTitle());
+        result.put("confidence", insight.getConfidence());
+        return ApiResponse.success(result);
+    }
+
+    private Map<String, Object> latestInsightMap(Long projectId, String type) {
+        InsightEntity insight = insightService.getLatestByType(projectId, type);
+        if (insight == null) {
+            return null;
+        }
+        Map<String, Object> result = new HashMap<>();
+        result.put("id", insight.getId());
+        result.put("title", insight.getTitle());
+        result.put("content", insight.getContent());
+        result.put("confidence", insight.getConfidence());
+        result.put("createdAt", insight.getCreatedAt() != null ? insight.getCreatedAt().toString() : null);
+        return result;
     }
 }

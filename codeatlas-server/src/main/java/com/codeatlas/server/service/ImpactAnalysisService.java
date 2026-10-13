@@ -1,13 +1,19 @@
 package com.codeatlas.server.service;
 
 import com.codeatlas.common.exception.BusinessException;
+import com.codeatlas.engine.ai.AiClient;
 import com.codeatlas.engine.ai.AiRequest;
 import com.codeatlas.engine.ai.AiResponse;
+import com.codeatlas.engine.ai.PromptTemplate;
+import com.codeatlas.server.config.TokenBudgetManager;
+import com.codeatlas.server.entity.ChatHistoryEntity;
 import com.codeatlas.server.entity.ClassSummaryEntity;
 import com.codeatlas.server.entity.Project;
 import com.codeatlas.server.entity.ScanRecord;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
@@ -19,20 +25,30 @@ public class ImpactAnalysisService {
     private static final Logger log = LoggerFactory.getLogger(ImpactAnalysisService.class);
     private static final int MAX_BFS_DEPTH = 5;
     private static final int MAX_INPUT_LENGTH = 2000;
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
     private final AiAnalysisService aiAnalysisService;
     private final ProjectService projectService;
     private final ScanService scanService;
     private final EvidenceVerifier evidenceVerifier;
+    private final TokenBudgetManager tokenBudgetManager;
+    private final AiClient aiClient;
+    private final ChatHistoryService chatHistoryService;
 
     public ImpactAnalysisService(AiAnalysisService aiAnalysisService,
                                   ProjectService projectService,
                                   ScanService scanService,
-                                  EvidenceVerifier evidenceVerifier) {
+                                  EvidenceVerifier evidenceVerifier,
+                                  TokenBudgetManager tokenBudgetManager,
+                                  @Autowired(required = false) AiClient aiClient,
+                                  ChatHistoryService chatHistoryService) {
         this.aiAnalysisService = aiAnalysisService;
         this.projectService = projectService;
         this.scanService = scanService;
         this.evidenceVerifier = evidenceVerifier;
+        this.tokenBudgetManager = tokenBudgetManager;
+        this.aiClient = aiClient;
+        this.chatHistoryService = chatHistoryService;
     }
 
     /**
@@ -40,7 +56,7 @@ public class ImpactAnalysisService {
      */
     public Map<String, Object> analyzeImpact(Long projectId, String targetClass,
                                               String changeType, String targetMethod,
-                                              String description) {
+                                              String description, Long userId) {
         Project project = projectService.getProjectEntity(projectId);
         if (project == null) {
             throw new BusinessException(404, "项目不存在");
@@ -66,25 +82,60 @@ public class ImpactAnalysisService {
         result.put("totalImpacted", totalImpacted);
         result.put("impactPaths", impactPaths);
 
+        boolean aiAnswered = false;
         if (target != null) {
-            try {
-                String prompt = buildImpactPrompt(project.getName(), target, classes, impactPaths,
-                        changeType, targetMethod, description);
-                AiRequest request = new AiRequest();
-                request.setPrompt(prompt);
-                request.setSystemPrompt(
-                        "你是一位资深软件架构师。分析代码变更的影响范围，评估风险，给出建议。用中文回答，保留类名/方法名原文。");
-                request.setTemperature(0.3);
-                request.setMaxTokens(2048);
+            String prompt = buildImpactPrompt(project.getName(), target, classes, impactPaths,
+                    changeType, targetMethod, description);
+            if (prompt.isEmpty()) {
+                log.warn("Impact AI analysis skipped: empty prompt for projectId={}", projectId);
+            } else if (aiClient == null) {
+                log.info("Impact AI analysis skipped: no AI client for projectId={}", projectId);
+            } else {
+                int estimatedTokens = prompt.length() * 2 / 3 + 4096;
+                if (!tokenBudgetManager.tryConsume(estimatedTokens)) {
+                    log.warn("AI token monthly budget exceeded, rejecting impact analysis for projectId={}", projectId);
+                    saveAudit("IMPACT_ANALYSIS", projectId, userId, null, "Monthly token budget exceeded", false);
+                    result.put("aiAnalysis", "本月 AI Token 配额已用完，请下月再试。");
+                } else {
+                    try {
+                        AiRequest request = new AiRequest();
+                        request.setPrompt(prompt);
+                        request.setSystemPrompt(
+                                "你是一位资深软件架构师。分析代码变更的影响范围，评估风险，给出建议。用中文回答，保留类名/方法名原文。");
+                        request.setTemperature(0.3);
+                        request.setMaxTokens(2048);
 
-                AiResponse response = aiAnalysisService.callAiWithResilience(request);
-                if (response != null) {
-                    result.put("aiAnalysis", response.getContent());
+                        AiResponse response = aiAnalysisService.callAiWithResilience(request);
+                        if (response != null) {
+                            result.put("aiAnalysis", response.getContent());
+                            saveAudit("IMPACT_ANALYSIS", projectId, userId, response, null, true);
+                            aiAnswered = response.getContent() != null && !response.getContent().isEmpty();
+                        } else {
+                            saveAudit("IMPACT_ANALYSIS", projectId, userId, null,
+                                    "All AI models exhausted or circuit breaker open", false);
+                            result.put("aiAnalysis", "AI 分析暂不可用，以下为静态依赖分析结果");
+                        }
+                    } catch (Exception e) {
+                        log.warn("AI impact analysis failed: {}", e.getMessage());
+                        result.put("aiAnalysis", "AI 分析暂不可用，以下为静态依赖分析结果");
+                    }
                 }
-            } catch (Exception e) {
-                log.warn("AI impact analysis failed: {}", e.getMessage());
-                result.put("aiAnalysis", "AI 分析暂不可用，以下为静态依赖分析结果");
             }
+        }
+
+        // 仅记录真实 AI 回答（降级路径不落历史）；verification 列存结果快照供前端还原完整视图
+        if (aiAnswered) {
+            Map<String, Object> snapshot = new LinkedHashMap<>();
+            snapshot.put("targetClass", result.get("targetClass"));
+            snapshot.put("changeType", changeType);
+            snapshot.put("targetMethod", targetMethod);
+            snapshot.put("description", description);
+            snapshot.put("totalImpacted", totalImpacted);
+            snapshot.put("impactPaths", impactPaths);
+            recordChatHistory(projectId, userId, ChatHistoryService.SCOPE_IMPACT,
+                    (String) result.get("targetClass"),
+                    buildImpactQuestion((String) result.get("targetClass"), changeType, targetMethod, description),
+                    (String) result.get("aiAnalysis"), snapshot);
         }
 
         return result;
@@ -93,7 +144,7 @@ public class ImpactAnalysisService {
     /**
      * 上下文限定问答：基于项目代码上下文回答用户问题。
      */
-    public Map<String, Object> contextualQa(Long projectId, String question, String classFqn) {
+    public Map<String, Object> contextualQa(Long projectId, String question, String classFqn, Long userId) {
         question = sanitizeUserInput(question);
 
         Project project = projectService.getProjectEntity(projectId);
@@ -103,34 +154,42 @@ public class ImpactAnalysisService {
 
         List<ClassSummaryEntity> classes = scanService.getClassSummaries(projectId);
 
-        StringBuilder context = new StringBuilder();
-        context.append("项目: ").append(project.getName()).append("\n");
-        context.append("语言: ").append(project.getLanguage() != null ? project.getLanguage() : "Java").append("\n");
-        context.append("总类数: ").append(classes.size()).append("\n\n");
-
+        ClassSummaryEntity targetClass = null;
         if (classFqn != null && !classFqn.isEmpty()) {
-            ClassSummaryEntity targetClass = classes.stream()
+            targetClass = classes.stream()
                     .filter(c -> c.getFqn().equals(classFqn))
                     .findFirst().orElse(null);
-            if (targetClass != null) {
-                context.append("当前关注的类:\n");
-                context.append(formatClassDetail(targetClass));
-                context.append("\n该类的直接依赖:\n");
-                List<String> deps = aiAnalysisService.parseDeps(targetClass.getDependencies());
-                for (String dep : deps) {
-                    ClassSummaryEntity depClass = classes.stream()
-                            .filter(c -> c.getFqn().equals(dep))
-                            .findFirst().orElse(null);
-                    if (depClass != null) {
-                        context.append("- ").append(depClass.getSimpleName())
-                                .append(" (").append(depClass.getLayer()).append(")\n");
-                    }
-                }
-            }
         }
 
-        String prompt = "## 项目上下文\n" + context + "\n## 用户问题\n" + question
-                + "\n\n请基于以上项目上下文回答问题。如果问题超出上下文范围，请说明。回答要具体，引用类名和方法名。用中文回答。";
+        Map<String, String> vars = new HashMap<>();
+        vars.put("projectName", project.getName());
+        vars.put("language", project.getLanguage() != null ? project.getLanguage() : "Java");
+        vars.put("contextClass", targetClass != null ? formatClassDetail(targetClass)
+                : "- 类名: " + classFqn + "（未在当前扫描结果中找到该类）\n");
+        vars.put("relatedDependencies", buildRelatedDependencies(targetClass, classes));
+        vars.put("userQuestion", question);
+
+        PromptTemplate template = new PromptTemplate("prompts/context-qa.md");
+        String prompt = template.render(vars);
+
+        Map<String, Object> result = new HashMap<>();
+        result.put("question", question);
+        result.put("classFqn", classFqn);
+
+        if (aiClient == null || prompt.isEmpty()) {
+            log.warn("Context QA skipped: aiClient={}, emptyPrompt={}, projectId={}",
+                    aiClient == null, prompt.isEmpty(), projectId);
+            result.put("answer", "AI 服务暂不可用，请稍后重试");
+            return result;
+        }
+
+        int estimatedTokens = prompt.length() * 2 / 3 + 4096;
+        if (!tokenBudgetManager.tryConsume(estimatedTokens)) {
+            log.warn("AI token monthly budget exceeded, rejecting context QA for projectId={}", projectId);
+            saveAudit("CONTEXT_QA", projectId, userId, null, "Monthly token budget exceeded", false);
+            result.put("answer", "本月 AI Token 配额已用完，请下月再试。");
+            return result;
+        }
 
         try {
             AiRequest request = new AiRequest();
@@ -140,19 +199,18 @@ public class ImpactAnalysisService {
             request.setMaxTokens(2048);
 
             AiResponse response = aiAnalysisService.callAiWithResilience(request);
-            Map<String, Object> result = new HashMap<>();
-            result.put("question", question);
-            result.put("classFqn", classFqn);
             if (response == null || response.getContent() == null || response.getContent().isEmpty()) {
+                saveAudit("CONTEXT_QA", projectId, userId, null, "All AI models exhausted or no content", false);
                 result.put("answer", "AI 服务暂不可用，请稍后重试");
                 return result;
             }
+            saveAudit("CONTEXT_QA", projectId, userId, response, null, true);
 
             String answer = response.getContent();
             // 输出侧证据验证：答案对照项目数据与本次注入的上下文
             if (!classes.isEmpty()) {
                 try {
-                    List<String> evidence = Collections.singletonList(context.toString());
+                    List<String> evidence = Collections.singletonList(prompt);
                     EvidenceVerifier.VerificationReport report = evidenceVerifier.verify(answer, evidence, classes);
                     boolean corrected = false;
                     int correctionRounds = 0;
@@ -179,6 +237,8 @@ public class ImpactAnalysisService {
                 }
             }
             result.put("answer", answer);
+            recordChatHistory(projectId, userId, ChatHistoryService.SCOPE_CLASS, classFqn,
+                    question, answer, result.get("verification"));
             return result;
         } catch (Exception e) {
             log.error("Context QA failed: {}", e.getMessage());
@@ -259,26 +319,16 @@ public class ImpactAnalysisService {
                                       List<ClassSummaryEntity> allClasses,
                                       List<Map<String, Object>> impactPaths,
                                       String changeType, String targetMethod, String description) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("## 项目: ").append(projectName).append("\n");
-        sb.append("## 目标类: ").append(target.getFqn()).append("\n");
-        sb.append("- 分层: ").append(target.getLayer()).append("\n");
-        sb.append("- 方法数: ").append(target.getTotalMethods()).append("\n");
-        sb.append("- 行数: ").append(target.getLineCount()).append("\n");
-        sb.append("\n## 变更类型: ").append(changeType).append("\n");
-        if (targetMethod != null) {
-            sb.append("## 目标方法: ").append(targetMethod).append("\n");
-        }
-        if (description != null && !description.isEmpty()) {
-            sb.append("## 变更描述: ").append(description).append("\n");
-        }
-        sb.append("\n## 影响链路（BFS 遍历，depth ≤ 5）\n");
-        for (Map<String, Object> path : impactPaths) {
-            sb.append("- ").append(path.get("source")).append(" → ").append(path.get("target"))
-                    .append(" (depth=").append(path.get("depth")).append(")\n");
-        }
-        sb.append("\n请分析此变更的风险等级(HIGH/MEDIUM/LOW)、影响范围、以及建议的测试范围。");
-        return sb.toString();
+        Map<String, String> vars = new HashMap<>();
+        vars.put("projectName", projectName);
+        vars.put("classCount", String.valueOf(allClasses.size()));
+        vars.put("targetClass", formatClassDetail(target));
+        vars.put("changeType", changeType != null && !changeType.isEmpty() ? changeType : "MODIFY_METHOD");
+        vars.put("targetMethod", targetMethod != null && !targetMethod.isEmpty() ? targetMethod : "未指定");
+        vars.put("changeDescription", description != null && !description.isEmpty() ? description : "未提供");
+        vars.put("dependencyHighlights", formatImpactPaths(impactPaths));
+        PromptTemplate template = new PromptTemplate("prompts/impact-analysis.md");
+        return template.render(vars);
     }
 
     private String formatClassDetail(ClassSummaryEntity cls) {
@@ -292,6 +342,82 @@ public class ImpactAnalysisService {
         List<String> methodNames = aiAnalysisService.parseDeps(cls.getMethodNames());
         if (!methodNames.isEmpty()) {
             sb.append("- 方法列表: ").append(String.join(", ", methodNames)).append("\n");
+        }
+        return sb.toString();
+    }
+
+    private String buildRelatedDependencies(ClassSummaryEntity targetClass,
+                                            List<ClassSummaryEntity> classes) {
+        if (targetClass == null) {
+            return "（未指定具体类）\n";
+        }
+        List<String> deps = aiAnalysisService.parseDeps(targetClass.getDependencies());
+        StringBuilder sb = new StringBuilder();
+        for (String dep : deps) {
+            ClassSummaryEntity depClass = classes.stream()
+                    .filter(c -> c.getFqn().equals(dep))
+                    .findFirst().orElse(null);
+            if (depClass != null) {
+                sb.append("- ").append(depClass.getSimpleName())
+                        .append(" (").append(depClass.getLayer()).append(")\n");
+            }
+        }
+        return sb.length() > 0 ? sb.toString() : "（无项目内直接依赖）\n";
+    }
+
+    private String formatImpactPaths(List<Map<String, Object>> impactPaths) {
+        if (impactPaths.isEmpty()) {
+            return "（BFS 未发现依赖待修改类的其他类）\n";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (Map<String, Object> path : impactPaths) {
+            sb.append("- ").append(path.get("source")).append(" → ").append(path.get("target"))
+                    .append(" (depth=").append(path.get("depth")).append(")\n");
+        }
+        return sb.toString();
+    }
+
+    private void saveAudit(String stage, Long projectId, Long userId,
+                           AiResponse response, String errorMessage, boolean success) {
+        aiAnalysisService.saveAiAuditLog(aiClient.getModelName(), stage, projectId, userId,
+                response != null ? response.getPromptTokens() : 0,
+                response != null ? response.getCompletionTokens() : 0,
+                response != null ? response.getTokensUsed() : 0,
+                response != null ? response.getLatencyMs() : 0,
+                errorMessage, success);
+    }
+
+    private void recordChatHistory(Long projectId, Long userId, String scope, String contextFqn,
+                                   String question, String answer, Object verification) {
+        try {
+            ChatHistoryEntity entity = new ChatHistoryEntity();
+            entity.setProjectId(projectId);
+            entity.setUserId(userId);
+            entity.setScope(scope);
+            entity.setContextFqn(contextFqn);
+            entity.setQuestion(question);
+            entity.setAnswer(answer);
+            if (verification != null) {
+                entity.setVerification(OBJECT_MAPPER.writeValueAsString(verification));
+            }
+            chatHistoryService.record(entity);
+        } catch (Exception e) {
+            log.warn("Failed to record chat history (non-fatal): {}", e.getMessage());
+        }
+    }
+
+    private String buildImpactQuestion(String targetClass, String changeType,
+                                       String targetMethod, String description) {
+        StringBuilder sb = new StringBuilder("变更影响分析: ")
+                .append(targetClass != null ? targetClass : "未指定");
+        if (changeType != null && !changeType.isEmpty()) {
+            sb.append(" [").append(changeType).append("]");
+        }
+        if (targetMethod != null && !targetMethod.isEmpty()) {
+            sb.append(" 方法: ").append(targetMethod);
+        }
+        if (description != null && !description.isEmpty()) {
+            sb.append(" — ").append(description);
         }
         return sb.toString();
     }

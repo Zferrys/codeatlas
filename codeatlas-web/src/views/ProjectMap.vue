@@ -19,7 +19,7 @@
         </a-radio-group>
         <a-divider type="vertical" />
         <a-tooltip title="变更影响模拟">
-          <a-button size="small" @click="showImpactModal = true" :disabled="!hasData">
+          <a-button size="small" @click="openImpactModal" :disabled="!hasData">
             <template #icon><ThunderboltOutlined /></template>
             影响模拟
           </a-button>
@@ -147,6 +147,23 @@
 
         <a-button style="margin-top:16px" @click="impactResult = null">重新分析</a-button>
       </div>
+
+      <a-collapse v-model:activeKey="impactHistoryActive" ghost class="history-collapse">
+        <a-collapse-panel key="h" :header="'历史记录（' + impactHistory.length + '）'">
+          <a-empty v-if="impactHistory.length === 0" description="暂无历史记录" :image-style="{ height: '36px' }" />
+          <div v-else class="history-list">
+            <div v-for="item in impactHistory" :key="item.id" class="history-item" @click="restoreImpactHistory(item)">
+              <div class="history-item-main">
+                <div class="history-question">{{ item.question }}</div>
+                <div class="history-time">{{ formatHistoryTime(item.createdAt) }}</div>
+              </div>
+              <a-button type="text" size="small" @click.stop="deleteHistory(item.id, loadImpactHistory)">
+                <template #icon><DeleteOutlined /></template>
+              </a-button>
+            </div>
+          </div>
+        </a-collapse-panel>
+      </a-collapse>
     </a-modal>
 
     <a-modal
@@ -185,6 +202,26 @@
           </a-tooltip>
         </div>
       </div>
+
+      <a-collapse v-model:activeKey="qaHistoryActive" ghost class="history-collapse">
+        <a-collapse-panel key="h" :header="'历史记录（' + qaHistory.length + '）'">
+          <a-empty v-if="qaHistory.length === 0" description="暂无历史记录" :image-style="{ height: '36px' }" />
+          <div v-else class="history-list">
+            <div v-for="item in qaHistory" :key="item.id" class="history-item" @click="restoreQaHistory(item)">
+              <div class="history-item-main">
+                <div class="history-question">
+                  <a-tag v-if="item.contextFqn" color="purple" size="small">{{ shortName(item.contextFqn) }}</a-tag>
+                  {{ item.question }}
+                </div>
+                <div class="history-time">{{ formatHistoryTime(item.createdAt) }}</div>
+              </div>
+              <a-button type="text" size="small" @click.stop="deleteHistory(item.id, loadQaHistory)">
+                <template #icon><DeleteOutlined /></template>
+              </a-button>
+            </div>
+          </div>
+        </a-collapse-panel>
+      </a-collapse>
     </a-modal>
   </div>
 </template>
@@ -193,7 +230,7 @@
 import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { message } from 'ant-design-vue'
-import { ThunderboltOutlined, QuestionCircleOutlined } from '@ant-design/icons-vue'
+import { ThunderboltOutlined, QuestionCircleOutlined, DeleteOutlined } from '@ant-design/icons-vue'
 import CodeMap from '../components/map/CodeMap.vue'
 import CodeMap3D from '../components/map/CodeMap3D.vue'
 import api from '../api'
@@ -264,6 +301,12 @@ const impactForm = reactive({
 function runImpactSim(node) {
   impactForm.targetClass = node?.id || node?.label || ''
   showImpactModal.value = true
+  loadImpactHistory()
+}
+
+function openImpactModal() {
+  showImpactModal.value = true
+  loadImpactHistory()
 }
 
 async function doImpactSim() {
@@ -275,6 +318,7 @@ async function doImpactSim() {
   try {
     const res = await api.post(`/projects/${projectId}/ai/impact-simulate`, impactForm)
     impactResult.value = res.data.data
+    loadImpactHistory()
   } catch (e) {
     message.error('影响分析失败: ' + (e.response?.data?.message || '网络错误'))
   } finally {
@@ -288,6 +332,10 @@ const qaQuestion = ref('')
 const qaLoading = ref(false)
 const qaAnswer = ref('')
 const qaVerification = ref(null)
+const qaHistory = ref([])
+const qaHistoryActive = ref([])
+const impactHistory = ref([])
+const impactHistoryActive = ref([])
 
 const qaVerifyText = computed(() => {
   const v = qaVerification.value
@@ -324,12 +372,14 @@ function openQaPanel() {
   qaAnswer.value = ''
   qaVerification.value = null
   showQaModal.value = true
+  loadQaHistory()
 }
 
 function switchToGlobalQa() {
   qaTarget.value = null
   qaAnswer.value = ''
   qaVerification.value = null
+  loadQaHistory()
 }
 
 async function doContextQa() {
@@ -345,11 +395,84 @@ async function doContextQa() {
     })
     qaAnswer.value = res.data.data?.answer || '未获取到回答'
     qaVerification.value = res.data.data?.verification || null
+    loadQaHistory()
   } catch (e) {
     message.error('问答失败: ' + (e.response?.data?.message || '网络错误'))
   } finally {
     qaLoading.value = false
   }
+}
+
+// ===== 对话历史（每人每项目每类型最多 10 条，服务端自动裁剪） =====
+
+async function loadQaHistory() {
+  const scope = qaTarget.value ? 'CLASS' : 'GLOBAL'
+  try {
+    const res = await api.get(`/projects/${projectId}/chat-history`, { params: { scope } })
+    qaHistory.value = res.data.data || []
+  } catch (e) {
+    qaHistory.value = []
+  }
+}
+
+async function loadImpactHistory() {
+  try {
+    const res = await api.get(`/projects/${projectId}/chat-history`, { params: { scope: 'IMPACT' } })
+    impactHistory.value = res.data.data || []
+  } catch (e) {
+    impactHistory.value = []
+  }
+}
+
+function restoreQaHistory(item) {
+  qaQuestion.value = item.question || ''
+  qaAnswer.value = item.answer || ''
+  qaVerification.value = parseJson(item.verification)
+}
+
+function restoreImpactHistory(item) {
+  const snapshot = parseJson(item.verification) || {}
+  impactForm.targetClass = snapshot.targetClass || item.contextFqn || ''
+  impactForm.changeType = snapshot.changeType || 'MODIFY_METHOD'
+  impactForm.targetMethod = snapshot.targetMethod || ''
+  impactForm.description = snapshot.description || ''
+  impactResult.value = {
+    targetClass: snapshot.targetClass || item.contextFqn,
+    changeType: snapshot.changeType,
+    totalImpacted: snapshot.totalImpacted || 0,
+    impactPaths: snapshot.impactPaths || [],
+    aiAnalysis: item.answer || ''
+  }
+}
+
+async function deleteHistory(id, reload) {
+  try {
+    await api.delete(`/projects/${projectId}/chat-history/${id}`)
+    reload()
+  } catch (e) {
+    message.error('删除失败: ' + (e.response?.data?.message || '网络错误'))
+  }
+}
+
+function parseJson(str) {
+  if (!str) return null
+  try {
+    return JSON.parse(str)
+  } catch (e) {
+    return null
+  }
+}
+
+function shortName(fqn) {
+  if (!fqn) return ''
+  const parts = String(fqn).split('.')
+  return parts[parts.length - 1]
+}
+
+function formatHistoryTime(t) {
+  if (!t) return ''
+  const d = new Date(t)
+  return d.toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 
 function onSearch(value) {
@@ -439,6 +562,45 @@ function renderSimpleMd(content) {
   padding-top: 8px;
   border-top: 1px dashed #e0e4ff;
   text-align: right;
+}
+
+.history-collapse {
+  margin-top: 12px;
+  border-top: 1px solid #f0f0f0;
+}
+.history-list {
+  max-height: 220px;
+  overflow-y: auto;
+}
+.history-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 4px;
+  border-bottom: 1px dashed #f0f0f0;
+  cursor: pointer;
+}
+.history-item:hover {
+  background: #f9faff;
+}
+.history-item-main {
+  flex: 1;
+  min-width: 0;
+}
+.history-question {
+  font-size: 13px;
+  color: #333;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  word-break: break-all;
+}
+.history-time {
+  font-size: 12px;
+  color: #bbb;
+  margin-top: 2px;
 }
 .markdown-body { line-height: 1.7; font-size: 14px; color: #333; }
 .markdown-body :deep(h4) { margin: 12px 0 4px; }

@@ -56,6 +56,8 @@ class ProjectServiceImplTest {
     private MapViewSnapshotMapper mapViewSnapshotMapper;
     @Mock
     private ConstitutionRuleMapper constitutionRuleMapper;
+    @Mock
+    private ChatHistoryService chatHistoryService;
 
     private ProjectServiceImpl projectService;
 
@@ -63,7 +65,7 @@ class ProjectServiceImplTest {
     void setUp() {
         projectService = new ProjectServiceImpl(projectMapper, projectMemberMapper,
                 scanMapper, insightMapper, classSummaryMapper, userMapper, workspaceConfig,
-                violationMapper, mapViewSnapshotMapper, constitutionRuleMapper);
+                violationMapper, mapViewSnapshotMapper, constitutionRuleMapper, chatHistoryService);
     }
 
     @Test

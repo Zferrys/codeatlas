@@ -11,7 +11,13 @@
 
 {{targetClass}}
 
-## 依赖关系
+## 变更信息
+
+- 变更类型: {{changeType}}
+- 目标方法: {{targetMethod}}
+- 变更描述: {{changeDescription}}
+
+## 依赖关系（反向依赖 BFS 遍历结果，depth ≤ 5）
 
 {{dependencyHighlights}}
 

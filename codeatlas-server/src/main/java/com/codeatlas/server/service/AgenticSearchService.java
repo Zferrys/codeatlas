@@ -4,9 +4,11 @@ import com.codeatlas.common.util.AiPromptSanitizer;
 import com.codeatlas.engine.ai.*;
 import com.codeatlas.server.config.TokenBudgetManager;
 import com.codeatlas.server.entity.AiAuditLogEntity;
+import com.codeatlas.server.entity.ChatHistoryEntity;
 import com.codeatlas.server.entity.ClassSummaryEntity;
 import com.codeatlas.server.entity.Project;
 import com.codeatlas.server.mapper.AiAuditLogMapper;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -19,6 +21,8 @@ public class AgenticSearchService {
     private static final Logger log = LoggerFactory.getLogger(AgenticSearchService.class);
     private static final int MAX_ITERATIONS = 5;
     private static final int CORRECTION_TOKEN_ESTIMATE = 3000;
+    private static final String NO_CONTENT_PLACEHOLDER = "(AI 未返回内容)";
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
     private final AiClient aiClient;
     private final ToolRegistry toolRegistry;
@@ -27,12 +31,14 @@ public class AgenticSearchService {
     private final TokenBudgetManager tokenBudgetManager;
     private final AiAuditLogMapper aiAuditLogMapper;
     private final EvidenceVerifier evidenceVerifier;
+    private final ChatHistoryService chatHistoryService;
 
     public AgenticSearchService(AiClient aiClient, ToolRegistry toolRegistry,
                                 ProjectService projectService, ScanService scanService,
                                 TokenBudgetManager tokenBudgetManager,
                                 AiAuditLogMapper aiAuditLogMapper,
-                                EvidenceVerifier evidenceVerifier) {
+                                EvidenceVerifier evidenceVerifier,
+                                ChatHistoryService chatHistoryService) {
         this.aiClient = aiClient;
         this.toolRegistry = toolRegistry;
         this.projectService = projectService;
@@ -40,6 +46,7 @@ public class AgenticSearchService {
         this.tokenBudgetManager = tokenBudgetManager;
         this.aiAuditLogMapper = aiAuditLogMapper;
         this.evidenceVerifier = evidenceVerifier;
+        this.chatHistoryService = chatHistoryService;
     }
 
     /**
@@ -150,7 +157,7 @@ public class AgenticSearchService {
                 }
             } else {
                 // final answer — no more tool calls
-                result.put("answer", response.getContent() != null ? response.getContent() : "(AI 未返回内容)");
+                result.put("answer", response.getContent() != null ? response.getContent() : NO_CONTENT_PLACEHOLDER);
                 success = true;
                 break;
             }
@@ -247,6 +254,11 @@ public class AgenticSearchService {
         result.put("toolsCalled", toolsCalled);
         result.put("totalTokens", totalTokenUsed);
 
+        // 仅记录真实 AI 回答（降级/失败路径已提前 return，不落历史）
+        if (success) {
+            recordChatHistory(projectId, userId, question, result);
+        }
+
         // audit log
         long elapsed = System.currentTimeMillis() - startTime;
         saveAuditLog(aiClient.getModelName(), projectId, userId,
@@ -257,6 +269,30 @@ public class AgenticSearchService {
                 projectId, iterations, toolsCalled, totalTokenUsed, elapsed);
 
         return result;
+    }
+
+    private void recordChatHistory(Long projectId, Long userId, String question, Map<String, Object> result) {
+        try {
+            Object answer = result.get("answer");
+            String answerText = answer != null ? answer.toString() : null;
+            if (answerText == null || answerText.trim().isEmpty() || NO_CONTENT_PLACEHOLDER.equals(answerText)) {
+                // 模型未产出真实回答（空串/占位文案）时不落历史
+                return;
+            }
+            ChatHistoryEntity entity = new ChatHistoryEntity();
+            entity.setProjectId(projectId);
+            entity.setUserId(userId);
+            entity.setScope(ChatHistoryService.SCOPE_GLOBAL);
+            entity.setQuestion(question);
+            entity.setAnswer(answerText);
+            Object verification = result.get("verification");
+            if (verification != null) {
+                entity.setVerification(OBJECT_MAPPER.writeValueAsString(verification));
+            }
+            chatHistoryService.record(entity);
+        } catch (Exception e) {
+            log.warn("Failed to record chat history (non-fatal): {}", e.getMessage());
+        }
     }
 
     private String buildSystemPrompt(Project project, int totalClasses) {

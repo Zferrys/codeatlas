@@ -53,6 +53,8 @@ class AgenticSearchServiceTest {
     private TokenBudgetManager tokenBudgetManager;
     @Mock
     private AiAuditLogMapper aiAuditLogMapper;
+    @Mock
+    private ChatHistoryService chatHistoryService;
 
     private AgenticSearchService agenticSearchService;
 
@@ -62,7 +64,7 @@ class AgenticSearchServiceTest {
     void setUp() {
         agenticSearchService = new AgenticSearchService(aiClient, toolRegistry,
                 projectService, scanService, tokenBudgetManager, aiAuditLogMapper,
-                new EvidenceVerifier());
+                new EvidenceVerifier(), chatHistoryService);
 
         Project project = new Project();
         project.setName("TestProject");

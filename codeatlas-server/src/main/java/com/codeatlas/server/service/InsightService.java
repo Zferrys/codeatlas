@@ -14,4 +14,7 @@ public interface InsightService {
     PageResult<InsightEntity> getInsightsByType(Long projectId, String type, int page, int size);
 
     InsightEntity getLatestArchStory(Long projectId);
+
+    /** 按类型取最新一条洞察（PATTERN / ANTI_PATTERN / CONSTITUTION_CHECK 等） */
+    InsightEntity getLatestByType(Long projectId, String type);
 }

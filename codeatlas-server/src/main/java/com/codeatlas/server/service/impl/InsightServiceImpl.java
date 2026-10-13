@@ -45,4 +45,10 @@ public class InsightServiceImpl implements InsightService {
         List<InsightEntity> list = insightMapper.findByProjectIdAndType(projectId, "ARCH_STORY");
         return list.isEmpty() ? null : list.get(0);
     }
+
+    @Override
+    public InsightEntity getLatestByType(Long projectId, String type) {
+        List<InsightEntity> list = insightMapper.findByProjectIdAndType(projectId, type);
+        return list.isEmpty() ? null : list.get(0);
+    }
 }

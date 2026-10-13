@@ -18,6 +18,7 @@ import com.codeatlas.server.mapper.ProjectMemberMapper;
 import com.codeatlas.server.mapper.ScanMapper;
 import com.codeatlas.server.mapper.UserMapper;
 import com.codeatlas.server.mapper.ViolationMapper;
+import com.codeatlas.server.service.ChatHistoryService;
 import com.codeatlas.server.service.ProjectService;
 import com.codeatlas.server.util.SourceUrlValidator;
 import org.slf4j.Logger;
@@ -53,6 +54,7 @@ public class ProjectServiceImpl implements ProjectService {
     private final ViolationMapper violationMapper;
     private final MapViewSnapshotMapper mapViewSnapshotMapper;
     private final ConstitutionRuleMapper constitutionRuleMapper;
+    private final ChatHistoryService chatHistoryService;
 
     public ProjectServiceImpl(ProjectMapper projectMapper, ProjectMemberMapper projectMemberMapper,
                               ScanMapper scanMapper, InsightMapper insightMapper,
@@ -60,7 +62,8 @@ public class ProjectServiceImpl implements ProjectService {
                               WorkspaceConfig workspaceConfig,
                               ViolationMapper violationMapper,
                               MapViewSnapshotMapper mapViewSnapshotMapper,
-                              ConstitutionRuleMapper constitutionRuleMapper) {
+                              ConstitutionRuleMapper constitutionRuleMapper,
+                              ChatHistoryService chatHistoryService) {
         this.projectMapper = projectMapper;
         this.projectMemberMapper = projectMemberMapper;
         this.scanMapper = scanMapper;
@@ -71,6 +74,7 @@ public class ProjectServiceImpl implements ProjectService {
         this.violationMapper = violationMapper;
         this.mapViewSnapshotMapper = mapViewSnapshotMapper;
         this.constitutionRuleMapper = constitutionRuleMapper;
+        this.chatHistoryService = chatHistoryService;
     }
 
     @Override
@@ -198,6 +202,7 @@ public class ProjectServiceImpl implements ProjectService {
         projectMemberMapper.deleteByProjectId(projectId);
         mapViewSnapshotMapper.deleteByProjectId(projectId);
         constitutionRuleMapper.deleteByProjectId(projectId);
+        chatHistoryService.deleteByProjectId(projectId);
         projectMapper.deleteById(projectId);
         log.info("Project deleted: id={}, userId={}", projectId, userId);
     }
