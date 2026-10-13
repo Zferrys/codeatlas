@@ -86,11 +86,11 @@
     </a-drawer>
 
     <a-modal
-      v-model:open="showImpactModal"
+      :open="showImpactModal"
       title="变更影响模拟"
       :footer="null"
       width="640px"
-      @cancel="impactResult = null"
+      @cancel="requestCloseImpact"
     >
       <a-form layout="vertical" v-if="!impactResult">
         <a-form-item label="目标类" required>
@@ -113,6 +113,12 @@
         <a-button type="primary" @click="doImpactSim" :loading="impactLoading" block>
           {{ impactLoading ? '分析中...' : '开始分析' }}
         </a-button>
+        <div v-if="impactLoading" class="task-progress">
+          <a-spin size="small" />
+          <span class="task-stage">{{ activeTask?.stage || '正在分析依赖影响链路…' }}</span>
+          <span class="task-elapsed">已等待 {{ activeTask?.elapsedSec || 0 }} 秒</span>
+          <a-button size="small" danger @click="cancelActiveAiTask">终止</a-button>
+        </div>
       </a-form>
 
       <div v-else class="impact-result">
@@ -167,10 +173,11 @@
     </a-modal>
 
     <a-modal
-      v-model:open="showQaModal"
+      :open="showQaModal"
       :title="qaTarget ? '上下文问答 — ' + qaTarget.label : '全局智能搜索'"
       :footer="null"
       width="600px"
+      @cancel="requestCloseQa"
     >
       <div class="qa-class-info" v-if="qaTarget">
         <a-tag :color="getLayerColor(qaTarget.layer)">{{ qaTarget.layer }}</a-tag>
@@ -194,6 +201,12 @@
       <a-button type="primary" @click="doContextQa" :loading="qaLoading" block>
         {{ qaLoading ? 'AI 思考中...' : '提问' }}
       </a-button>
+      <div v-if="qaLoading" class="task-progress">
+        <a-spin size="small" />
+        <span class="task-stage">{{ activeTask?.stage || 'AI 正在思考…' }}</span>
+        <span class="task-elapsed">已等待 {{ activeTask?.elapsedSec || 0 }} 秒</span>
+        <a-button size="small" danger @click="cancelActiveAiTask">终止</a-button>
+      </div>
       <div v-if="qaAnswer" class="qa-answer-box">
         <div class="markdown-body" v-html="renderSimpleMd(qaAnswer)"></div>
         <div v-if="qaVerification" class="qa-verify-line">
@@ -229,11 +242,12 @@
 <script setup>
 import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { message } from 'ant-design-vue'
+import { message, Modal } from 'ant-design-vue'
 import { ThunderboltOutlined, QuestionCircleOutlined, DeleteOutlined } from '@ant-design/icons-vue'
 import CodeMap from '../components/map/CodeMap.vue'
 import CodeMap3D from '../components/map/CodeMap3D.vue'
 import api from '../api'
+import { runAiTask, AI_TASK_CANCELLED, cancelActiveAiTask, activeTask } from '../composables/useAiTask'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 
@@ -317,14 +331,44 @@ async function doImpactSim() {
   }
   impactLoading.value = true
   try {
-    const res = await api.post(`/projects/${projectId}/ai/impact-simulate`, impactForm)
-    impactResult.value = res.data.data
+    const data = await runAiTask({
+      projectId,
+      label: '影响模拟',
+      execute: ({ taskId, signal }) =>
+        api
+          .post(`/projects/${projectId}/ai/impact-simulate`, impactForm, {
+            headers: { 'X-Ai-Task-Id': taskId },
+            signal
+          })
+          .then(res => res.data.data)
+    })
+    if (data === AI_TASK_CANCELLED) return
+    impactResult.value = data
     loadImpactHistory()
   } catch (e) {
     message.error('影响分析失败: ' + (e.response?.data?.message || '网络错误'))
   } finally {
     impactLoading.value = false
   }
+}
+
+function requestCloseImpact() {
+  if (impactLoading.value) {
+    Modal.confirm({
+      title: 'AI 分析正在进行中',
+      content: '关闭将终止本次分析，确定要关闭吗？',
+      okText: '终止并关闭',
+      okType: 'danger',
+      cancelText: '继续等待',
+      onOk: () => {
+        cancelActiveAiTask()
+        showImpactModal.value = false
+      }
+    })
+    return
+  }
+  showImpactModal.value = false
+  impactResult.value = null
 }
 
 const showQaModal = ref(false)
@@ -390,18 +434,45 @@ async function doContextQa() {
   }
   qaLoading.value = true
   try {
-    const res = await api.post(`/projects/${projectId}/ai/context-qa`, {
-      question: qaQuestion.value,
-      classFqn: qaTarget.value?.id || null
+    const data = await runAiTask({
+      projectId,
+      label: qaTarget.value ? '类问答 — ' + qaTarget.value.label : '全局问答',
+      execute: ({ taskId, signal }) =>
+        api
+          .post(
+            `/projects/${projectId}/ai/context-qa`,
+            { question: qaQuestion.value, classFqn: qaTarget.value?.id || null },
+            { headers: { 'X-Ai-Task-Id': taskId }, signal }
+          )
+          .then(res => res.data.data)
     })
-    qaAnswer.value = res.data.data?.answer || '未获取到回答'
-    qaVerification.value = res.data.data?.verification || null
+    if (data === AI_TASK_CANCELLED) return
+    qaAnswer.value = data?.answer || '未获取到回答'
+    qaVerification.value = data?.verification || null
     loadQaHistory()
   } catch (e) {
     message.error('问答失败: ' + (e.response?.data?.message || '网络错误'))
   } finally {
     qaLoading.value = false
   }
+}
+
+function requestCloseQa() {
+  if (qaLoading.value) {
+    Modal.confirm({
+      title: 'AI 问答正在进行中',
+      content: '关闭将终止本次回答，确定要关闭吗？',
+      okText: '终止并关闭',
+      okType: 'danger',
+      cancelText: '继续等待',
+      onOk: () => {
+        cancelActiveAiTask()
+        showQaModal.value = false
+      }
+    })
+    return
+  }
+  showQaModal.value = false
 }
 
 // ===== 对话历史（每人每项目每类型最多 10 条，服务端自动裁剪） =====
@@ -564,6 +635,18 @@ function renderSimpleMd(content) {
   border-top: 1px dashed #e0e4ff;
   text-align: right;
 }
+
+.task-progress {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 12px 14px;
+  background: #fafafa;
+  border-radius: 8px;
+}
+.task-stage { flex: 1; min-width: 0; font-size: 13px; color: #333; }
+.task-elapsed { font-size: 12px; color: #999; white-space: nowrap; }
 
 .history-collapse {
   margin-top: 12px;

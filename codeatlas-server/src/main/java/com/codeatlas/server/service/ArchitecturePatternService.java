@@ -8,7 +8,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 /**
- * 架构模式识别：渲染 prompts/architecture-pattern.md，AI 识别主要架构/设计模式与分层合理性，
+ * 设计模式分析：渲染 prompts/architecture-pattern.md，AI 识别主要架构/设计模式与分层合理性，
  * 结果落 insight 表（type=PATTERN）。骨架逻辑见 {@link AbstractInsightAnalysisService}。
  */
 @Service
@@ -22,14 +22,20 @@ public class ArchitecturePatternService extends AbstractInsightAnalysisService {
                                       InsightService insightService,
                                       HallucinationChecker hallucinationChecker,
                                       TokenBudgetManager tokenBudgetManager,
-                                      @Autowired(required = false) AiClient aiClient) {
+                                      @Autowired(required = false) AiClient aiClient,
+                                      AiTaskProgressRegistry progressRegistry) {
         super(aiAnalysisService, projectService, scanService, insightService,
-                hallucinationChecker, tokenBudgetManager, aiClient);
+                hallucinationChecker, tokenBudgetManager, aiClient, progressRegistry);
     }
 
     @Timed(value = "ai.analysis.duration", description = "AI architecture pattern analysis duration")
     public InsightEntity analyzePatterns(Long projectId, Long userId) {
         return execute(projectId, userId);
+    }
+
+    /** @param taskId 前端进度任务 ID；非 null 时推送阶段事件并支持断开即取消 */
+    public InsightEntity analyzePatterns(Long projectId, Long userId, String taskId) {
+        return execute(projectId, userId, taskId);
     }
 
     @Override
@@ -49,7 +55,7 @@ public class ArchitecturePatternService extends AbstractInsightAnalysisService {
 
     @Override
     protected String retrySystemPrompt() {
-        return "你是一位资深软件架构师。请重新输出架构模式识别结果，只引用给定的类列表。用中文回答。";
+        return "你是一位资深软件架构师。请重新输出设计模式报告，只引用给定的类列表。用中文回答。";
     }
 
     @Override
@@ -59,7 +65,7 @@ public class ArchitecturePatternService extends AbstractInsightAnalysisService {
 
     @Override
     protected String insightTitle(String projectName) {
-        return "架构模式识别 — " + projectName;
+        return "设计模式报告 — " + projectName;
     }
 
     @Override

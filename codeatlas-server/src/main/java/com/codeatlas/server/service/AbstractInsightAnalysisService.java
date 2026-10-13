@@ -39,6 +39,7 @@ public abstract class AbstractInsightAnalysisService {
     protected final HallucinationChecker hallucinationChecker;
     protected final TokenBudgetManager tokenBudgetManager;
     protected final AiClient aiClient;
+    protected final AiTaskProgressRegistry progressRegistry;
 
     protected AbstractInsightAnalysisService(AiAnalysisService aiAnalysisService,
                                              ProjectService projectService,
@@ -46,7 +47,8 @@ public abstract class AbstractInsightAnalysisService {
                                              InsightService insightService,
                                              HallucinationChecker hallucinationChecker,
                                              TokenBudgetManager tokenBudgetManager,
-                                             AiClient aiClient) {
+                                             AiClient aiClient,
+                                             AiTaskProgressRegistry progressRegistry) {
         this.aiAnalysisService = aiAnalysisService;
         this.projectService = projectService;
         this.scanService = scanService;
@@ -54,9 +56,17 @@ public abstract class AbstractInsightAnalysisService {
         this.hallucinationChecker = hallucinationChecker;
         this.tokenBudgetManager = tokenBudgetManager;
         this.aiClient = aiClient;
+        this.progressRegistry = progressRegistry;
     }
 
     protected InsightEntity execute(Long projectId, Long userId) {
+        return execute(projectId, userId, null);
+    }
+
+    /**
+     * @param taskId 前端进度任务 ID；非 null 时推送阶段事件并支持断开即取消（取消返回 null 不落库）
+     */
+    protected InsightEntity execute(Long projectId, Long userId, String taskId) {
         if (aiClient == null) {
             log.info("{} skipped: no AI client for projectId={}", logLabel(), projectId);
             return null;
@@ -73,6 +83,7 @@ public abstract class AbstractInsightAnalysisService {
         if (classes.isEmpty()) {
             throw new BusinessException(400, "暂无扫描结果，请先触发一次扫描");
         }
+        progressRegistry.publish(taskId, "正在渲染分析提示词…");
 
         AnalysisContext ctx = new AnalysisContext(project, scan, classes);
         prepareVariables(ctx);
@@ -92,6 +103,12 @@ public abstract class AbstractInsightAnalysisService {
             throw new BusinessException(ErrorCode.AI_TOKEN_BUDGET_EXCEEDED);
         }
 
+        if (progressRegistry.isCancelled(taskId)) {
+            log.info("{} cancelled before AI call for projectId={}", logLabel(), projectId);
+            return null;
+        }
+        progressRegistry.publish(taskId, "AI 正在生成报告（通常需要 1–3 分钟）…");
+
         AiRequest request = new AiRequest();
         request.setPrompt(prompt);
         request.setSystemPrompt(systemPrompt());
@@ -107,15 +124,23 @@ public abstract class AbstractInsightAnalysisService {
         }
         saveAudit(projectId, userId, response, null, true);
 
+        if (progressRegistry.isCancelled(taskId)) {
+            log.info("{} cancelled after AI call, discarding result for projectId={}", logLabel(), projectId);
+            return null;
+        }
+
         String content = response.getContent();
         long totalTokens = response.getTokensUsed();
+        progressRegistry.publish(taskId, "正在做类名防幻觉校验…");
 
         HallucinationChecker.HallucinationResult hResult = hallucinationChecker.check(content, classes);
         if (hResult.hasHallucination()) {
             HallucinationChecker.Action action = hallucinationChecker.suggestAction(hResult);
             log.warn("{}: fakeClasses={}, action={}",
                     hallucinationCheckLabel(), hResult.getFakeClasses().size(), action);
-            if (action == HallucinationChecker.Action.RETRY && classes.size() <= MAX_CLASSES_PER_CHUNK) {
+            if (action == HallucinationChecker.Action.RETRY && classes.size() <= MAX_CLASSES_PER_CHUNK
+                    && !progressRegistry.isCancelled(taskId)) {
+                progressRegistry.publish(taskId, "发现可疑类名，正在重新生成…");
                 AiRequest retryReq = new AiRequest();
                 retryReq.setPrompt(prompt);
                 retryReq.setSystemPrompt(retrySystemPrompt());
@@ -133,6 +158,12 @@ public abstract class AbstractInsightAnalysisService {
                 }
             }
         }
+
+        if (progressRegistry.isCancelled(taskId)) {
+            log.info("{} cancelled before save for projectId={}", logLabel(), projectId);
+            return null;
+        }
+        progressRegistry.publish(taskId, "正在保存报告…");
 
         InsightEntity insight = new InsightEntity();
         insight.setScanId(scan.getId());

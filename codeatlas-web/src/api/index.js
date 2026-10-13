@@ -27,6 +27,10 @@ api.interceptors.request.use(
 api.interceptors.response.use(
   response => response,
   error => {
+    // 用户主动终止 AI 任务等取消请求：静默透传，避免误报「网络异常」
+    if (error?.code === 'ERR_CANCELED' || error?.name === 'CanceledError') {
+      return Promise.reject(error)
+    }
     const { response } = error
     if (response && response.status >= 400) {
       report({

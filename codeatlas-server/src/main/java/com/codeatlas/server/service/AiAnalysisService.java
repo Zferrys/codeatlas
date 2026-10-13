@@ -56,6 +56,7 @@ public class AiAnalysisService {
     private final TokenBudgetManager tokenBudgetManager;
     private final CodeAtlasMetrics metrics;
     private final ApplicationEventPublisher eventPublisher;
+    private final AiTaskProgressRegistry progressRegistry;
 
     /** 正在运行的 AI 分析，key = projectId */
     private final ConcurrentHashMap<Long, Boolean> runningAnalyses = new ConcurrentHashMap<>();
@@ -72,7 +73,8 @@ public class AiAnalysisService {
                               TokenBudgetManager tokenBudgetManager,
                               CodeAtlasMetrics metrics,
                               ApplicationEventPublisher eventPublisher,
-                              @Autowired(required = false) AiClient aiClient) {
+                              @Autowired(required = false) AiClient aiClient,
+                              AiTaskProgressRegistry progressRegistry) {
         this.projectMapper = projectMapper;
         this.scanMapper = scanMapper;
         this.classSummaryMapper = classSummaryMapper;
@@ -84,6 +86,7 @@ public class AiAnalysisService {
         this.metrics = metrics;
         this.eventPublisher = eventPublisher;
         this.aiClient = aiClient;
+        this.progressRegistry = progressRegistry;
         if (aiClient != null) {
             log.info("AiAnalysisService initialized with AI client: {}", aiClient.getModelName());
         } else {
@@ -120,6 +123,13 @@ public class AiAnalysisService {
 
     @Timed(value = "ai.analysis.duration", description = "AI architecture analysis duration")
     public InsightEntity analyzeArchitecture(Long projectId, Long scanId) {
+        return analyzeArchitecture(projectId, scanId, null);
+    }
+
+    /**
+     * @param taskId 前端进度任务 ID；非 null 时推送阶段事件并支持断开即取消（取消返回 null 不落库）
+     */
+    public InsightEntity analyzeArchitecture(Long projectId, Long scanId, String taskId) {
         if (aiClient == null) {
             log.info("AI analysis skipped: no AI client available for projectId={}", projectId);
             return null;
@@ -133,6 +143,7 @@ public class AiAnalysisService {
             log.warn("AI analysis skipped: missing data projectId={}, scanId={}", projectId, scanId);
             return null;
         }
+        progressRegistry.publish(taskId, "正在渲染架构叙事提示词…");
 
         String finalContent;
         int totalTokens = 0;
@@ -141,12 +152,16 @@ public class AiAnalysisService {
         if (classes.size() > MAX_CLASSES_PER_CHUNK) {
             log.info("Large project detected: {} classes > {}, triggering chunked analysis for projectId={}",
                     classes.size(), MAX_CLASSES_PER_CHUNK, projectId);
-            finalContent = analyzeWithChunking(project, scan, classes);
+            finalContent = analyzeWithChunking(project, scan, classes, taskId);
             if (finalContent == null || finalContent.isEmpty()) {
                 log.warn("Chunked AI analysis failed for projectId={}", projectId);
                 return null;
             }
         } else {
+            if (progressRegistry.isCancelled(taskId)) {
+                log.info("Architecture story cancelled before AI call for projectId={}", projectId);
+                return null;
+            }
             Map<String, String> vars = buildPromptVariables(project, scan, classes);
             PromptTemplate template = new PromptTemplate("prompts/architecture-story.md");
             String prompt = template.render(vars);
@@ -171,6 +186,7 @@ public class AiAnalysisService {
             request.setSystemPrompt("你是一位资深软件架构师。请分析代码库并用中文生成深入、准确的架构叙事报告。所有结论必须引用具体的类和包。专业术语保留英文，类名/包名保留原文。");
             request.setTemperature(0.3);
             request.setMaxTokens(8192);
+            progressRegistry.publish(taskId, "AI 正在生成架构解读（通常需要 1–3 分钟）…");
 
             AiResponse response = self.callAiWithResilience(request);
             if (response == null || response.getContent() == null || response.getContent().isEmpty()) {
@@ -184,18 +200,25 @@ public class AiAnalysisService {
             self.saveAiAuditLog(aiClient.getModelName(), "ARCHITECTURE_STORY", projectId, null,
                     response.getPromptTokens(), response.getCompletionTokens(),
                     response.getTokensUsed(), response.getLatencyMs(), null, true);
+            if (progressRegistry.isCancelled(taskId)) {
+                log.info("Architecture story cancelled after AI call, discarding for projectId={}", projectId);
+                return null;
+            }
             finalContent = response.getContent();
             totalTokens = response.getTokensUsed();
             totalLatency = response.getLatencyMs();
         }
 
+        progressRegistry.publish(taskId, "正在做类名防幻觉校验…");
         HallucinationChecker.HallucinationResult hResult =
                 hallucinationChecker.check(finalContent, classes);
         if (hResult.hasHallucination()) {
             HallucinationChecker.Action action = hallucinationChecker.suggestAction(hResult);
             log.warn("Hallucination check: result={}, fakeClasses={}, action={}",
                     hResult.hasHallucination(), hResult.getFakeClasses().size(), action);
-            if (action == HallucinationChecker.Action.RETRY && classes.size() <= MAX_CLASSES_PER_CHUNK) {
+            if (action == HallucinationChecker.Action.RETRY && classes.size() <= MAX_CLASSES_PER_CHUNK
+                    && !progressRegistry.isCancelled(taskId)) {
+                progressRegistry.publish(taskId, "发现可疑类名，正在重新生成…");
                 AiRequest retryReq = new AiRequest();
                 retryReq.setPrompt(finalContent);
                 retryReq.setSystemPrompt("你是一位资深软件架构师。请分析代码库并用中文生成深入、准确的架构叙事报告。");
@@ -212,6 +235,12 @@ public class AiAnalysisService {
                 }
             }
         }
+
+        if (progressRegistry.isCancelled(taskId)) {
+            log.info("Architecture story cancelled before save for projectId={}", projectId);
+            return null;
+        }
+        progressRegistry.publish(taskId, "正在保存报告…");
 
         InsightEntity insight = new InsightEntity();
         insight.setScanId(scanId);
@@ -332,7 +361,8 @@ public class AiAnalysisService {
         }
     }
 
-    private String analyzeWithChunking(Project project, ScanRecord scan, List<ClassSummaryEntity> classes) {
+    private String analyzeWithChunking(Project project, ScanRecord scan, List<ClassSummaryEntity> classes,
+                                       String taskId) {
         Map<String, List<ClassSummaryEntity>> groups = new LinkedHashMap<>();
         for (ClassSummaryEntity cls : classes) {
             String pkg = cls.getPackageName();
@@ -346,11 +376,18 @@ public class AiAnalysisService {
         List<String> chunkResults = new ArrayList<>();
         String systemPrompt = "你是一位资深软件架构师。请分析以下代码模块，用中文输出该模块的：1) 职责描述 2) 关键类 3) 对外依赖。简明扼要，不超过500字。";
 
+        int chunkIndex = 0;
         for (Map.Entry<String, List<ClassSummaryEntity>> entry : groups.entrySet()) {
             if (chunkResults.size() >= MAX_CHUNK_CONCURRENCY * 3) {
                 log.warn("Too many chunks, stopping at {} for projectId={}", chunkResults.size(), project.getId());
                 break;
             }
+            if (progressRegistry.isCancelled(taskId)) {
+                log.info("Chunked story cancelled mid-way for projectId={}", project.getId());
+                return null;
+            }
+            chunkIndex++;
+            progressRegistry.publish(taskId, "项目较大，正在分片分析：第 " + chunkIndex + " 批（" + entry.getKey() + "）…");
             String groupName = entry.getKey();
             List<ClassSummaryEntity> groupClasses = entry.getValue();
 
@@ -391,6 +428,12 @@ public class AiAnalysisService {
                 + " 个模块分析结果。请将这些分片结果合并为一份完整的架构叙事报告，包含：\n"
                 + "1. 项目整体概述\n2. 分层架构与各层职责\n3. 核心链路\n4. 问题与改进建议\n\n---\n\n"
                 + combinedChunks;
+
+        if (progressRegistry.isCancelled(taskId)) {
+            log.info("Chunked story cancelled before summary for projectId={}", project.getId());
+            return null;
+        }
+        progressRegistry.publish(taskId, "正在合并 " + chunkResults.size() + " 个分片为完整报告…");
 
         AiRequest summaryReq = new AiRequest();
         summaryReq.setPrompt(summaryPrompt);

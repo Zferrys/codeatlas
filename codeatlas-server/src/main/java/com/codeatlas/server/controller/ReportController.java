@@ -1,7 +1,9 @@
 package com.codeatlas.server.controller;
 
 import com.codeatlas.server.security.CodeAtlasUserDetails;
+import com.codeatlas.common.constant.ErrorCode;
 import com.codeatlas.common.dto.ApiResponse;
+import com.codeatlas.common.exception.BusinessException;
 import com.codeatlas.server.service.ReportService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -20,6 +22,10 @@ import java.util.Map;
 @RequestMapping("/api/v1/projects/{projectId}")
 @Tag(name = "报告导出")
 public class ReportController {
+
+    /** 可导出的洞察类型白名单：同时兜住 type 进 Content-Disposition 的路径注入面 */
+    private static final java.util.Set<String> INSIGHT_TYPES =
+            java.util.Set.of("ARCH_STORY", "PATTERN", "ANTI_PATTERN", "CONSTITUTION_CHECK");
 
     private final ReportService reportService;
 
@@ -84,5 +90,30 @@ public class ReportController {
         return ResponseEntity.ok()
                 .contentType(MediaType.TEXT_HTML)
                 .body(html);
+    }
+
+    @GetMapping("/insights/{type}/export")
+    @Operation(summary = "导出单份分析报告（PDF/HTML）")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<?> exportInsight(@PathVariable Long projectId,
+                                           @PathVariable String type,
+                                           @RequestParam(defaultValue = "pdf") String format,
+                                           @AuthenticationPrincipal CodeAtlasUserDetails principal) {
+        if (!INSIGHT_TYPES.contains(type)) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "不支持的报告类型");
+        }
+        String filename = "codeatlas-" + type.toLowerCase();
+        if ("html".equalsIgnoreCase(format)) {
+            String html = reportService.generateInsightHtml(projectId, type, principal.getUserId());
+            return ResponseEntity.ok()
+                    .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=" + filename + ".html")
+                    .contentType(MediaType.TEXT_HTML)
+                    .body(html);
+        }
+        byte[] pdfBytes = reportService.generateInsightPdf(projectId, type, principal.getUserId());
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=" + filename + ".pdf")
+                .contentType(MediaType.APPLICATION_PDF)
+                .body(pdfBytes);
     }
 }

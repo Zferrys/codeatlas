@@ -285,6 +285,83 @@ public class ReportService {
         return sb.toString();
     }
 
+    /**
+     * 按洞察类型导出单份报告（PDF）：与报告面板展示同口径（getLatestByType 取最新一条）。
+     */
+    public byte[] generateInsightPdf(Long projectId, String type, Long userId) {
+        Project project = projectMapper.findById(projectId);
+        checkProjectAccess(project, projectId, userId);
+        InsightEntity insight = insightService.getLatestByType(projectId, type);
+        if (insight == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND, "暂无可导出的报告");
+        }
+
+        try (ByteArrayOutputStream baos = new ByteArrayOutputStream()) {
+            PdfWriter writer = new PdfWriter(baos);
+            PdfDocument pdf = new PdfDocument(writer);
+            Document document = new Document(pdf);
+            PdfFont cnFont = loadChineseFont();
+
+            document.add(new Paragraph(insight.getTitle() != null ? insight.getTitle() : "分析报告")
+                    .setFontSize(18).setBold().setTextAlignment(TextAlignment.CENTER).setFont(cnFont));
+            StringBuilder meta = new StringBuilder("项目：")
+                    .append(project != null ? project.getName() : "N/A");
+            if (insight.getCreatedAt() != null) {
+                meta.append("    生成时间：").append(insight.getCreatedAt().toString().replace("T", " "));
+            }
+            if (insight.getConfidence() != null) {
+                meta.append("    置信度：")
+                        .append(insight.getConfidence().multiply(BigDecimal.valueOf(100)).intValue()).append("%");
+            }
+            document.add(new Paragraph(meta.toString()).setFontSize(10).setFont(cnFont).setOpacity(0.6f));
+            document.add(new Paragraph(""));
+
+            String content = insight.getContent() != null ? insight.getContent() : "";
+            if (content.length() > 15000) {
+                content = content.substring(0, 15000) + "\n\n...（内容过长，已截断）";
+            }
+            addNarrativeToPdf(document, content, cnFont);
+
+            document.close();
+            return baos.toByteArray();
+        } catch (Exception e) {
+            log.error("Insight PDF generation failed: {}", e.getMessage(), e);
+            throw new RuntimeException("PDF 生成失败：" + e.getMessage());
+        }
+    }
+
+    /** 按洞察类型导出单份报告（HTML）：Markdown 经共享渲染器转 HTML */
+    public String generateInsightHtml(Long projectId, String type, Long userId) {
+        Project project = projectMapper.findById(projectId);
+        checkProjectAccess(project, projectId, userId);
+        InsightEntity insight = insightService.getLatestByType(projectId, type);
+        if (insight == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND, "暂无可导出的报告");
+        }
+
+        String title = insight.getTitle() != null ? insight.getTitle() : "分析报告";
+        StringBuilder sb = new StringBuilder();
+        sb.append("<html><head><meta charset='UTF-8'><title>").append(escapeHtml(title)).append("</title>");
+        sb.append("<style>body{font-family:-apple-system,'Segoe UI','Microsoft YaHei','PingFang SC',sans-serif;margin:40px;line-height:1.8;color:#2d3748;max-width:900px;}");
+        sb.append("h1{color:#1a365d;}.narrative h2,.narrative h3,.narrative h4{color:#1a365d;}");
+        sb.append("code{background:#f5f5f5;padding:1px 4px;border-radius:3px;}");
+        sb.append("pre{background:#f5f5f5;padding:16px;border-radius:6px;overflow-x:auto;}");
+        sb.append("table{border-collapse:collapse;margin:16px 0;width:100%;}td,th{border:1px solid #ddd;padding:8px;}");
+        sb.append("blockquote{border-left:3px solid #1890ff;padding:4px 16px;margin:16px 0;color:#666;background:#fafafa;}");
+        sb.append("</style></head><body>");
+        sb.append("<h1>").append(escapeHtml(title)).append("</h1>");
+        sb.append("<p style='color:#999;'>项目：").append(escapeHtml(project != null ? project.getName() : "N/A"));
+        if (insight.getCreatedAt() != null) {
+            sb.append(" · 生成时间：").append(escapeHtml(insight.getCreatedAt().toString().replace("T", " ")));
+        }
+        sb.append("</p>");
+        sb.append("<div class='narrative'>")
+                .append(MarkdownRenderer.toHtml(insight.getContent() != null ? insight.getContent() : ""))
+                .append("</div>");
+        sb.append("</body></html>");
+        return sb.toString();
+    }
+
     /** 进行中/中断的扫描这些统计列可为 NULL，统一兜底为 0，避免导出时拆箱 NPE */
     private static long orZero(Number value) {
         return value != null ? value.longValue() : 0L;

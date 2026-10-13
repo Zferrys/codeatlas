@@ -10,6 +10,7 @@ import com.codeatlas.server.entity.ConstitutionRuleEntity;
 import com.codeatlas.server.entity.InsightEntity;
 import com.codeatlas.server.entity.Project;
 import com.codeatlas.server.entity.ScanRecord;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -65,7 +66,8 @@ class ConstitutionCheckServiceTest {
     @BeforeEach
     void setUp() {
         service = new ConstitutionCheckService(aiAnalysisService, projectService, scanService,
-                insightService, constitutionRuleService, hallucinationChecker, tokenBudgetManager, aiClient);
+                insightService, constitutionRuleService, hallucinationChecker, tokenBudgetManager, aiClient,
+                new AiTaskProgressRegistry(new ObjectMapper()));
     }
 
     private void stubProjectScanClasses() {

@@ -11,6 +11,7 @@ import com.codeatlas.server.entity.ClassSummaryEntity;
 import com.codeatlas.server.entity.InsightEntity;
 import com.codeatlas.server.entity.Project;
 import com.codeatlas.server.entity.ScanRecord;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -68,7 +69,8 @@ class ArchitecturePatternServiceTest {
     @BeforeEach
     void setUp() {
         service = new ArchitecturePatternService(aiAnalysisService, projectService, scanService,
-                insightService, hallucinationChecker, tokenBudgetManager, aiClient);
+                insightService, hallucinationChecker, tokenBudgetManager, aiClient,
+                new AiTaskProgressRegistry(new ObjectMapper()));
     }
 
     private void stubProjectScanClasses() {
@@ -100,7 +102,8 @@ class ArchitecturePatternServiceTest {
     @DisplayName("AI 客户端未配置时跳过并返回 null，不触碰项目数据")
     void analyzePatterns_noAiClient_shouldReturnNull() {
         ArchitecturePatternService noAi = new ArchitecturePatternService(aiAnalysisService, projectService,
-                scanService, insightService, hallucinationChecker, tokenBudgetManager, null);
+                scanService, insightService, hallucinationChecker, tokenBudgetManager, null,
+                new AiTaskProgressRegistry(new ObjectMapper()));
 
         assertNull(noAi.analyzePatterns(PROJECT_ID, USER_ID));
         verifyNoInteractions(projectService);
@@ -218,7 +221,7 @@ class ArchitecturePatternServiceTest {
 
         assertNotNull(insight);
         assertEquals("PATTERN", insight.getType());
-        assertEquals("架构模式识别 — Demo", insight.getTitle());
+        assertEquals("设计模式报告 — Demo", insight.getTitle());
         assertEquals("识别到分层架构", insight.getContent());
         assertEquals("[]", insight.getSources());
         assertEquals(100L, insight.getScanId());
@@ -247,7 +250,7 @@ class ArchitecturePatternServiceTest {
         when(tokenBudgetManager.tryConsume(anyLong())).thenReturn(true);
         when(aiAnalysisService.callAiWithResilience(any(AiRequest.class)))
                 .thenReturn(aiResponse("引用了 com.fake.GhostA 和 com.fake.GhostB", 500),
-                        aiResponse("修正后的架构模式识别", 300));
+                        aiResponse("修正后的设计模式报告", 300));
         when(hallucinationChecker.check(anyString(), anyList()))
                 .thenReturn(new HallucinationChecker.HallucinationResult(true, Arrays.asList("com.fake.GhostA", "com.fake.GhostB")),
                         new HallucinationChecker.HallucinationResult(false, Collections.emptyList()));
@@ -258,13 +261,13 @@ class ArchitecturePatternServiceTest {
 
         InsightEntity insight = service.analyzePatterns(PROJECT_ID, USER_ID);
 
-        assertEquals("修正后的架构模式识别", insight.getContent());
+        assertEquals("修正后的设计模式报告", insight.getContent());
         assertTrue(insight.getMetadata().contains("\"tokensUsed\":800"));
 
         ArgumentCaptor<AiRequest> requestCaptor = ArgumentCaptor.forClass(AiRequest.class);
         verify(aiAnalysisService, times(2)).callAiWithResilience(requestCaptor.capture());
         AiRequest retryRequest = requestCaptor.getAllValues().get(1);
         assertEquals(0.1, retryRequest.getTemperature());
-        assertTrue(retryRequest.getSystemPrompt().contains("重新输出架构模式识别结果"));
+        assertTrue(retryRequest.getSystemPrompt().contains("重新输出设计模式报告"));
     }
 }

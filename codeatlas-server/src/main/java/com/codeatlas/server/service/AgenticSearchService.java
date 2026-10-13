@@ -32,13 +32,15 @@ public class AgenticSearchService {
     private final AiAuditLogMapper aiAuditLogMapper;
     private final EvidenceVerifier evidenceVerifier;
     private final ChatHistoryService chatHistoryService;
+    private final AiTaskProgressRegistry progressRegistry;
 
     public AgenticSearchService(AiClient aiClient, ToolRegistry toolRegistry,
                                 ProjectService projectService, ScanService scanService,
                                 TokenBudgetManager tokenBudgetManager,
                                 AiAuditLogMapper aiAuditLogMapper,
                                 EvidenceVerifier evidenceVerifier,
-                                ChatHistoryService chatHistoryService) {
+                                ChatHistoryService chatHistoryService,
+                                AiTaskProgressRegistry progressRegistry) {
         this.aiClient = aiClient;
         this.toolRegistry = toolRegistry;
         this.projectService = projectService;
@@ -47,6 +49,7 @@ public class AgenticSearchService {
         this.aiAuditLogMapper = aiAuditLogMapper;
         this.evidenceVerifier = evidenceVerifier;
         this.chatHistoryService = chatHistoryService;
+        this.progressRegistry = progressRegistry;
     }
 
     /**
@@ -55,6 +58,13 @@ public class AgenticSearchService {
      * @return Map 包含 answer、iterations、toolsCalled 等字段
      */
     public Map<String, Object> search(Long projectId, String question, Long userId) {
+        return search(projectId, question, userId, null);
+    }
+
+    /**
+     * @param taskId 前端进度任务 ID；非 null 时推送阶段事件并支持断开即取消
+     */
+    public Map<String, Object> search(Long projectId, String question, Long userId, String taskId) {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("question", question);
 
@@ -89,6 +99,7 @@ public class AgenticSearchService {
             result.put("answer", "本月 AI Token 配额已用完，请下月再试。");
             return result;
         }
+        progressRegistry.publish(taskId, "正在分析问题，规划检索策略…");
 
         // build conversation
         List<Message> messages = new ArrayList<>();
@@ -108,6 +119,12 @@ public class AgenticSearchService {
 
         for (int i = 0; i < MAX_ITERATIONS; i++) {
             iterations = i + 1;
+
+            if (progressRegistry.isCancelled(taskId)) {
+                return finishCancelled(result, projectId, userId, startTime, iterations,
+                        toolsCalled, totalPromptTokens, totalCompletionTokens, totalTokenUsed);
+            }
+            progressRegistry.publish(taskId, "第 " + iterations + " 轮：AI 正在分析并选择检索动作…");
 
             AiRequest request = new AiRequest();
             request.setMessages(messages);
@@ -163,6 +180,8 @@ public class AgenticSearchService {
                     evidence.add(toolResult);
                     messages.add(Message.tool(tc.getId(), toolResult));
                 }
+                progressRegistry.publish(taskId, "第 " + iterations + " 轮：已检索到 "
+                        + response.getToolCalls().size() + " 项代码证据，继续分析…");
             } else {
                 // final answer — no more tool calls
                 result.put("answer", response.getContent() != null ? response.getContent() : NO_CONTENT_PLACEHOLDER);
@@ -172,7 +191,12 @@ public class AgenticSearchService {
         }
 
         if (!success) {
+            if (progressRegistry.isCancelled(taskId)) {
+                return finishCancelled(result, projectId, userId, startTime, iterations,
+                        toolsCalled, totalPromptTokens, totalCompletionTokens, totalTokenUsed);
+            }
             // 工具轮次用尽模型仍在请求工具：去掉工具再追加一轮强制总结，保证用户拿到答案
+            progressRegistry.publish(taskId, "已达检索轮次上限，正在汇总已获取的信息…");
             messages.add(Message.user(
                     "已达到工具调用轮次上限，请立即基于以上已获取的信息直接给出最终回答，不要再请求调用工具。"));
             AiRequest finalRequest = new AiRequest();
@@ -200,19 +224,26 @@ public class AgenticSearchService {
             result.put("answer", "分析未能在 " + MAX_ITERATIONS + " 轮内完成，请尝试更具体的问题。");
         }
 
+        if (success && progressRegistry.isCancelled(taskId)) {
+            return finishCancelled(result, projectId, userId, startTime, iterations,
+                    toolsCalled, totalPromptTokens, totalCompletionTokens, totalTokenUsed);
+        }
+
         // 输出侧多源交叉验证 + 自动修正轮
         if (success && result.get("answer") instanceof String && !classSummaries.isEmpty()) {
             try {
+                progressRegistry.publish(taskId, "正在进行证据交叉验证…");
                 EvidenceVerifier.VerificationReport report = evidenceVerifier.verify(
                         (String) result.get("answer"), evidence, classSummaries);
                 boolean corrected = false;
                 int correctionRounds = 0;
 
-                if (report.needsCorrection()) {
+                if (report.needsCorrection() && !progressRegistry.isCancelled(taskId)) {
                     int anomalyBefore = report.anomalyCount();
                     if (tokenBudgetManager.tryConsume(CORRECTION_TOKEN_ESTIMATE)) {
                         correctionRounds = 1;
                         try {
+                            progressRegistry.publish(taskId, "发现证据瑕疵，正在自动修正…");
                             List<Message> correctionMessages = new ArrayList<>(messages);
                             correctionMessages.add(Message.assistant((String) result.get("answer")));
                             correctionMessages.add(Message.user(evidenceVerifier.buildCorrectionPrompt(report)));
@@ -262,8 +293,8 @@ public class AgenticSearchService {
         result.put("toolsCalled", toolsCalled);
         result.put("totalTokens", totalTokenUsed);
 
-        // 仅记录真实 AI 回答（降级/失败路径已提前 return，不落历史）
-        if (success) {
+        // 仅记录真实 AI 回答（降级/失败路径已提前 return，不落历史）；被终止的回答同样不落
+        if (success && !progressRegistry.isCancelled(taskId)) {
             recordChatHistory(projectId, userId, question, result);
         }
 
@@ -276,6 +307,19 @@ public class AgenticSearchService {
         log.info("Agentic search completed: projectId={}, iterations={}, tools={}, tokens={}, latency={}ms",
                 projectId, iterations, toolsCalled, totalTokenUsed, elapsed);
 
+        return result;
+    }
+
+    /** 用户取消后的统一收尾：丢弃回答、落失败审计（已消耗 token 仍需记账），不落历史 */
+    private Map<String, Object> finishCancelled(Map<String, Object> result, Long projectId, Long userId,
+                                                long startTime, int iterations, List<String> toolsCalled,
+                                                int totalPromptTokens, int totalCompletionTokens, int totalTokenUsed) {
+        result.put("answer", "本次回答已被用户终止");
+        result.put("cancelled", true);
+        result.put("iterations", iterations);
+        saveAuditLog(aiClient.getModelName(), projectId, userId,
+                totalPromptTokens, totalCompletionTokens, totalTokenUsed,
+                System.currentTimeMillis() - startTime, iterations, toolsCalled, false);
         return result;
     }
 

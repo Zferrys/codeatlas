@@ -34,6 +34,7 @@ public class ImpactAnalysisService {
     private final TokenBudgetManager tokenBudgetManager;
     private final AiClient aiClient;
     private final ChatHistoryService chatHistoryService;
+    private final AiTaskProgressRegistry progressRegistry;
 
     public ImpactAnalysisService(AiAnalysisService aiAnalysisService,
                                   ProjectService projectService,
@@ -41,7 +42,8 @@ public class ImpactAnalysisService {
                                   EvidenceVerifier evidenceVerifier,
                                   TokenBudgetManager tokenBudgetManager,
                                   @Autowired(required = false) AiClient aiClient,
-                                  ChatHistoryService chatHistoryService) {
+                                  ChatHistoryService chatHistoryService,
+                                  AiTaskProgressRegistry progressRegistry) {
         this.aiAnalysisService = aiAnalysisService;
         this.projectService = projectService;
         this.scanService = scanService;
@@ -49,6 +51,7 @@ public class ImpactAnalysisService {
         this.tokenBudgetManager = tokenBudgetManager;
         this.aiClient = aiClient;
         this.chatHistoryService = chatHistoryService;
+        this.progressRegistry = progressRegistry;
     }
 
     /**
@@ -57,6 +60,15 @@ public class ImpactAnalysisService {
     public Map<String, Object> analyzeImpact(Long projectId, String targetClass,
                                               String changeType, String targetMethod,
                                               String description, Long userId) {
+        return analyzeImpact(projectId, targetClass, changeType, targetMethod, description, userId, null);
+    }
+
+    /**
+     * @param taskId 前端进度任务 ID；非 null 时推送阶段事件并支持断开即取消
+     */
+    public Map<String, Object> analyzeImpact(Long projectId, String targetClass,
+                                              String changeType, String targetMethod,
+                                              String description, Long userId, String taskId) {
         changeType = sanitizeUserInput(changeType);
         targetMethod = sanitizeUserInput(targetMethod);
         description = sanitizeUserInput(description);
@@ -85,6 +97,7 @@ public class ImpactAnalysisService {
         result.put("targetMethod", targetMethod);
         result.put("totalImpacted", totalImpacted);
         result.put("impactPaths", impactPaths);
+        progressRegistry.publish(taskId, "正在分析依赖影响链路…");
 
         boolean aiAnswered = false;
         if (target != null) {
@@ -94,6 +107,9 @@ public class ImpactAnalysisService {
                 log.warn("Impact AI analysis skipped: empty prompt for projectId={}", projectId);
             } else if (aiClient == null) {
                 log.info("Impact AI analysis skipped: no AI client for projectId={}", projectId);
+            } else if (progressRegistry.isCancelled(taskId)) {
+                result.put("aiAnalysis", "本次分析已被用户终止");
+                result.put("cancelled", true);
             } else {
                 int estimatedTokens = prompt.length() * 2 / 3 + 4096;
                 if (!tokenBudgetManager.tryConsume(estimatedTokens)) {
@@ -107,10 +123,17 @@ public class ImpactAnalysisService {
                         request.setSystemPrompt(
                                 "你是一位资深软件架构师。分析代码变更的影响范围，评估风险，给出建议。用中文回答，保留类名/方法名原文。");
                         request.setTemperature(0.3);
-                        request.setMaxTokens(4096);
+                        // 推理模型 reasoning 与正文共享 max_tokens：4096 档实测被推理 100% 耗尽（双模型空正文），对齐架构模式识别的成功档位
+                        request.setMaxTokens(8192);
+                        progressRegistry.publish(taskId, "AI 正在评估变更风险…");
 
                         AiResponse response = aiAnalysisService.callAiWithResilience(request);
-                        if (response != null) {
+                        if (response != null && progressRegistry.isCancelled(taskId)) {
+                            // 用户已终止：token 已消耗仍需记账，但结果丢弃不落历史
+                            saveAudit("IMPACT_ANALYSIS", projectId, userId, response, null, true);
+                            result.put("aiAnalysis", "本次分析已被用户终止");
+                            result.put("cancelled", true);
+                        } else if (response != null) {
                             result.put("aiAnalysis", response.getContent());
                             saveAudit("IMPACT_ANALYSIS", projectId, userId, response, null, true);
                             aiAnswered = response.getContent() != null && !response.getContent().isEmpty();
@@ -152,6 +175,13 @@ public class ImpactAnalysisService {
      * 上下文限定问答：基于项目代码上下文回答用户问题。
      */
     public Map<String, Object> contextualQa(Long projectId, String question, String classFqn, Long userId) {
+        return contextualQa(projectId, question, classFqn, userId, null);
+    }
+
+    /**
+     * @param taskId 前端进度任务 ID；非 null 时推送阶段事件并支持断开即取消
+     */
+    public Map<String, Object> contextualQa(Long projectId, String question, String classFqn, Long userId, String taskId) {
         question = sanitizeUserInput(question);
         String sanitizedClassFqn = sanitizeUserInput(classFqn);
 
@@ -191,6 +221,12 @@ public class ImpactAnalysisService {
             return result;
         }
 
+        if (progressRegistry.isCancelled(taskId)) {
+            result.put("answer", "本次回答已被用户终止");
+            result.put("cancelled", true);
+            return result;
+        }
+
         int estimatedTokens = prompt.length() * 2 / 3 + 4096;
         if (!tokenBudgetManager.tryConsume(estimatedTokens)) {
             log.warn("AI token monthly budget exceeded, rejecting context QA for projectId={}", projectId);
@@ -205,6 +241,7 @@ public class ImpactAnalysisService {
             request.setSystemPrompt("你是一位资深软件架构师，正在帮助开发者理解代码库。基于提供的项目上下文准确回答问题。");
             request.setTemperature(0.3);
             request.setMaxTokens(4096);
+            progressRegistry.publish(taskId, "AI 正在组织回答…");
 
             AiResponse response = aiAnalysisService.callAiWithResilience(request);
             if (response == null || response.getContent() == null || response.getContent().isEmpty()) {
@@ -213,17 +250,25 @@ public class ImpactAnalysisService {
                 return result;
             }
             saveAudit("CONTEXT_QA", projectId, userId, response, null, true);
+            if (progressRegistry.isCancelled(taskId)) {
+                // 用户已终止：token 已消耗仍需记账，但结果丢弃不落历史
+                result.put("answer", "本次回答已被用户终止");
+                result.put("cancelled", true);
+                return result;
+            }
 
             String answer = response.getContent();
             // 输出侧证据验证：答案对照项目数据与本次注入的上下文
             if (!classes.isEmpty()) {
                 try {
+                    progressRegistry.publish(taskId, "正在进行证据交叉验证…");
                     List<String> evidence = Collections.singletonList(prompt);
                     EvidenceVerifier.VerificationReport report = evidenceVerifier.verify(answer, evidence, classes);
                     boolean corrected = false;
                     int correctionRounds = 0;
-                    if (report.needsCorrection()) {
+                    if (report.needsCorrection() && !progressRegistry.isCancelled(taskId)) {
                         correctionRounds = 1;
+                        progressRegistry.publish(taskId, "发现证据瑕疵，正在自动修正…");
                         String correctedAnswer = runContextCorrection(prompt, answer, report);
                         if (correctedAnswer != null && !correctedAnswer.isEmpty()) {
                             EvidenceVerifier.VerificationReport recheck =
@@ -245,8 +290,10 @@ public class ImpactAnalysisService {
                 }
             }
             result.put("answer", answer);
-            recordChatHistory(projectId, userId, ChatHistoryService.SCOPE_CLASS, sanitizedClassFqn,
-                    question, answer, result.get("verification"));
+            if (!progressRegistry.isCancelled(taskId)) {
+                recordChatHistory(projectId, userId, ChatHistoryService.SCOPE_CLASS, sanitizedClassFqn,
+                        question, answer, result.get("verification"));
+            }
             return result;
         } catch (Exception e) {
             log.error("Context QA failed for projectId={}", projectId, e);

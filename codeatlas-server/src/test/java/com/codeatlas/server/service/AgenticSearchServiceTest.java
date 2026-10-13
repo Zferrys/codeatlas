@@ -10,6 +10,7 @@ import com.codeatlas.server.entity.AiAuditLogEntity;
 import com.codeatlas.server.entity.ClassSummaryEntity;
 import com.codeatlas.server.entity.Project;
 import com.codeatlas.server.mapper.AiAuditLogMapper;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -65,7 +66,7 @@ class AgenticSearchServiceTest {
     void setUp() {
         agenticSearchService = new AgenticSearchService(aiClient, toolRegistry,
                 projectService, scanService, tokenBudgetManager, aiAuditLogMapper,
-                new EvidenceVerifier(), chatHistoryService);
+                new EvidenceVerifier(), chatHistoryService, new AiTaskProgressRegistry(new ObjectMapper()));
 
         Project project = new Project();
         project.setName("TestProject");

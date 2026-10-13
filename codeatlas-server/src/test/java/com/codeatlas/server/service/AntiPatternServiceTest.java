@@ -8,6 +8,7 @@ import com.codeatlas.server.entity.ClassSummaryEntity;
 import com.codeatlas.server.entity.InsightEntity;
 import com.codeatlas.server.entity.Project;
 import com.codeatlas.server.entity.ScanRecord;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -59,14 +60,16 @@ class AntiPatternServiceTest {
     @BeforeEach
     void setUp() {
         service = new AntiPatternService(aiAnalysisService, projectService, scanService,
-                insightService, hallucinationChecker, tokenBudgetManager, aiClient);
+                insightService, hallucinationChecker, tokenBudgetManager, aiClient,
+                new AiTaskProgressRegistry(new ObjectMapper()));
     }
 
     @Test
     @DisplayName("AI 客户端未配置时跳过并返回 null")
     void analyzeAntiPatterns_noAiClient_shouldReturnNull() {
         AntiPatternService noAi = new AntiPatternService(aiAnalysisService, projectService, scanService,
-                insightService, hallucinationChecker, tokenBudgetManager, null);
+                insightService, hallucinationChecker, tokenBudgetManager, null,
+                new AiTaskProgressRegistry(new ObjectMapper()));
 
         assertNull(noAi.analyzeAntiPatterns(PROJECT_ID, USER_ID));
     }

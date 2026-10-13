@@ -29,15 +29,21 @@ public class ConstitutionCheckService extends AbstractInsightAnalysisService {
                                     ConstitutionRuleService constitutionRuleService,
                                     HallucinationChecker hallucinationChecker,
                                     TokenBudgetManager tokenBudgetManager,
-                                    @Autowired(required = false) AiClient aiClient) {
+                                    @Autowired(required = false) AiClient aiClient,
+                                    AiTaskProgressRegistry progressRegistry) {
         super(aiAnalysisService, projectService, scanService, insightService,
-                hallucinationChecker, tokenBudgetManager, aiClient);
+                hallucinationChecker, tokenBudgetManager, aiClient, progressRegistry);
         this.constitutionRuleService = constitutionRuleService;
     }
 
     @Timed(value = "ai.analysis.duration", description = "AI constitution compliance check duration")
     public InsightEntity analyzeConstitution(Long projectId, Long userId) {
         return execute(projectId, userId);
+    }
+
+    /** @param taskId 前端进度任务 ID；非 null 时推送阶段事件并支持断开即取消 */
+    public InsightEntity analyzeConstitution(Long projectId, Long userId, String taskId) {
+        return execute(projectId, userId, taskId);
     }
 
     @Override

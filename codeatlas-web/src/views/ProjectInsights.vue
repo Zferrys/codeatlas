@@ -18,7 +18,7 @@
           @pressEnter="onPressEnter"
         />
         <div class="ask-actions">
-          <a-button type="primary" :loading="asking" :disabled="!question.trim()" @click="ask">
+          <a-button type="primary" :loading="asking" :disabled="asking || !question.trim()" @click="ask">
             {{ asking ? 'AI 搜索与分析中...' : '提问' }}
           </a-button>
           <span class="ask-tip">Enter 发送，Shift+Enter 换行 · 通常需要 10–60 秒</span>
@@ -26,7 +26,11 @@
 
         <div v-if="asking" class="answer-loading">
           <a-spin size="small" />
-          <span>AI 正在搜索代码库并组织回答，请稍候...</span>
+          <div class="progress-body">
+            <div class="progress-stage">{{ activeTask?.stage || 'AI 正在搜索代码库并组织回答…' }}</div>
+            <div class="progress-meta">{{ activeTask?.label || '全局问答' }} · 已等待 {{ activeTask?.elapsedSec || 0 }} 秒</div>
+          </div>
+          <a-button size="small" danger @click="cancelActiveAiTask">终止</a-button>
         </div>
         <div v-else-if="answer" class="answer-box">
           <div class="markdown-body" v-html="renderMarkdown(answer)"></div>
@@ -125,6 +129,7 @@ import { message } from 'ant-design-vue'
 import { QuestionCircleOutlined, HistoryOutlined, DeleteOutlined } from '@ant-design/icons-vue'
 import api from '../api'
 import { renderMarkdown } from '../utils/markdown'
+import { runAiTask, AI_TASK_CANCELLED, cancelActiveAiTask, activeTask } from '../composables/useAiTask'
 
 const route = useRoute()
 const projectId = computed(() => route.params.id)
@@ -170,9 +175,21 @@ async function ask() {
   answer.value = ''
   verification.value = null
   try {
-    const res = await api.post(`/projects/${projectId.value}/ai/context-qa`, { question: q })
-    answer.value = res.data.data?.answer || '未获取到回答'
-    verification.value = res.data.data?.verification || null
+    const data = await runAiTask({
+      projectId: projectId.value,
+      label: '全局问答',
+      execute: ({ taskId, signal }) =>
+        api
+          .post(
+            `/projects/${projectId.value}/ai/context-qa`,
+            { question: q },
+            { headers: { 'X-Ai-Task-Id': taskId }, signal }
+          )
+          .then(res => res.data.data)
+    })
+    if (data === AI_TASK_CANCELLED) return
+    answer.value = data?.answer || '未获取到回答'
+    verification.value = data?.verification || null
     await loadHistory()
   } catch (e) {
     // 错误提示由响应拦截器统一弹出，此处不再重复
@@ -328,7 +345,7 @@ function formatDate(t) {
 .answer-loading {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   margin-top: 20px;
   padding: 20px;
   background: #fafafa;
@@ -336,6 +353,9 @@ function formatDate(t) {
   color: #888;
   font-size: 13px;
 }
+.progress-body { flex: 1; min-width: 0; }
+.progress-stage { color: #333; font-size: 13px; margin-bottom: 4px; }
+.progress-meta { color: #999; font-size: 12px; }
 .answer-box {
   margin-top: 20px;
   padding: 20px 24px;

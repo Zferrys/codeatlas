@@ -7,6 +7,7 @@ import com.codeatlas.server.entity.ScanRecord;
 import com.codeatlas.server.security.CodeAtlasUserDetails;
 import com.codeatlas.server.service.AgenticSearchService;
 import com.codeatlas.server.service.AiAnalysisService;
+import com.codeatlas.server.service.AiTaskProgressRegistry;
 import com.codeatlas.server.service.AntiPatternService;
 import com.codeatlas.server.service.ArchitecturePatternService;
 import com.codeatlas.server.service.ConstitutionCheckService;
@@ -40,6 +41,7 @@ public class AiController {
     private final AntiPatternService antiPatternService;
     private final ConstitutionCheckService constitutionCheckService;
     private final ProjectAccessChecker projectAccessChecker;
+    private final AiTaskProgressRegistry progressRegistry;
 
     public AiController(AiAnalysisService aiAnalysisService,
                         ImpactAnalysisService impactAnalysisService,
@@ -50,7 +52,8 @@ public class AiController {
                         ArchitecturePatternService architecturePatternService,
                         AntiPatternService antiPatternService,
                         ConstitutionCheckService constitutionCheckService,
-                        ProjectAccessChecker projectAccessChecker) {
+                        ProjectAccessChecker projectAccessChecker,
+                        AiTaskProgressRegistry progressRegistry) {
         this.aiAnalysisService = aiAnalysisService;
         this.impactAnalysisService = impactAnalysisService;
         this.insightService = insightService;
@@ -61,6 +64,7 @@ public class AiController {
         this.antiPatternService = antiPatternService;
         this.constitutionCheckService = constitutionCheckService;
         this.projectAccessChecker = projectAccessChecker;
+        this.progressRegistry = progressRegistry;
     }
 
     @GetMapping("/story")
@@ -86,22 +90,27 @@ public class AiController {
     @Operation(summary = "生成/刷新架构叙事")
     @PreAuthorize("hasAnyRole('ADMIN','ARCHITECT','DEVELOPER')")
     public ApiResponse<Map<String, Object>> generateStory(@PathVariable Long projectId,
+                                                          @RequestHeader(value = "X-Ai-Task-Id", required = false) String taskId,
                                                           @AuthenticationPrincipal CodeAtlasUserDetails principal) {
-        Project project = projectService.getProjectEntity(projectId);
-        projectAccessChecker.check(project, projectId, principal.getUserId());
-        ScanRecord scan = scanService.getLatestScanEntity(projectId);
-        if (scan == null) {
-            return ApiResponse.error(400, "请先触发一次扫描");
+        try {
+            Project project = projectService.getProjectEntity(projectId);
+            projectAccessChecker.check(project, projectId, principal.getUserId());
+            ScanRecord scan = scanService.getLatestScanEntity(projectId);
+            if (scan == null) {
+                return ApiResponse.error(400, "请先触发一次扫描");
+            }
+            InsightEntity insight = aiAnalysisService.analyzeArchitecture(projectId, scan.getId(), taskId);
+            if (insight == null) {
+                return ApiResponse.error(500, "AI 分析失败：模型未返回有效内容或服务暂不可用，请稍后重试");
+            }
+            Map<String, Object> result = new HashMap<>();
+            result.put("id", insight.getId());
+            result.put("title", insight.getTitle());
+            result.put("confidence", insight.getConfidence());
+            return ApiResponse.success(result);
+        } finally {
+            progressRegistry.complete(taskId);
         }
-        InsightEntity insight = aiAnalysisService.analyzeArchitecture(projectId, scan.getId());
-        if (insight == null) {
-            return ApiResponse.error(500, "AI 分析失败：模型未返回有效内容或服务暂不可用，请稍后重试");
-        }
-        Map<String, Object> result = new HashMap<>();
-        result.put("id", insight.getId());
-        result.put("title", insight.getTitle());
-        result.put("confidence", insight.getConfidence());
-        return ApiResponse.success(result);
     }
 
     @PostMapping("/impact-simulate")
@@ -109,20 +118,25 @@ public class AiController {
     @PreAuthorize("hasAnyRole('ADMIN','ARCHITECT','DEVELOPER')")
     public ApiResponse<Map<String, Object>> impactSimulate(@PathVariable Long projectId,
                                                            @RequestBody Map<String, Object> body,
+                                                           @RequestHeader(value = "X-Ai-Task-Id", required = false) String taskId,
                                                            @AuthenticationPrincipal CodeAtlasUserDetails principal) {
-        String targetClass = (String) body.get("targetClass");
-        String changeType = (String) body.getOrDefault("changeType", "MODIFY_METHOD");
-        String targetMethod = (String) body.get("targetMethod");
-        String description = (String) body.getOrDefault("description", "");
+        try {
+            String targetClass = (String) body.get("targetClass");
+            String changeType = (String) body.getOrDefault("changeType", "MODIFY_METHOD");
+            String targetMethod = (String) body.get("targetMethod");
+            String description = (String) body.getOrDefault("description", "");
 
-        if (targetClass == null || targetClass.isEmpty()) {
-            return ApiResponse.error(400, "targetClass 不能为空");
+            if (targetClass == null || targetClass.isEmpty()) {
+                return ApiResponse.error(400, "targetClass 不能为空");
+            }
+
+            projectAccessChecker.check(projectId, principal.getUserId());
+            Map<String, Object> result = impactAnalysisService.analyzeImpact(
+                    projectId, targetClass, changeType, targetMethod, description, principal.getUserId(), taskId);
+            return ApiResponse.success(result);
+        } finally {
+            progressRegistry.complete(taskId);
         }
-
-        projectAccessChecker.check(projectId, principal.getUserId());
-        Map<String, Object> result = impactAnalysisService.analyzeImpact(
-                projectId, targetClass, changeType, targetMethod, description, principal.getUserId());
-        return ApiResponse.success(result);
     }
 
     @PostMapping("/context-qa")
@@ -130,29 +144,34 @@ public class AiController {
     @PreAuthorize("isAuthenticated()")
     public ApiResponse<Map<String, Object>> contextQa(@PathVariable Long projectId,
                                                        @RequestBody Map<String, Object> body,
+                                                       @RequestHeader(value = "X-Ai-Task-Id", required = false) String taskId,
                                                        @AuthenticationPrincipal CodeAtlasUserDetails principal) {
-        String question = (String) body.get("question");
-        String classFqn = (String) body.get("classFqn");
+        try {
+            String question = (String) body.get("question");
+            String classFqn = (String) body.get("classFqn");
 
-        if (question == null || question.trim().isEmpty()) {
-            return ApiResponse.error(400, "question 不能为空");
-        }
+            if (question == null || question.trim().isEmpty()) {
+                return ApiResponse.error(400, "question 不能为空");
+            }
 
-        projectAccessChecker.check(projectId, principal.getUserId());
+            projectAccessChecker.check(projectId, principal.getUserId());
 
-        // 未指定类名 → Agentic Search（AI 自动搜索代码库）
-        if (classFqn == null || classFqn.trim().isEmpty()) {
-            Map<String, Object> result = agenticSearchService.search(projectId, question.trim(), principal.getUserId());
+            // 未指定类名 → Agentic Search（AI 自动搜索代码库）
+            if (classFqn == null || classFqn.trim().isEmpty()) {
+                Map<String, Object> result = agenticSearchService.search(projectId, question.trim(), principal.getUserId(), taskId);
+                return ApiResponse.success(result);
+            }
+
+            // 指定了类名 → 精确上下文匹配（兼容原有行为）
+            Map<String, Object> result = impactAnalysisService.contextualQa(projectId, question, classFqn, principal.getUserId(), taskId);
             return ApiResponse.success(result);
+        } finally {
+            progressRegistry.complete(taskId);
         }
-
-        // 指定了类名 → 精确上下文匹配（兼容原有行为）
-        Map<String, Object> result = impactAnalysisService.contextualQa(projectId, question, classFqn, principal.getUserId());
-        return ApiResponse.success(result);
     }
 
     @GetMapping("/pattern")
-    @Operation(summary = "获取最新架构模式识别")
+    @Operation(summary = "获取最新设计模式报告")
     @PreAuthorize("isAuthenticated()")
     public ApiResponse<Map<String, Object>> getPattern(@PathVariable Long projectId,
                                                        @AuthenticationPrincipal CodeAtlasUserDetails principal) {
@@ -161,12 +180,13 @@ public class AiController {
     }
 
     @PostMapping("/pattern")
-    @Operation(summary = "生成/刷新架构模式识别")
+    @Operation(summary = "生成/刷新设计模式报告")
     @PreAuthorize("hasAnyRole('ADMIN','ARCHITECT','DEVELOPER')")
     public ApiResponse<Map<String, Object>> generatePattern(@PathVariable Long projectId,
+                                                            @RequestHeader(value = "X-Ai-Task-Id", required = false) String taskId,
                                                             @AuthenticationPrincipal CodeAtlasUserDetails principal) {
         projectAccessChecker.check(projectId, principal.getUserId());
-        return generateInsight(() -> architecturePatternService.analyzePatterns(projectId, principal.getUserId()));
+        return generateInsight(() -> architecturePatternService.analyzePatterns(projectId, principal.getUserId(), taskId), taskId);
     }
 
     @GetMapping("/anti-pattern")
@@ -182,9 +202,10 @@ public class AiController {
     @Operation(summary = "生成/刷新反模式检测")
     @PreAuthorize("hasAnyRole('ADMIN','ARCHITECT','DEVELOPER')")
     public ApiResponse<Map<String, Object>> generateAntiPattern(@PathVariable Long projectId,
+                                                                @RequestHeader(value = "X-Ai-Task-Id", required = false) String taskId,
                                                                 @AuthenticationPrincipal CodeAtlasUserDetails principal) {
         projectAccessChecker.check(projectId, principal.getUserId());
-        return generateInsight(() -> antiPatternService.analyzeAntiPatterns(projectId, principal.getUserId()));
+        return generateInsight(() -> antiPatternService.analyzeAntiPatterns(projectId, principal.getUserId(), taskId), taskId);
     }
 
     @GetMapping("/constitution-check")
@@ -200,21 +221,26 @@ public class AiController {
     @Operation(summary = "生成/刷新规约合规检查")
     @PreAuthorize("hasAnyRole('ADMIN','ARCHITECT','DEVELOPER')")
     public ApiResponse<Map<String, Object>> generateConstitutionCheck(@PathVariable Long projectId,
+                                                                      @RequestHeader(value = "X-Ai-Task-Id", required = false) String taskId,
                                                                       @AuthenticationPrincipal CodeAtlasUserDetails principal) {
         projectAccessChecker.check(projectId, principal.getUserId());
-        return generateInsight(() -> constitutionCheckService.analyzeConstitution(projectId, principal.getUserId()));
+        return generateInsight(() -> constitutionCheckService.analyzeConstitution(projectId, principal.getUserId(), taskId), taskId);
     }
 
-    private ApiResponse<Map<String, Object>> generateInsight(Supplier<InsightEntity> analysis) {
-        InsightEntity insight = analysis.get();
-        if (insight == null) {
-            return ApiResponse.error(500, "AI 分析失败：服务未就绪或返回为空，请稍后重试");
+    private ApiResponse<Map<String, Object>> generateInsight(Supplier<InsightEntity> analysis, String taskId) {
+        try {
+            InsightEntity insight = analysis.get();
+            if (insight == null) {
+                return ApiResponse.error(500, "AI 分析失败：服务未就绪或返回为空，请稍后重试");
+            }
+            Map<String, Object> result = new HashMap<>();
+            result.put("id", insight.getId());
+            result.put("title", insight.getTitle());
+            result.put("confidence", insight.getConfidence());
+            return ApiResponse.success(result);
+        } finally {
+            progressRegistry.complete(taskId);
         }
-        Map<String, Object> result = new HashMap<>();
-        result.put("id", insight.getId());
-        result.put("title", insight.getTitle());
-        result.put("confidence", insight.getConfidence());
-        return ApiResponse.success(result);
     }
 
     private Map<String, Object> latestInsightMap(Long projectId, String type) {

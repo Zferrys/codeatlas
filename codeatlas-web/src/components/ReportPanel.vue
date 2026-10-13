@@ -27,6 +27,12 @@
           <a-button type="primary" :loading="generating" @click="generate">
             {{ generating ? 'AI 分析中（约需 30–90 秒）...' : '立即生成' }}
           </a-button>
+          <div v-if="generating" class="report-task-progress">
+            <a-spin size="small" />
+            <span class="task-stage">{{ activeTask?.stage || 'AI 正在生成报告…' }}</span>
+            <span class="task-elapsed">已等待 {{ activeTask?.elapsedSec || 0 }} 秒</span>
+            <a-button size="small" danger @click="cancelActiveAiTask">终止</a-button>
+          </div>
         </a-empty>
       </div>
 
@@ -40,12 +46,36 @@
             </a-tag>
           </template>
           <template #extra>
-            <a-button type="primary" size="small" :loading="generating" @click="generate">
-              <template #icon><ReloadOutlined /></template>
-              {{ generating ? 'AI 分析中...' : '重新生成' }}
-            </a-button>
+            <a-space>
+              <a-dropdown :disabled="!report || generating">
+                <a-button size="small" :disabled="!report || generating">
+                  <template #icon><DownloadOutlined /></template>
+                  导出
+                </a-button>
+                <template #overlay>
+                  <a-menu @click="handleExport">
+                    <a-menu-item key="pdf">
+                      <FilePdfOutlined /> PDF 格式
+                    </a-menu-item>
+                    <a-menu-item key="html">
+                      <FileTextOutlined /> HTML 格式
+                    </a-menu-item>
+                  </a-menu>
+                </template>
+              </a-dropdown>
+              <a-button type="primary" size="small" :loading="generating" @click="generate">
+                <template #icon><ReloadOutlined /></template>
+                {{ generating ? 'AI 分析中...' : '重新生成' }}
+              </a-button>
+            </a-space>
           </template>
         </a-page-header>
+        <div v-if="generating" class="report-task-progress">
+          <a-spin size="small" />
+          <span class="task-stage">{{ activeTask?.stage || 'AI 正在重新生成报告…' }}</span>
+          <span class="task-elapsed">已等待 {{ activeTask?.elapsedSec || 0 }} 秒</span>
+          <a-button size="small" danger @click="cancelActiveAiTask">终止</a-button>
+        </div>
         <p class="report-hint">{{ description }}</p>
         <div class="markdown-body" v-html="renderMarkdown(report.content || '')"></div>
       </div>
@@ -56,9 +86,10 @@
 <script setup>
 import { ref, watch, onMounted, onActivated, onBeforeUnmount } from 'vue'
 import { message } from 'ant-design-vue'
-import { ReloadOutlined } from '@ant-design/icons-vue'
+import { ReloadOutlined, DownloadOutlined, FilePdfOutlined, FileTextOutlined } from '@ant-design/icons-vue'
 import api from '../api'
 import { renderMarkdown } from '../utils/markdown'
+import { runAiTask, AI_TASK_CANCELLED, cancelActiveAiTask, activeTask } from '../composables/useAiTask'
 
 const props = defineProps({
   projectId: { type: String, required: true },
@@ -94,7 +125,11 @@ onActivated(() => {
   }
   init()
 })
-onBeforeUnmount(() => stopPolling())
+onBeforeUnmount(() => {
+  stopPolling()
+  // 组件卸载（如切换报告 tab）时仍在生成：同步终止任务，避免出现看不见进度的后台任务
+  if (generating.value) cancelActiveAiTask()
+})
 
 async function init() {
   await fetchReport()
@@ -171,17 +206,55 @@ async function fetchReport() {
 async function generate() {
   generating.value = true
   try {
-    const res = await api.post(`/projects/${props.projectId}/ai/${props.kind}`)
-    if (res.data.code === 200) {
+    const data = await runAiTask({
+      projectId: props.projectId,
+      label: props.title,
+      execute: ({ taskId, signal }) =>
+        api
+          .post(`/projects/${props.projectId}/ai/${props.kind}`, null, {
+            headers: { 'X-Ai-Task-Id': taskId },
+            signal
+          })
+          .then(res => res.data)
+    })
+    if (data === AI_TASK_CANCELLED) return
+    if (data.code === 200) {
       message.success(props.title + '生成完成')
       await fetchReport()
     } else {
-      message.error(res.data.message || 'AI 分析失败')
+      message.error(data.message || 'AI 分析失败')
     }
   } catch (e) {
     // 错误提示由响应拦截器统一弹出，此处不再重复
   } finally {
     generating.value = false
+  }
+}
+
+async function handleExport({ key }) {
+  if (!report.value) return
+  try {
+    const token = localStorage.getItem('codeatlas_token')
+    const response = await fetch(
+      `/api/v1/projects/${props.projectId}/insights/${props.type}/export?format=${key}`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    )
+    if (!response.ok) {
+      message.error('导出失败')
+      return
+    }
+    const blob = await response.blob()
+    const url = window.URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `codeatlas-${props.type.toLowerCase()}.${key}`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    window.URL.revokeObjectURL(url)
+    message.success('报告已下载')
+  } catch (e) {
+    message.error('导出失败: ' + (e.message || '网络错误'))
   }
 }
 
@@ -197,6 +270,21 @@ function formatDate(date) {
 .report-processing { padding: 60px 0; text-align: center; }
 .processing-hint { color: #999; font-size: 13px; margin-top: 20px; }
 .report-error, .report-empty { padding: 40px 0; }
+.report-task-progress {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 12px 0 16px;
+  padding: 12px 14px;
+  background: #fafafa;
+  border-radius: 8px;
+}
+.report-empty .report-task-progress {
+  max-width: 460px;
+  margin: 16px auto 0;
+}
+.task-stage { flex: 1; min-width: 0; font-size: 13px; color: #333; text-align: left; }
+.task-elapsed { font-size: 12px; color: #999; white-space: nowrap; }
 .report-content { background: #fff; border-radius: 8px; padding: 24px 32px 48px; }
 .report-hint { color: #999; font-size: 13px; margin: 0 0 20px; }
 .markdown-body { line-height: 1.9; color: #333; font-size: 15px; }

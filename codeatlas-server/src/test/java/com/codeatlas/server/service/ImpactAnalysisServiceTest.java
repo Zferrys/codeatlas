@@ -61,9 +61,11 @@ class ImpactAnalysisServiceTest {
     @BeforeEach
     void setUp() {
         serviceWithAi = new ImpactAnalysisService(aiAnalysisService, projectService, scanService,
-                evidenceVerifier, tokenBudgetManager, aiClient, chatHistoryService);
+                evidenceVerifier, tokenBudgetManager, aiClient, chatHistoryService,
+                new AiTaskProgressRegistry(new ObjectMapper()));
         serviceWithoutAi = new ImpactAnalysisService(aiAnalysisService, projectService, scanService,
-                evidenceVerifier, tokenBudgetManager, null, chatHistoryService);
+                evidenceVerifier, tokenBudgetManager, null, chatHistoryService,
+                new AiTaskProgressRegistry(new ObjectMapper()));
     }
 
     private void stubAnalyzeBase() {
