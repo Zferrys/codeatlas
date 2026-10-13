@@ -33,11 +33,7 @@ public class AdminAiModelController {
     @Operation(summary = "切换当前 AI 模型")
     @AuditLog(action = "SWITCH_AI_MODEL", targetType = "SYSTEM", detail = "切换 AI 模型")
     public ApiResponse<Map<String, Object>> switchModel(@RequestBody Map<String, String> body) {
-        try {
-            aiModelService.switchModel(body.get("model"));
-        } catch (IllegalArgumentException e) {
-            return ApiResponse.error(400, e.getMessage());
-        }
+        aiModelService.switchModel(body.get("model"));
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("current", aiModelService.getCurrentModelId());
         return ApiResponse.success(result);

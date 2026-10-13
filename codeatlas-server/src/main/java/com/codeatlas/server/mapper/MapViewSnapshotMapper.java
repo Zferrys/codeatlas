@@ -22,7 +22,8 @@ public interface MapViewSnapshotMapper {
     @Select("SELECT * FROM map_view_snapshot WHERE id = #{id}")
     MapViewSnapshot findById(Long id);
 
+    /** LIMIT 100：视图数由用户自行增长，查询上限兜底防无界列表 */
     @Select("SELECT * FROM map_view_snapshot WHERE project_id = #{projectId} "
-            + "AND (user_id = #{userId} OR is_public = 1) ORDER BY updated_at DESC")
+            + "AND (user_id = #{userId} OR is_public = 1) ORDER BY updated_at DESC LIMIT 100")
     List<MapViewSnapshot> findByProjectId(@Param("projectId") Long projectId, @Param("userId") Long userId);
 }

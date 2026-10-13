@@ -102,6 +102,13 @@ function getNodeColor(layer) {
   return LAYER_COLORS[layer.toLowerCase()] || LAYER_COLORS['unknown']
 }
 
+// tooltip 走 innerHTML，插值内容必须转义防 XSS
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, ch => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[ch]))
+}
+
 async function fetchMapData() {
   loading.value = true
   error.value = null
@@ -228,9 +235,9 @@ function renderGraph(data) {
     const rect = container.getBoundingClientRect()
     const x = e.canvasX + rect.left + 12
     const y = e.canvasY + rect.top + 12
-    tooltipEl.innerHTML = `<b>${model.label}</b><br/>
-      <span style="opacity:0.7;font-size:11px">${model.id}</span><br/>
-      方法: ${model.methods} | 行数: ${model.lineCount} | 分层: ${model.layer || 'unknown'}`
+    tooltipEl.innerHTML = `<b>${escapeHtml(model.label)}</b><br/>
+      <span style="opacity:0.7;font-size:11px">${escapeHtml(model.id)}</span><br/>
+      方法: ${escapeHtml(model.methods)} | 行数: ${escapeHtml(model.lineCount)} | 分层: ${escapeHtml(model.layer || 'unknown')}`
     tooltipEl.style.display = 'block'
     tooltipEl.style.left = x + 'px'
     tooltipEl.style.top = y + 'px'

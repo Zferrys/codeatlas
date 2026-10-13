@@ -42,13 +42,13 @@ public class InsightServiceImpl implements InsightService {
 
     @Override
     public InsightEntity getLatestArchStory(Long projectId) {
-        List<InsightEntity> list = insightMapper.findByProjectIdAndType(projectId, "ARCH_STORY");
+        List<InsightEntity> list = insightMapper.findLatestByProjectIdAndType(projectId, "ARCH_STORY");
         return list.isEmpty() ? null : list.get(0);
     }
 
     @Override
     public InsightEntity getLatestByType(Long projectId, String type) {
-        List<InsightEntity> list = insightMapper.findByProjectIdAndType(projectId, type);
+        List<InsightEntity> list = insightMapper.findLatestByProjectIdAndType(projectId, type);
         return list.isEmpty() ? null : list.get(0);
     }
 }

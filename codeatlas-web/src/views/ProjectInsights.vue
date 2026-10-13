@@ -26,7 +26,13 @@
         <a-empty description="暂无 AI 洞察">
           <template #description>
             <p>触发一次扫描后，AI 将自动分析代码并生成洞察</p>
+            <p style="color: #999; font-size: 12px;">也可手动触发以下分析</p>
           </template>
+          <div class="insights-actions" style="justify-content: center; margin-top: 8px;">
+            <a-button size="small" :loading="generating === 'pattern'" @click="generateAi('pattern')">架构模式识别</a-button>
+            <a-button size="small" :loading="generating === 'anti-pattern'" @click="generateAi('anti-pattern')">反模式检测</a-button>
+            <a-button size="small" :loading="generating === 'constitution-check'" @click="generateAi('constitution-check')">规约检查</a-button>
+          </div>
         </a-empty>
       </div>
 
@@ -37,9 +43,15 @@
             <a-radio-button value="ARCH_STORY">架构叙事</a-radio-button>
             <a-radio-button value="ANTI_PATTERN">反模式</a-radio-button>
             <a-radio-button value="PATTERN">设计模式</a-radio-button>
+            <a-radio-button value="CONSTITUTION_CHECK">规约检查</a-radio-button>
             <a-radio-button value="IMPACT">影响分析</a-radio-button>
             <a-radio-button value="QA">问答</a-radio-button>
           </a-radio-group>
+          <div class="insights-actions">
+            <a-button size="small" :loading="generating === 'pattern'" @click="generateAi('pattern')">架构模式识别</a-button>
+            <a-button size="small" :loading="generating === 'anti-pattern'" @click="generateAi('anti-pattern')">反模式检测</a-button>
+            <a-button size="small" :loading="generating === 'constitution-check'" @click="generateAi('constitution-check')">规约检查</a-button>
+          </div>
           <span class="insight-count">共 {{ filteredInsights.length }} 条</span>
         </div>
 
@@ -115,8 +127,10 @@ import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import { marked } from 'marked'
 import { markedHighlight } from 'marked-highlight'
+import DOMPurify from 'dompurify'
 import hljs from 'highlight.js'
 import 'highlight.js/styles/github.css'
+import { message } from 'ant-design-vue'
 import { ClockCircleOutlined } from '@ant-design/icons-vue'
 import api from '../api'
 
@@ -140,6 +154,7 @@ const activeType = ref('all')
 const selectedInsight = ref(null)
 const modalVisible = ref(false)
 const aiProcessing = ref(false)
+const generating = ref(null)
 let pollTimer = null
 
 watch(selectedInsight, (val) => {
@@ -206,6 +221,24 @@ async function fetchInsights() {
   }
 }
 
+async function generateAi(kind) {
+  generating.value = kind
+  try {
+    const res = await api.post(`/projects/${projectId.value}/ai/${kind}`)
+    if (res.data.code === 200) {
+      message.success('生成完成')
+      activeType.value = 'all'
+      await fetchInsights()
+    } else {
+      message.error(res.data.message || 'AI 分析失败')
+    }
+  } catch (e) {
+    message.error(e.response?.data?.message || 'AI 服务不可用')
+  } finally {
+    generating.value = null
+  }
+}
+
 function onTypeChange() {
   selectedInsight.value = null
 }
@@ -226,7 +259,7 @@ function renderPreview(content) {
 
 function renderMarkdown(content) {
   if (!content) return ''
-  return marked(content)
+  return DOMPurify.sanitize(marked(content))
 }
 
 function typeIcon(type) {
@@ -234,6 +267,7 @@ function typeIcon(type) {
     'ARCH_STORY': 'A',
     'ANTI_PATTERN': '!',
     'PATTERN': 'P',
+    'CONSTITUTION_CHECK': 'C',
     'IMPACT': 'I',
     'QA': '?'
   }
@@ -245,6 +279,7 @@ function typeColor(type) {
     'ARCH_STORY': '#1890ff',
     'ANTI_PATTERN': '#ff4d4f',
     'PATTERN': '#52c41a',
+    'CONSTITUTION_CHECK': '#13c2c2',
     'IMPACT': '#fa8c16',
     'QA': '#722ed1'
   }
@@ -256,6 +291,7 @@ function typeLabel(type) {
     'ARCH_STORY': '架构叙事',
     'ANTI_PATTERN': '反模式',
     'PATTERN': '设计模式',
+    'CONSTITUTION_CHECK': '规约检查',
     'IMPACT': '影响分析',
     'QA': '问答'
   }
@@ -295,6 +331,7 @@ function formatDate(date) {
   gap: 8px;
 }
 .insight-count { font-size: 13px; color: #999; }
+.insights-actions { display: flex; gap: 8px; }
 .insight-card {
   border-radius: 12px;
   height: 100%;

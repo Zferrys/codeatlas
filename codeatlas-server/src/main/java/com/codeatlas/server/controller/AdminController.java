@@ -34,24 +34,16 @@ public class AdminController {
     @Operation(summary = "修改用户角色")
     public ApiResponse<Void> updateRole(@PathVariable Long id,
                                          @RequestParam String role) {
-        try {
-            adminService.updateRole(id, role);
-            return ApiResponse.success(null);
-        } catch (IllegalArgumentException e) {
-            return ApiResponse.error(400, e.getMessage());
-        }
+        adminService.updateRole(id, role);
+        return ApiResponse.success(null);
     }
 
     @PutMapping("/users/{id}/status")
     @Operation(summary = "修改用户状态")
     public ApiResponse<Void> updateStatus(@PathVariable Long id,
                                            @RequestParam int status) {
-        try {
-            adminService.updateStatus(id, status);
-            return ApiResponse.success(null);
-        } catch (IllegalArgumentException e) {
-            return ApiResponse.error(400, e.getMessage());
-        }
+        adminService.updateStatus(id, status);
+        return ApiResponse.success(null);
     }
 
     @GetMapping("/audit-log")

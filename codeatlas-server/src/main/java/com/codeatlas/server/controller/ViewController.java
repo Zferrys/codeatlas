@@ -29,18 +29,11 @@ public class ViewController {
     public ApiResponse<Map<String, Object>> saveView(@PathVariable Long projectId,
                                                       @RequestBody Map<String, Object> body,
                                                       @AuthenticationPrincipal CodeAtlasUserDetails principal) {
-        try {
-            String name = (String) body.getOrDefault("name", "未命名视图");
-            boolean isPublic = Boolean.TRUE.equals(body.get("isPublic"));
-            Object viewState = body.get("viewState");
-            if (viewState == null) {
-                return ApiResponse.error(400, "viewState 不能为空");
-            }
-            String viewStateStr = viewState instanceof String ? (String) viewState : viewState.toString();
-            return ApiResponse.success(mapViewService.saveView(projectId, principal.getUserId(), name, isPublic, viewStateStr));
-        } catch (IllegalArgumentException e) {
-            return ApiResponse.error(400, e.getMessage());
-        }
+        String name = (String) body.getOrDefault("name", "未命名视图");
+        boolean isPublic = Boolean.TRUE.equals(body.get("isPublic"));
+        Object viewState = body.get("viewState");
+        String viewStateStr = viewState == null ? null : String.valueOf(viewState);
+        return ApiResponse.success(mapViewService.saveView(projectId, principal.getUserId(), name, isPublic, viewStateStr));
     }
 
     @GetMapping
@@ -57,11 +50,7 @@ public class ViewController {
     public ApiResponse<Void> deleteView(@PathVariable Long projectId,
                                          @PathVariable Long viewId,
                                          @AuthenticationPrincipal CodeAtlasUserDetails principal) {
-        try {
-            mapViewService.deleteView(viewId, principal.getUserId());
-            return ApiResponse.success(null);
-        } catch (IllegalArgumentException e) {
-            return ApiResponse.error(404, e.getMessage());
-        }
+        mapViewService.deleteView(viewId, principal.getUserId());
+        return ApiResponse.success(null);
     }
 }

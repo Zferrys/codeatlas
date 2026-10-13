@@ -11,9 +11,6 @@ public interface ViolationMapper {
     /** 严重度按 BLOCKER > ERROR > WARN > INFO 排序（字母序 DESC 会把 BLOCKER 排最后） */
     String SEVERITY_ORDER = "CASE severity WHEN 'BLOCKER' THEN 1 WHEN 'ERROR' THEN 2 WHEN 'WARN' THEN 3 ELSE 4 END";
 
-    @Select("SELECT * FROM violation WHERE project_id = #{projectId} ORDER BY " + SEVERITY_ORDER + ", created_at DESC")
-    List<ViolationEntity> findByProjectId(Long projectId);
-
     @Select("SELECT COUNT(*) FROM violation WHERE project_id = #{projectId}")
     long countByProjectId(Long projectId);
 

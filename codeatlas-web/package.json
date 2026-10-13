@@ -13,6 +13,7 @@
     "@antv/g6": "^4.8.25",
     "ant-design-vue": "^4.2.6",
     "axios": "^1.18.1",
+    "dompurify": "^3.4.17",
     "highlight.js": "^11.11.1",
     "marked": "^18.0.7",
     "marked-highlight": "^2.2.4",

@@ -68,7 +68,8 @@ public class PromptTemplate {
         return VAR_PATTERN.matcher(templateContent).replaceAll(match -> {
             String key = match.group(1);
             String value = variables.getOrDefault(key, "");
-            return value.replace("$", "\\$");
+            // 替换串中 \ 与 $ 都是特殊字符：反斜杠必须先转义，否则会触发 Illegal group reference 或丢字符
+            return value.replace("\\", "\\\\").replace("$", "\\$");
         });
     }
 

@@ -1,5 +1,6 @@
 package com.codeatlas.server.service.impl;
 
+import com.codeatlas.common.exception.BusinessException;
 import com.codeatlas.server.entity.MapViewSnapshot;
 import com.codeatlas.server.mapper.MapViewSnapshotMapper;
 import com.codeatlas.server.service.MapViewService;
@@ -22,7 +23,7 @@ public class MapViewServiceImpl implements MapViewService {
     @Override
     public Map<String, Object> saveView(Long projectId, Long userId, String name, boolean isPublic, String viewState) {
         if (viewState == null) {
-            throw new IllegalArgumentException("viewState 不能为空");
+            throw new BusinessException(400, "viewState 不能为空");
         }
         projectAccessChecker.check(projectId, userId);
         MapViewSnapshot snapshot = new MapViewSnapshot();
@@ -60,7 +61,7 @@ public class MapViewServiceImpl implements MapViewService {
     public void deleteView(Long viewId, Long userId) {
         int affected = mapper.deleteByIdAndUser(viewId, userId);
         if (affected == 0) {
-            throw new IllegalArgumentException("视图不存在或无权删除");
+            throw new BusinessException(404, "视图不存在或无权删除");
         }
     }
 }

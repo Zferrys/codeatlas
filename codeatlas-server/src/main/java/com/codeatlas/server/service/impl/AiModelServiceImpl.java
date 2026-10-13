@@ -1,5 +1,6 @@
 package com.codeatlas.server.service.impl;
 
+import com.codeatlas.common.exception.BusinessException;
 import com.codeatlas.engine.ai.AiClient;
 import com.codeatlas.engine.ai.AiRequest;
 import com.codeatlas.engine.ai.ClaudeClient;
@@ -115,11 +116,11 @@ public class AiModelServiceImpl implements AiModelService {
     @Override
     public void switchModel(String modelId) {
         if (modelId == null || modelId.trim().isEmpty()) {
-            throw new IllegalArgumentException("模型 ID 不能为空");
+            throw new BusinessException(400, "模型 ID 不能为空");
         }
         String id = modelId.trim();
         if (findVisibleModel(id) == null) {
-            throw new IllegalArgumentException("未知模型: " + id);
+            throw new BusinessException(400, "未知模型: " + id);
         }
         SystemConfigEntity config = new SystemConfigEntity();
         config.setConfigKey(CONFIG_KEY_CURRENT_MODEL);

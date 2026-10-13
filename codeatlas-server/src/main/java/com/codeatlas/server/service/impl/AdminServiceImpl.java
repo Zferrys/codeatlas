@@ -1,6 +1,7 @@
 package com.codeatlas.server.service.impl;
 
 import com.codeatlas.common.dto.PageResult;
+import com.codeatlas.common.exception.BusinessException;
 import com.codeatlas.server.mapper.AuditLogMapper;
 import com.codeatlas.server.mapper.UserMapper;
 import com.codeatlas.server.service.AdminService;
@@ -46,7 +47,7 @@ public class AdminServiceImpl implements AdminService {
     public void updateRole(Long id, String role) {
         Set<String> validRoles = Set.of("ADMIN", "ARCHITECT", "DEVELOPER", "VIEWER");
         if (!validRoles.contains(role)) {
-            throw new IllegalArgumentException("无效角色: " + role + "，可选: " + String.join(",", validRoles));
+            throw new BusinessException(400, "无效角色: " + role + "，可选: " + String.join(",", validRoles));
         }
         userMapper.updateRole(id, role);
     }
@@ -54,7 +55,7 @@ public class AdminServiceImpl implements AdminService {
     @Override
     public void updateStatus(Long id, int status) {
         if (status != 0 && status != 1) {
-            throw new IllegalArgumentException("状态值只能为 0(禁用) 或 1(正常)");
+            throw new BusinessException(400, "状态值只能为 0(禁用) 或 1(正常)");
         }
         userMapper.updateStatus(id, status);
     }

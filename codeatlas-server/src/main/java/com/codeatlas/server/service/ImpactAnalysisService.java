@@ -57,6 +57,10 @@ public class ImpactAnalysisService {
     public Map<String, Object> analyzeImpact(Long projectId, String targetClass,
                                               String changeType, String targetMethod,
                                               String description, Long userId) {
+        changeType = sanitizeUserInput(changeType);
+        targetMethod = sanitizeUserInput(targetMethod);
+        description = sanitizeUserInput(description);
+
         Project project = projectService.getProjectEntity(projectId);
         if (project == null) {
             throw new BusinessException(404, "项目不存在");
@@ -116,7 +120,10 @@ public class ImpactAnalysisService {
                             result.put("aiAnalysis", "AI 分析暂不可用，以下为静态依赖分析结果");
                         }
                     } catch (Exception e) {
-                        log.warn("AI impact analysis failed: {}", e.getMessage());
+                        log.warn("AI impact analysis failed for projectId={}", projectId, e);
+                        // 配额已扣，失败路径也必须落审计
+                        saveAudit("IMPACT_ANALYSIS", projectId, userId, null,
+                                "AI call exception: " + e.getMessage(), false);
                         result.put("aiAnalysis", "AI 分析暂不可用，以下为静态依赖分析结果");
                     }
                 }
@@ -146,6 +153,7 @@ public class ImpactAnalysisService {
      */
     public Map<String, Object> contextualQa(Long projectId, String question, String classFqn, Long userId) {
         question = sanitizeUserInput(question);
+        String sanitizedClassFqn = sanitizeUserInput(classFqn);
 
         Project project = projectService.getProjectEntity(projectId);
         if (project == null) {
@@ -155,9 +163,9 @@ public class ImpactAnalysisService {
         List<ClassSummaryEntity> classes = scanService.getClassSummaries(projectId);
 
         ClassSummaryEntity targetClass = null;
-        if (classFqn != null && !classFqn.isEmpty()) {
+        if (!sanitizedClassFqn.isEmpty()) {
             targetClass = classes.stream()
-                    .filter(c -> c.getFqn().equals(classFqn))
+                    .filter(c -> c.getFqn().equals(sanitizedClassFqn))
                     .findFirst().orElse(null);
         }
 
@@ -165,7 +173,7 @@ public class ImpactAnalysisService {
         vars.put("projectName", project.getName());
         vars.put("language", project.getLanguage() != null ? project.getLanguage() : "Java");
         vars.put("contextClass", targetClass != null ? formatClassDetail(targetClass)
-                : "- 类名: " + classFqn + "（未在当前扫描结果中找到该类）\n");
+                : "- 类名: " + sanitizedClassFqn + "（未在当前扫描结果中找到该类）\n");
         vars.put("relatedDependencies", buildRelatedDependencies(targetClass, classes));
         vars.put("userQuestion", question);
 
@@ -174,7 +182,7 @@ public class ImpactAnalysisService {
 
         Map<String, Object> result = new HashMap<>();
         result.put("question", question);
-        result.put("classFqn", classFqn);
+        result.put("classFqn", sanitizedClassFqn);
 
         if (aiClient == null || prompt.isEmpty()) {
             log.warn("Context QA skipped: aiClient={}, emptyPrompt={}, projectId={}",
@@ -237,11 +245,13 @@ public class ImpactAnalysisService {
                 }
             }
             result.put("answer", answer);
-            recordChatHistory(projectId, userId, ChatHistoryService.SCOPE_CLASS, classFqn,
+            recordChatHistory(projectId, userId, ChatHistoryService.SCOPE_CLASS, sanitizedClassFqn,
                     question, answer, result.get("verification"));
             return result;
         } catch (Exception e) {
-            log.error("Context QA failed: {}", e.getMessage());
+            log.error("Context QA failed for projectId={}", projectId, e);
+            // 配额已扣，失败路径也必须落审计
+            saveAudit("CONTEXT_QA", projectId, userId, null, "AI call exception: " + e.getMessage(), false);
             throw new BusinessException(500, "AI 问答服务暂时不可用，请稍后重试");
         }
     }

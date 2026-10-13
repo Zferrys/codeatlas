@@ -120,14 +120,22 @@ public class AgenticSearchService {
                 response = aiClient.chat(request);
             } catch (Exception e) {
                 log.error("Agentic search AI call failed at iteration {}", iterations, e);
-                result.put("answer", "AI 调用失败: " + e.getMessage());
+                // 异常细节只进日志不回传前端；配额已扣，失败路径也必须落审计
+                result.put("answer", "AI 调用失败，请稍后重试。");
                 result.put("iterations", iterations);
+                saveAuditLog(aiClient.getModelName(), projectId, userId,
+                        totalPromptTokens, totalCompletionTokens, totalTokenUsed,
+                        System.currentTimeMillis() - startTime, iterations, toolsCalled, false);
                 return result;
             }
 
             if (response == null) {
+                // 配额已扣，失败路径也必须落审计
                 result.put("answer", "AI 服务暂不可用（所有模型已熔断），请稍后重试。");
                 result.put("iterations", iterations);
+                saveAuditLog(aiClient.getModelName(), projectId, userId,
+                        totalPromptTokens, totalCompletionTokens, totalTokenUsed,
+                        System.currentTimeMillis() - startTime, iterations, toolsCalled, false);
                 return result;
             }
 

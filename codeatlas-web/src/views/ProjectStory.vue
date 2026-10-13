@@ -55,6 +55,7 @@ import { message } from 'ant-design-vue'
 import { ReloadOutlined } from '@ant-design/icons-vue'
 import { marked } from 'marked'
 import { markedHighlight } from 'marked-highlight'
+import DOMPurify from 'dompurify'
 import hljs from 'highlight.js'
 import 'highlight.js/styles/github.css'
 import api from '../api'
@@ -137,7 +138,7 @@ async function fetchStory() {
 
 function renderMarkdown(content) {
   if (!content) return ''
-  return marked(content)
+  return DOMPurify.sanitize(marked(content))
 }
 
 async function regenerateStory() {

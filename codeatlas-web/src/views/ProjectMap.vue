@@ -235,6 +235,7 @@ import CodeMap from '../components/map/CodeMap.vue'
 import CodeMap3D from '../components/map/CodeMap3D.vue'
 import api from '../api'
 import { marked } from 'marked'
+import DOMPurify from 'dompurify'
 
 const route = useRoute()
 const projectId = route.params.id
@@ -490,7 +491,7 @@ function getLayerColor(layer) {
 
 function renderSimpleMd(content) {
   if (!content) return ''
-  return marked(content)
+  return DOMPurify.sanitize(marked(content))
 }
 </script>
 

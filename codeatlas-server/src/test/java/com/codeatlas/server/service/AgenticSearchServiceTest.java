@@ -24,6 +24,7 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -135,6 +136,36 @@ class AgenticSearchServiceTest {
         ArgumentCaptor<AiAuditLogEntity> auditCaptor = ArgumentCaptor.forClass(AiAuditLogEntity.class);
         verify(aiAuditLogMapper).insert(auditCaptor.capture());
         assertEquals(Boolean.FALSE, auditCaptor.getValue().getSuccess());
+    }
+
+    @Test
+    @DisplayName("AI 调用抛异常时返回通用文案且仍写审计日志")
+    void search_aiCallFails_shouldHideExceptionDetailAndWriteAudit() {
+        when(aiClient.chat(any(AiRequest.class))).thenThrow(new RuntimeException("secret-internal-detail"));
+
+        Map<String, Object> result = agenticSearchService.search(PROJECT_ID, "问题", USER_ID);
+
+        String answer = String.valueOf(result.get("answer"));
+        assertFalse(answer.contains("secret-internal-detail"), "异常细节不得回传前端");
+        assertFalse(answer.contains("AI 调用失败: "), "不应再拼接异常原文");
+
+        ArgumentCaptor<AiAuditLogEntity> auditCaptor = ArgumentCaptor.forClass(AiAuditLogEntity.class);
+        verify(aiAuditLogMapper).insert(auditCaptor.capture());
+        assertEquals(Boolean.FALSE, auditCaptor.getValue().getSuccess(), "失败路径必须落审计（配额已扣）");
+    }
+
+    @Test
+    @DisplayName("模型全部熔断（响应为 null）时返回熔断文案且仍写审计日志")
+    void search_nullResponse_shouldWriteAudit() {
+        when(aiClient.chat(any(AiRequest.class))).thenReturn(null);
+
+        Map<String, Object> result = agenticSearchService.search(PROJECT_ID, "问题", USER_ID);
+
+        assertEquals("AI 服务暂不可用（所有模型已熔断），请稍后重试。", result.get("answer"));
+
+        ArgumentCaptor<AiAuditLogEntity> auditCaptor = ArgumentCaptor.forClass(AiAuditLogEntity.class);
+        verify(aiAuditLogMapper).insert(auditCaptor.capture());
+        assertEquals(Boolean.FALSE, auditCaptor.getValue().getSuccess(), "失败路径必须落审计（配额已扣）");
     }
 
     @Test
