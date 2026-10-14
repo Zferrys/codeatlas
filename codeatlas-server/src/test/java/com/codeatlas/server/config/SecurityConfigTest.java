@@ -12,8 +12,10 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Import;
 import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.test.context.support.WithMockUser;
@@ -62,6 +64,9 @@ class SecurityConfigTest {
 
     @Autowired(required = false)
     private SecurityFilterChain securityFilterChainBean;
+
+    @Autowired
+    private ApplicationContext applicationContext;
 
     private final SecurityConfig config = new SecurityConfig(null);
 
@@ -155,6 +160,20 @@ class SecurityConfigTest {
     void filterChain_shouldRegisterNonNullSecurityFilterChainBean() {
         assertNotNull(securityFilterChainBean,
                 "SecurityConfig.filterChain 的返回值必须注册为 SecurityFilterChain Bean（http.build() 结果不可为 null）");
+    }
+
+    @Test
+    @DisplayName("直接调用 filterChain(HttpSecurity) 必须返回非 null 链（http.build() 结果不可为 null）")
+    void filterChain_calledDirectly_shouldReturnNonNullChain() throws Exception {
+        // filterChain 仅在 Spring 上下文刷新时被调用；PIT 单 minion JVM 内复用 Spring 上下文缓存，
+        // 刷新期代码在缓存命中时不再重放，上下文路径无法察觉该方法内部的变异。
+        // 直接以原型 Bean HttpSecurity 调用，可在任意缓存状态下覆盖 http.build() 的返回值。
+        SecurityConfig configUnderTest = new SecurityConfig(jwtAuthFilter);
+        HttpSecurity http = applicationContext.getBean(HttpSecurity.class);
+
+        SecurityFilterChain chain = configUnderTest.filterChain(http);
+
+        assertNotNull(chain, "filterChain(http) 必须返回 http.build() 构建的 SecurityFilterChain");
     }
 
     @Test
