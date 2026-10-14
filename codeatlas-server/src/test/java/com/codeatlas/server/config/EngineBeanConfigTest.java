@@ -29,8 +29,12 @@ import static org.mockito.Mockito.when;
  * EngineBeanConfig 单元测试。
  *
  * aiModelService 的装配分支由进程环境变量 ANTHROPIC_API_KEY / DEEPSEEK_API_KEY 决定，
- * 而 JDK 17 下环境变量表不可修改、Mockito 也明确拒绝 mock java.lang.System。
- * 因此该用例读取真实环境变量并推导精确期望（在任意环境组合下都断言真实行为）。
+ * 而 JDK 17 下环境变量表不可修改；Mockito 也明确拒绝 mock java.lang.System
+ * （2026-10-14 实测抛 MockitoException："not possible to mock static methods of
+ * java.lang.System ... infinite loops"）。
+ * 因此该用例读取真实环境变量并推导精确期望（在任意环境组合下都断言真实行为）：
+ * - 常规跑（本机未设 ANTHROPIC_API_KEY）：Claude 分支跳过，走 DeepSeek 兜底路径；
+ * - 全分支覆盖跑（mvn 命令前缀 ANTHROPIC_API_KEY=<假值>）：Claude 优先路径亦被完整执行。
  */
 @ExtendWith(MockitoExtension.class)
 @DisplayName("EngineBeanConfig 单元测试（engine Bean 装配 + API Key 环境变量分支）")
