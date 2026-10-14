@@ -42,6 +42,7 @@ class AgenticSearchServiceTest {
 
     private static final Long PROJECT_ID = 1L;
     private static final Long USER_ID = 7L;
+    private static final String TASK_ID = "aitask-agentic-1";
 
     @Mock
     private AiClient aiClient;
@@ -61,12 +62,13 @@ class AgenticSearchServiceTest {
     private AgenticSearchService agenticSearchService;
 
     private final AtomicInteger toolResultCounter = new AtomicInteger();
+    private final AiTaskProgressRegistry progressRegistry = new AiTaskProgressRegistry(new ObjectMapper());
 
     @BeforeEach
     void setUp() {
         agenticSearchService = new AgenticSearchService(aiClient, toolRegistry,
                 projectService, scanService, tokenBudgetManager, aiAuditLogMapper,
-                new EvidenceVerifier(), chatHistoryService, new AiTaskProgressRegistry(new ObjectMapper()));
+                new EvidenceVerifier(), chatHistoryService, progressRegistry);
 
         Project project = new Project();
         project.setName("TestProject");
@@ -249,6 +251,24 @@ class AgenticSearchServiceTest {
         assertEquals(Boolean.FALSE, verification.get("corrected"));
         assertEquals(0, verification.get("correctionRounds"), "未实际发起修正轮时不应上报轮次");
         verify(aiClient, times(2)).chat(any(AiRequest.class));
+    }
+
+    @Test
+    @DisplayName("用户终止后收尾审计：success=false 且 errorMessage 为 Cancelled by user（而非 Truncated）")
+    void search_cancelled_shouldAuditCancelledByUser() {
+        progressRegistry.subscribe(TASK_ID, PROJECT_ID);
+        progressRegistry.cancel(TASK_ID);
+
+        Map<String, Object> result = agenticSearchService.search(PROJECT_ID, "问题", USER_ID, TASK_ID);
+
+        assertEquals("本次回答已被用户终止", result.get("answer"));
+        assertEquals(Boolean.TRUE, result.get("cancelled"));
+
+        ArgumentCaptor<AiAuditLogEntity> auditCaptor = ArgumentCaptor.forClass(AiAuditLogEntity.class);
+        verify(aiAuditLogMapper).insert(auditCaptor.capture());
+        assertEquals(Boolean.FALSE, auditCaptor.getValue().getSuccess());
+        assertEquals("Cancelled by user", auditCaptor.getValue().getErrorMessage(),
+                "终止审计不得再复用 Truncated 截断文案");
     }
 
     private ClassSummaryEntity makeClass(String fqn, String simpleName) {

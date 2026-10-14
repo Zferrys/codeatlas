@@ -48,6 +48,7 @@ class ArchitecturePatternServiceTest {
 
     private static final Long PROJECT_ID = 1L;
     private static final Long USER_ID = 7L;
+    private static final String TASK_ID = "aitask-pattern-1";
 
     @Mock
     private AiAnalysisService aiAnalysisService;
@@ -186,7 +187,7 @@ class ArchitecturePatternServiceTest {
     }
 
     @Test
-    @DisplayName("响应内容为空（推理截断形态）时同样抛 AI 异常并落失败审计")
+    @DisplayName("响应内容为空（推理截断形态）时同样抛 AI 异常并落失败审计，已消耗 Token 必须记账")
     void analyzePatterns_emptyContent_shouldAuditAndThrow() {
         stubProjectScanClasses();
         when(aiClient.getModelName()).thenReturn("mock-model");
@@ -199,7 +200,7 @@ class ArchitecturePatternServiceTest {
         assertEquals(ErrorCode.AI_API_INTERNAL_ERROR.getCode(), ex.getCode());
 
         verify(aiAnalysisService).saveAiAuditLog(eq("mock-model"), eq("PATTERN_ANALYSIS"),
-                eq(PROJECT_ID), eq(USER_ID), eq(0L), eq(0L), eq(0L), eq(0L),
+                eq(PROJECT_ID), eq(USER_ID), eq(1024L), eq(1024L), eq(2048L), eq(120L),
                 eq("All AI models exhausted or no content"), eq(false));
         verify(insightService, never()).saveInsight(any(InsightEntity.class));
     }
@@ -240,6 +241,31 @@ class ArchitecturePatternServiceTest {
         verify(aiAnalysisService).saveAiAuditLog(eq("mock-model"), eq("PATTERN_ANALYSIS"),
                 eq(PROJECT_ID), eq(USER_ID), eq(400L), eq(400L), eq(800L), eq(120L),
                 isNull(), eq(true));
+    }
+
+    @Test
+    @DisplayName("AI 返回后被终止：结果丢弃、落失败审计（Cancelled by user），不保存洞察")
+    void analyzePatterns_cancelledAfterAiCall_shouldDiscardAndAuditFailure() {
+        stubProjectScanClasses();
+        when(aiClient.getModelName()).thenReturn("mock-model");
+        when(tokenBudgetManager.tryConsume(anyLong())).thenReturn(true);
+        AiTaskProgressRegistry registry = new AiTaskProgressRegistry(new ObjectMapper());
+        ArchitecturePatternService cancellableService = new ArchitecturePatternService(aiAnalysisService,
+                projectService, scanService, insightService, hallucinationChecker, tokenBudgetManager,
+                aiClient, registry);
+        registry.subscribe(TASK_ID, PROJECT_ID);
+        when(aiAnalysisService.callAiWithResilience(any(AiRequest.class))).thenAnswer(invocation -> {
+            registry.cancel(TASK_ID);
+            return aiResponse("识别到分层架构", 800);
+        });
+
+        InsightEntity insight = cancellableService.analyzePatterns(PROJECT_ID, USER_ID, TASK_ID);
+
+        assertNull(insight);
+        verify(aiAnalysisService).saveAiAuditLog(eq("mock-model"), eq("PATTERN_ANALYSIS"),
+                eq(PROJECT_ID), eq(USER_ID), eq(400L), eq(400L), eq(800L), eq(120L),
+                eq("Cancelled by user"), eq(false));
+        verify(insightService, never()).saveInsight(any(InsightEntity.class));
     }
 
     @Test

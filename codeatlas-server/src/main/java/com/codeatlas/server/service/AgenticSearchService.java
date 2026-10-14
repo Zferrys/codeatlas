@@ -142,7 +142,8 @@ public class AgenticSearchService {
                 result.put("iterations", iterations);
                 saveAuditLog(aiClient.getModelName(), projectId, userId,
                         totalPromptTokens, totalCompletionTokens, totalTokenUsed,
-                        System.currentTimeMillis() - startTime, iterations, toolsCalled, false);
+                        System.currentTimeMillis() - startTime, iterations, toolsCalled,
+                        "AI call failed at iteration " + iterations, false);
                 return result;
             }
 
@@ -152,7 +153,8 @@ public class AgenticSearchService {
                 result.put("iterations", iterations);
                 saveAuditLog(aiClient.getModelName(), projectId, userId,
                         totalPromptTokens, totalCompletionTokens, totalTokenUsed,
-                        System.currentTimeMillis() - startTime, iterations, toolsCalled, false);
+                        System.currentTimeMillis() - startTime, iterations, toolsCalled,
+                        "All AI models exhausted or unavailable", false);
                 return result;
             }
 
@@ -302,7 +304,10 @@ public class AgenticSearchService {
         long elapsed = System.currentTimeMillis() - startTime;
         saveAuditLog(aiClient.getModelName(), projectId, userId,
                 totalPromptTokens, totalCompletionTokens, totalTokenUsed, elapsed,
-                iterations, toolsCalled, success);
+                iterations, toolsCalled,
+                success ? null : "Truncated after " + iterations + " iterations, tools="
+                        + String.join(",", toolsCalled),
+                success);
 
         log.info("Agentic search completed: projectId={}, iterations={}, tools={}, tokens={}, latency={}ms",
                 projectId, iterations, toolsCalled, totalTokenUsed, elapsed);
@@ -319,7 +324,8 @@ public class AgenticSearchService {
         result.put("iterations", iterations);
         saveAuditLog(aiClient.getModelName(), projectId, userId,
                 totalPromptTokens, totalCompletionTokens, totalTokenUsed,
-                System.currentTimeMillis() - startTime, iterations, toolsCalled, false);
+                System.currentTimeMillis() - startTime, iterations, toolsCalled,
+                "Cancelled by user", false);
         return result;
     }
 
@@ -359,7 +365,7 @@ public class AgenticSearchService {
     private void saveAuditLog(String model, Long projectId, Long userId,
                               int promptTokens, int completionTokens, int totalTokens,
                               long latencyMs, int iterations, List<String> toolsCalled,
-                              boolean success) {
+                              String errorMessage, boolean success) {
         try {
             AiAuditLogEntity logEntity = new AiAuditLogEntity();
             logEntity.setModel(model);
@@ -371,13 +377,10 @@ public class AgenticSearchService {
             logEntity.setTotalTokens(totalTokens);
             logEntity.setLatencyMs((int) latencyMs);
             logEntity.setSuccess(success);
+            logEntity.setErrorMessage(errorMessage);
             if (totalTokens > 0) {
                 double cost = totalTokens / 1_000_000.0 * 8.0;
                 logEntity.setCost(java.math.BigDecimal.valueOf(Math.round(cost * 100000.0) / 100000.0));
-            }
-            if (!success) {
-                logEntity.setErrorMessage("Truncated after " + iterations + " iterations, tools="
-                        + String.join(",", toolsCalled));
             }
             aiAuditLogMapper.insert(logEntity);
         } catch (Exception e) {

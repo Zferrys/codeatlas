@@ -39,6 +39,7 @@ class ImpactAnalysisServiceTest {
 
     private static final Long PROJECT_ID = 1L;
     private static final Long USER_ID = 7L;
+    private static final String TASK_ID = "aitask-impact-1";
 
     @Mock
     private AiAnalysisService aiAnalysisService;
@@ -57,12 +58,13 @@ class ImpactAnalysisServiceTest {
 
     private ImpactAnalysisService serviceWithAi;
     private ImpactAnalysisService serviceWithoutAi;
+    private AiTaskProgressRegistry progressRegistry;
 
     @BeforeEach
     void setUp() {
+        progressRegistry = new AiTaskProgressRegistry(new ObjectMapper());
         serviceWithAi = new ImpactAnalysisService(aiAnalysisService, projectService, scanService,
-                evidenceVerifier, tokenBudgetManager, aiClient, chatHistoryService,
-                new AiTaskProgressRegistry(new ObjectMapper()));
+                evidenceVerifier, tokenBudgetManager, aiClient, chatHistoryService, progressRegistry);
         serviceWithoutAi = new ImpactAnalysisService(aiAnalysisService, projectService, scanService,
                 evidenceVerifier, tokenBudgetManager, null, chatHistoryService,
                 new AiTaskProgressRegistry(new ObjectMapper()));
@@ -186,5 +188,59 @@ class ImpactAnalysisServiceTest {
         verify(aiAnalysisService).saveAiAuditLog(eq("mock-model"), eq("CONTEXT_QA"),
                 eq(PROJECT_ID), eq(USER_ID), eq(0L), eq(0L), eq(0L), eq(0L),
                 eq("AI call exception: qa-boom"), eq(false));
+    }
+
+    @Test
+    @DisplayName("影响分析：AI 调用期间被终止 → 落失败审计（Cancelled by user）、结果丢弃、不写历史")
+    void analyzeImpact_cancelledAfterAiCall_shouldAuditFailure() {
+        stubAnalyzeBase();
+        when(aiClient.getModelName()).thenReturn("mock-model");
+        when(tokenBudgetManager.tryConsume(anyLong())).thenReturn(true);
+        progressRegistry.subscribe(TASK_ID, PROJECT_ID);
+        AiResponse response = new AiResponse();
+        response.setContent("AI 建议：注意兼容性");
+        response.setTokensUsed(300);
+        when(aiAnalysisService.callAiWithResilience(any(AiRequest.class))).thenAnswer(invocation -> {
+            progressRegistry.cancel(TASK_ID);
+            return response;
+        });
+
+        Map<String, Object> result = serviceWithAi.analyzeImpact(PROJECT_ID, "com.demo.AService",
+                "MODIFY", "run", "desc", USER_ID, TASK_ID);
+
+        assertEquals(Boolean.TRUE, result.get("cancelled"));
+        assertEquals("本次分析已被用户终止", result.get("aiAnalysis"));
+        verify(aiAnalysisService).saveAiAuditLog(eq("mock-model"), eq("IMPACT_ANALYSIS"),
+                eq(PROJECT_ID), eq(USER_ID), eq(0L), eq(0L), eq(300L), eq(0L),
+                eq("Cancelled by user"), eq(false));
+        verifyNoInteractions(chatHistoryService);
+    }
+
+    @Test
+    @DisplayName("上下文问答：AI 调用期间被终止 → 落失败审计（Cancelled by user）、不写历史")
+    void contextualQa_cancelledAfterAiCall_shouldAuditFailure() {
+        Project project = new Project();
+        project.setName("Demo");
+        when(projectService.getProjectEntity(PROJECT_ID)).thenReturn(project);
+        when(scanService.getClassSummaries(PROJECT_ID)).thenReturn(Collections.emptyList());
+        when(aiClient.getModelName()).thenReturn("mock-model");
+        when(tokenBudgetManager.tryConsume(anyLong())).thenReturn(true);
+        progressRegistry.subscribe(TASK_ID, PROJECT_ID);
+        AiResponse response = new AiResponse();
+        response.setContent("回答内容");
+        response.setTokensUsed(200);
+        when(aiAnalysisService.callAiWithResilience(any(AiRequest.class))).thenAnswer(invocation -> {
+            progressRegistry.cancel(TASK_ID);
+            return response;
+        });
+
+        Map<String, Object> result = serviceWithAi.contextualQa(PROJECT_ID, "问题", "", USER_ID, TASK_ID);
+
+        assertEquals(Boolean.TRUE, result.get("cancelled"));
+        assertEquals("本次回答已被用户终止", result.get("answer"));
+        verify(aiAnalysisService).saveAiAuditLog(eq("mock-model"), eq("CONTEXT_QA"),
+                eq(PROJECT_ID), eq(USER_ID), eq(0L), eq(0L), eq(200L), eq(0L),
+                eq("Cancelled by user"), eq(false));
+        verifyNoInteractions(chatHistoryService);
     }
 }

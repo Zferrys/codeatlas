@@ -190,7 +190,8 @@ public class AiModelServiceImpl implements AiModelService {
                 return result;
             }
             AiRequest request = new AiRequest();
-            request.setPrompt("ping");
+            // 同健康探针：强制正文回复，避免推理模型把预算耗在 reasoning 上、正文为空被误判失败
+            request.setPrompt("Reply with the single word: OK");
             request.setMaxTokens(TEST_MAX_TOKENS);
             request.setTemperature(0);
             long start = System.currentTimeMillis();

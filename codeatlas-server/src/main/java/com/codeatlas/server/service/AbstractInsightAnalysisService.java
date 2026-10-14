@@ -95,6 +95,12 @@ public abstract class AbstractInsightAnalysisService {
             return null;
         }
 
+        if (progressRegistry.isCancelled(taskId)) {
+            // 先于预算扣减检查：用户已终止时不再消耗预算（与影响分析/上下文问答口径一致）
+            log.info("{} cancelled before AI call for projectId={}", logLabel(), projectId);
+            return null;
+        }
+
         int estimatedTokens = prompt.length() * 2 / 3 + 4096;
         if (!tokenBudgetManager.tryConsume(estimatedTokens)) {
             log.warn("AI token monthly budget exceeded, rejecting {} for projectId={}",
@@ -103,10 +109,6 @@ public abstract class AbstractInsightAnalysisService {
             throw new BusinessException(ErrorCode.AI_TOKEN_BUDGET_EXCEEDED);
         }
 
-        if (progressRegistry.isCancelled(taskId)) {
-            log.info("{} cancelled before AI call for projectId={}", logLabel(), projectId);
-            return null;
-        }
         progressRegistry.publish(taskId, "AI 正在生成报告（通常需要 1–3 分钟）…");
 
         AiRequest request = new AiRequest();
@@ -117,17 +119,19 @@ public abstract class AbstractInsightAnalysisService {
 
         AiResponse response = aiAnalysisService.callAiWithResilience(request);
         if (response == null || response.getContent() == null || response.getContent().isEmpty()) {
-            saveAudit(projectId, userId, null, "All AI models exhausted or no content", false);
+            // 空正文响应也带 response：已消耗 token 仍需记账
+            saveAudit(projectId, userId, response, "All AI models exhausted or no content", false);
             log.warn("{} failed for projectId={}", logLabel(), projectId);
             throw new AiException(ErrorCode.AI_API_INTERNAL_ERROR,
                     "AI 模型多次尝试均未返回有效内容，请稍后重试");
         }
-        saveAudit(projectId, userId, response, null, true);
-
         if (progressRegistry.isCancelled(taskId)) {
             log.info("{} cancelled after AI call, discarding result for projectId={}", logLabel(), projectId);
+            // 用户已终止：token 已消耗仍需记账，结果丢弃；审计口径统一为失败
+            saveAudit(projectId, userId, response, "Cancelled by user", false);
             return null;
         }
+        saveAudit(projectId, userId, response, null, true);
 
         String content = response.getContent();
         long totalTokens = response.getTokensUsed();

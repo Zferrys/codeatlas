@@ -1,11 +1,23 @@
 import axios from 'axios'
 import { message } from 'ant-design-vue'
 import { report } from '../utils/errorReporter'
+import { useAuthStore } from '../stores/auth'
 
 const api = axios.create({
   baseURL: '/api/v1',
   timeout: 120000
 })
+
+// pinia store 与 localStorage 同步清理：只清 localStorage 会残留 store 状态，
+// 过期会话跳登录页时会被路由守卫按「已登录」重定向回 Dashboard
+function clearAuthState() {
+  try {
+    useAuthStore().clearAuth()
+  } catch (e) {
+    localStorage.removeItem('codeatlas_token')
+    localStorage.removeItem('codeatlas_user')
+  }
+}
 
 // Request interceptor — attach JWT token + set Content-Type for JSON
 api.interceptors.request.use(
@@ -45,8 +57,7 @@ api.interceptors.response.use(
       const { status, data } = response
       switch (status) {
         case 401:
-          localStorage.removeItem('codeatlas_token')
-          localStorage.removeItem('codeatlas_user')
+          clearAuthState()
           window.location.hash = '#/login'
           message.error('登录已过期，请重新登录')
           break

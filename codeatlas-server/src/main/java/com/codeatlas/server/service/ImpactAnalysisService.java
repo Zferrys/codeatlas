@@ -129,17 +129,19 @@ public class ImpactAnalysisService {
 
                         AiResponse response = aiAnalysisService.callAiWithResilience(request);
                         if (response != null && progressRegistry.isCancelled(taskId)) {
-                            // 用户已终止：token 已消耗仍需记账，但结果丢弃不落历史
-                            saveAudit("IMPACT_ANALYSIS", projectId, userId, response, null, true);
+                            // 用户已终止：token 已消耗仍需记账，结果丢弃不落历史；审计口径统一为失败
+                            saveAudit("IMPACT_ANALYSIS", projectId, userId, response, "Cancelled by user", false);
                             result.put("aiAnalysis", "本次分析已被用户终止");
                             result.put("cancelled", true);
-                        } else if (response != null) {
+                        } else if (response != null && response.getContent() != null
+                                && !response.getContent().isEmpty()) {
                             result.put("aiAnalysis", response.getContent());
                             saveAudit("IMPACT_ANALYSIS", projectId, userId, response, null, true);
-                            aiAnswered = response.getContent() != null && !response.getContent().isEmpty();
+                            aiAnswered = true;
                         } else {
-                            saveAudit("IMPACT_ANALYSIS", projectId, userId, null,
-                                    "All AI models exhausted or circuit breaker open", false);
+                            // 空正文响应也带 response：已消耗 token 仍需记账
+                            saveAudit("IMPACT_ANALYSIS", projectId, userId, response,
+                                    "All AI models exhausted or no content", false);
                             result.put("aiAnalysis", "AI 分析暂不可用，以下为静态依赖分析结果");
                         }
                     } catch (Exception e) {
@@ -245,17 +247,19 @@ public class ImpactAnalysisService {
 
             AiResponse response = aiAnalysisService.callAiWithResilience(request);
             if (response == null || response.getContent() == null || response.getContent().isEmpty()) {
-                saveAudit("CONTEXT_QA", projectId, userId, null, "All AI models exhausted or no content", false);
+                // 空正文响应也带 response：已消耗 token 仍需记账
+                saveAudit("CONTEXT_QA", projectId, userId, response, "All AI models exhausted or no content", false);
                 result.put("answer", "AI 服务暂不可用，请稍后重试");
                 return result;
             }
-            saveAudit("CONTEXT_QA", projectId, userId, response, null, true);
             if (progressRegistry.isCancelled(taskId)) {
-                // 用户已终止：token 已消耗仍需记账，但结果丢弃不落历史
+                // 用户已终止：token 已消耗仍需记账，结果丢弃不落历史；审计口径统一为失败
+                saveAudit("CONTEXT_QA", projectId, userId, response, "Cancelled by user", false);
                 result.put("answer", "本次回答已被用户终止");
                 result.put("cancelled", true);
                 return result;
             }
+            saveAudit("CONTEXT_QA", projectId, userId, response, null, true);
 
             String answer = response.getContent();
             // 输出侧证据验证：答案对照项目数据与本次注入的上下文
