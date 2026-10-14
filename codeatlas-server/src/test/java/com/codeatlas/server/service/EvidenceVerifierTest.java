@@ -228,6 +228,41 @@ class EvidenceVerifierTest {
         assertTrue(prompt.contains("工具"));
     }
 
+    // ==================== 以下为覆盖率补全追加（不改动上方既有用例） ====================
+
+    @Test
+    @DisplayName("自反关系声明（同类依赖自身）跳过校验，不计数不误判")
+    void verify_selfDependencyClaim_shouldSkipRelation() {
+        List<ClassSummaryEntity> classes = Collections.singletonList(
+                classEntity("com.demo.AService", "AService", "[\"com.demo.BService\"]"));
+
+        EvidenceVerifier.VerificationReport report = verifier.verify(
+                "AService 依赖 AService。",
+                Collections.singletonList("com.demo.AService"), classes);
+
+        assertEquals(0, report.toMap().get("relationClaimsChecked"), "自反关系应跳过而非判定");
+        assertTrue(report.getRelationMismatches().isEmpty());
+        assertFalse(report.needsCorrection());
+    }
+
+    @Test
+    @DisplayName("依赖字段 JSON 非法：解析降级为空依赖并标记关系矛盾")
+    void verify_invalidDependenciesJson_shouldTreatAsNoDependenciesAndFlagMismatch() {
+        List<ClassSummaryEntity> classes = Arrays.asList(
+                classEntity("com.demo.AService", "AService", "{not-json"),
+                classEntity("com.demo.BService", "BService", null));
+        List<String> evidence = Arrays.asList("com.demo.AService", "com.demo.BService");
+
+        EvidenceVerifier.VerificationReport report =
+                verifier.verify("AService 依赖 BService。", evidence, classes);
+
+        assertEquals(1, report.toMap().get("relationClaimsChecked"));
+        assertEquals(1, report.getRelationMismatches().size());
+        assertTrue(report.getRelationMismatches().get(0).contains("AService 依赖 BService"),
+                "非法 JSON 应降级为空依赖列表，导致声明被判矛盾：" + report.getRelationMismatches());
+        assertTrue(report.needsCorrection());
+    }
+
     private ClassSummaryEntity classEntity(String fqn, String simpleName, String dependencies) {
         ClassSummaryEntity entity = new ClassSummaryEntity();
         entity.setFqn(fqn);

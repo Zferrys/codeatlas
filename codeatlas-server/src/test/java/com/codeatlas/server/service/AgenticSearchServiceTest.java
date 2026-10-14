@@ -7,6 +7,7 @@ import com.codeatlas.engine.ai.Message;
 import com.codeatlas.engine.ai.ToolCall;
 import com.codeatlas.server.config.TokenBudgetManager;
 import com.codeatlas.server.entity.AiAuditLogEntity;
+import com.codeatlas.server.entity.ChatHistoryEntity;
 import com.codeatlas.server.entity.ClassSummaryEntity;
 import com.codeatlas.server.entity.Project;
 import com.codeatlas.server.mapper.AiAuditLogMapper;
@@ -30,8 +31,13 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -294,6 +300,284 @@ class AgenticSearchServiceTest {
         AiResponse response = new AiResponse();
         response.setContent(content);
         response.setTokensUsed(50);
+        return response;
+    }
+
+    // ==================== 以下为覆盖率补全追加（不改动上方既有用例） ====================
+
+    @Test
+    @DisplayName("未配置 AI 客户端：直接返回配置提示且不调用 AI")
+    void search_noAiClient_shouldReturnConfigHint() {
+        // 该路径在读取项目数据前即返回：手动消费 setUp 严格桩，避免严格模式误报未使用
+        projectService.getProjectEntity(PROJECT_ID);
+        scanService.getClassSummaries(PROJECT_ID);
+
+        Map<String, Object> result = serviceWithVerifier(null, new EvidenceVerifier())
+                .search(PROJECT_ID, "问题", USER_ID);
+
+        assertEquals("AI 服务未配置，无法执行智能搜索。请检查 API Key 设置。", result.get("answer"));
+        verify(aiClient, never()).chat(any(AiRequest.class));
+    }
+
+    @Test
+    @DisplayName("项目不存在：返回提示且不调用 AI")
+    void search_projectMissing_shouldReturnNotFound() {
+        when(projectService.getProjectEntity(PROJECT_ID)).thenReturn(null);
+        // 该路径在类摘要加载前返回：手动消费 setUp 严格桩，避免严格模式误报未使用
+        scanService.getClassSummaries(PROJECT_ID);
+
+        Map<String, Object> result = agenticSearchService.search(PROJECT_ID, "问题", USER_ID);
+
+        assertEquals("项目不存在", result.get("answer"));
+        verify(aiClient, never()).chat(any(AiRequest.class));
+    }
+
+    @Test
+    @DisplayName("问题净化后为空：返回无效提示且不调用 AI")
+    void search_sanitizedQuestionEmpty_shouldReturnInvalidHint() {
+        Map<String, Object> result = agenticSearchService.search(PROJECT_ID, "   ", USER_ID);
+
+        assertEquals("   ", result.get("question"));
+        assertEquals("问题内容无效（净化后为空），请重新输入。", result.get("answer"));
+        verify(aiClient, never()).chat(any(AiRequest.class));
+    }
+
+    @Test
+    @DisplayName("入口预算耗尽：返回配额提示且不调用 AI")
+    void search_budgetExhaustedAtEntry_shouldReturnQuotaHint() {
+        when(tokenBudgetManager.tryConsume(anyLong())).thenReturn(false);
+
+        Map<String, Object> result = agenticSearchService.search(PROJECT_ID, "问题", USER_ID);
+
+        assertEquals("本月 AI Token 配额已用完，请下月再试。", result.get("answer"));
+        verify(aiClient, never()).chat(any(AiRequest.class));
+    }
+
+    @Test
+    @DisplayName("工具轮带正文时助手消息携带正文并进入下一轮请求")
+    void search_toolTurnWithContent_shouldCarryContentIntoAssistantMessage() {
+        when(aiClient.chat(any(AiRequest.class)))
+                .thenReturn(toolCallResponse("call_1", "我先检索一下"))
+                .thenReturn(textResponse("最终答案"));
+
+        Map<String, Object> result = agenticSearchService.search(PROJECT_ID, "问题", USER_ID);
+
+        assertEquals("最终答案", result.get("answer"));
+        ArgumentCaptor<AiRequest> requestCaptor = ArgumentCaptor.forClass(AiRequest.class);
+        verify(aiClient, times(2)).chat(requestCaptor.capture());
+        assertTrue(requestCaptor.getAllValues().get(1).getMessages().stream()
+                        .anyMatch(msg -> "assistant".equals(msg.getRole()) && "我先检索一下".equals(msg.getContent())),
+                "工具轮的助手正文必须进入下一轮请求上下文");
+    }
+
+    @Test
+    @DisplayName("五轮工具用尽后用户终止：不再强制总结，按取消收尾")
+    void search_cancelledAfterExhaustedRounds_shouldFinishCancelled() {
+        progressRegistry.subscribe(TASK_ID, PROJECT_ID);
+        AtomicInteger calls = new AtomicInteger();
+        when(aiClient.chat(any(AiRequest.class))).thenAnswer(invocation -> {
+            if (calls.incrementAndGet() == 5) {
+                progressRegistry.cancel(TASK_ID);
+            }
+            return toolCallResponse("call_" + calls.get());
+        });
+
+        Map<String, Object> result = agenticSearchService.search(PROJECT_ID, "问题", USER_ID, TASK_ID);
+
+        assertEquals("本次回答已被用户终止", result.get("answer"));
+        assertEquals(Boolean.TRUE, result.get("cancelled"));
+        verify(aiClient, times(5)).chat(any(AiRequest.class));
+        verify(chatHistoryService, never()).record(any(ChatHistoryEntity.class));
+
+        ArgumentCaptor<AiAuditLogEntity> auditCaptor = ArgumentCaptor.forClass(AiAuditLogEntity.class);
+        verify(aiAuditLogMapper).insert(auditCaptor.capture());
+        assertEquals("Cancelled by user", auditCaptor.getValue().getErrorMessage());
+        assertEquals(Boolean.FALSE, auditCaptor.getValue().getSuccess());
+    }
+
+    @Test
+    @DisplayName("成功答案产出后、证据校验前终止：按取消收尾且不落历史")
+    void search_cancelledAfterSuccessBeforeVerification_shouldFinishCancelled() {
+        progressRegistry.subscribe(TASK_ID, PROJECT_ID);
+        AtomicInteger calls = new AtomicInteger();
+        when(aiClient.chat(any(AiRequest.class))).thenAnswer(invocation -> {
+            if (calls.incrementAndGet() == 1) {
+                return toolCallResponse("call_1");
+            }
+            progressRegistry.cancel(TASK_ID);
+            return textResponse("最终答案");
+        });
+
+        Map<String, Object> result = agenticSearchService.search(PROJECT_ID, "问题", USER_ID, TASK_ID);
+
+        assertEquals("本次回答已被用户终止", result.get("answer"));
+        assertEquals(Boolean.TRUE, result.get("cancelled"));
+        verify(chatHistoryService, never()).record(any(ChatHistoryEntity.class));
+
+        ArgumentCaptor<AiAuditLogEntity> auditCaptor = ArgumentCaptor.forClass(AiAuditLogEntity.class);
+        verify(aiAuditLogMapper).insert(auditCaptor.capture());
+        assertEquals("Cancelled by user", auditCaptor.getValue().getErrorMessage());
+    }
+
+    @Test
+    @DisplayName("修正结果未减少异常数：保留原答案且不下调报告")
+    void search_correctionNoImprovement_shouldKeepOriginalAnswer() {
+        when(scanService.getClassSummaries(PROJECT_ID))
+                .thenReturn(Collections.singletonList(makeClass("com.demo.RealService", "RealService")));
+        when(toolRegistry.execute(any(ToolCall.class), anyLong()))
+                .thenReturn("找到 1 个匹配类:\n1. com.demo.RealService [SERVICE] 方法3 行40");
+        when(aiClient.chat(any(AiRequest.class)))
+                .thenReturn(toolCallResponse("call_1"))
+                .thenReturn(textResponse("GhostService 与 PhantomService 是核心类，RealService 也参与其中。"))
+                .thenReturn(textResponse("GhostService 与 PhantomService 仍然是核心类。"));
+
+        Map<String, Object> result = agenticSearchService.search(PROJECT_ID, "核心类有哪些？", USER_ID);
+
+        assertEquals("GhostService 与 PhantomService 是核心类，RealService 也参与其中。", result.get("answer"),
+                "未改善时应保留原答案");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> verification = (Map<String, Object>) result.get("verification");
+        assertEquals(Boolean.FALSE, verification.get("corrected"));
+        assertEquals(1, verification.get("correctionRounds"));
+        assertEquals(2, ((List<?>) verification.get("unsourced")).size(), "未采用修正时报告保持原异常数");
+        verify(aiClient, times(3)).chat(any(AiRequest.class));
+    }
+
+    @Test
+    @DisplayName("修正轮调用抛异常：被吞并保留原答案，修正轮次照常上报")
+    void search_correctionRoundThrows_shouldKeepOriginalAnswer() {
+        when(scanService.getClassSummaries(PROJECT_ID))
+                .thenReturn(Collections.singletonList(makeClass("com.demo.RealService", "RealService")));
+        when(toolRegistry.execute(any(ToolCall.class), anyLong()))
+                .thenReturn("找到 1 个匹配类:\n1. com.demo.RealService [SERVICE] 方法3 行40");
+        when(aiClient.chat(any(AiRequest.class)))
+                .thenReturn(toolCallResponse("call_1"))
+                .thenReturn(textResponse("GhostService 与 PhantomService 是核心类，RealService 也参与其中。"))
+                .thenThrow(new RuntimeException("correction boom"));
+
+        Map<String, Object> result = agenticSearchService.search(PROJECT_ID, "核心类有哪些？", USER_ID);
+
+        assertEquals("GhostService 与 PhantomService 是核心类，RealService 也参与其中。", result.get("answer"));
+        @SuppressWarnings("unchecked")
+        Map<String, Object> verification = (Map<String, Object>) result.get("verification");
+        assertEquals(Boolean.FALSE, verification.get("corrected"));
+        assertEquals(1, verification.get("correctionRounds"), "异常前置的轮次计数已置 1");
+        verify(aiClient, times(3)).chat(any(AiRequest.class));
+    }
+
+    @Test
+    @DisplayName("证据校验自身抛异常：非致命降级，答案照常交付且不挂验证报告")
+    void search_verificationThrows_shouldDeliverAnswerWithoutReport() {
+        when(scanService.getClassSummaries(PROJECT_ID))
+                .thenReturn(Collections.singletonList(makeClass("com.demo.RealService", "RealService")));
+        EvidenceVerifier failingVerifier = mock(EvidenceVerifier.class);
+        when(failingVerifier.verify(anyString(), anyList(), anyList()))
+                .thenThrow(new RuntimeException("verifier boom"));
+        when(aiClient.chat(any(AiRequest.class)))
+                .thenReturn(toolCallResponse("call_1"))
+                .thenReturn(textResponse("RealService 是核心服务类。"));
+
+        Map<String, Object> result = serviceWithVerifier(aiClient, failingVerifier)
+                .search(PROJECT_ID, "核心类有哪些？", USER_ID);
+
+        assertEquals("RealService 是核心服务类。", result.get("answer"));
+        assertNull(result.get("verification"), "校验异常时不得挂验证报告");
+        verify(chatHistoryService).record(any(ChatHistoryEntity.class));
+
+        ArgumentCaptor<AiAuditLogEntity> auditCaptor = ArgumentCaptor.forClass(AiAuditLogEntity.class);
+        verify(aiAuditLogMapper).insert(auditCaptor.capture());
+        assertEquals(Boolean.TRUE, auditCaptor.getValue().getSuccess());
+    }
+
+    @Test
+    @DisplayName("证据校验期间终止：回答丢弃、不落历史，按取消审计")
+    void search_cancelledDuringVerification_shouldFinishCancelled() {
+        progressRegistry.subscribe(TASK_ID, PROJECT_ID);
+        when(scanService.getClassSummaries(PROJECT_ID))
+                .thenReturn(Collections.singletonList(makeClass("com.demo.RealService", "RealService")));
+        EvidenceVerifier cancellingVerifier = mock(EvidenceVerifier.class);
+        when(cancellingVerifier.verify(anyString(), anyList(), anyList())).thenAnswer(invocation -> {
+            progressRegistry.cancel(TASK_ID);
+            return new EvidenceVerifier().verify(invocation.getArgument(0),
+                    invocation.getArgument(1), invocation.getArgument(2));
+        });
+        when(aiClient.chat(any(AiRequest.class)))
+                .thenReturn(toolCallResponse("call_1"))
+                .thenReturn(textResponse("RealService 是核心服务类。"));
+
+        Map<String, Object> result = serviceWithVerifier(aiClient, cancellingVerifier)
+                .search(PROJECT_ID, "核心类有哪些？", USER_ID, TASK_ID);
+
+        assertEquals("本次回答已被用户终止", result.get("answer"));
+        assertEquals(Boolean.TRUE, result.get("cancelled"));
+        verify(chatHistoryService, never()).record(any(ChatHistoryEntity.class));
+
+        ArgumentCaptor<AiAuditLogEntity> auditCaptor = ArgumentCaptor.forClass(AiAuditLogEntity.class);
+        verify(aiAuditLogMapper).insert(auditCaptor.capture());
+        assertEquals("Cancelled by user", auditCaptor.getValue().getErrorMessage());
+        assertEquals(Boolean.FALSE, auditCaptor.getValue().getSuccess());
+    }
+
+    @Test
+    @DisplayName("模型无正文（占位文案）时成功交付但不落对话历史")
+    void search_placeholderAnswer_shouldNotRecordHistory() {
+        when(aiClient.chat(any(AiRequest.class)))
+                .thenReturn(toolCallResponse("call_1"))
+                .thenReturn(textResponse(null));
+
+        Map<String, Object> result = agenticSearchService.search(PROJECT_ID, "问题", USER_ID);
+
+        assertEquals("(AI 未返回内容)", result.get("answer"));
+        verify(chatHistoryService, never()).record(any(ChatHistoryEntity.class));
+
+        ArgumentCaptor<AiAuditLogEntity> auditCaptor = ArgumentCaptor.forClass(AiAuditLogEntity.class);
+        verify(aiAuditLogMapper).insert(auditCaptor.capture());
+        assertEquals(Boolean.TRUE, auditCaptor.getValue().getSuccess());
+    }
+
+    @Test
+    @DisplayName("对话历史入库抛异常：被吞并且不影响答案与审计")
+    void search_historyRecordThrows_shouldBeSwallowed() {
+        when(aiClient.chat(any(AiRequest.class)))
+                .thenReturn(toolCallResponse("call_1"))
+                .thenReturn(textResponse("最终答案"));
+        doThrow(new RuntimeException("history db down"))
+                .when(chatHistoryService).record(any(ChatHistoryEntity.class));
+
+        Map<String, Object> result = agenticSearchService.search(PROJECT_ID, "问题", USER_ID);
+
+        assertEquals("最终答案", result.get("answer"));
+        verify(chatHistoryService).record(any(ChatHistoryEntity.class));
+
+        ArgumentCaptor<AiAuditLogEntity> auditCaptor = ArgumentCaptor.forClass(AiAuditLogEntity.class);
+        verify(aiAuditLogMapper).insert(auditCaptor.capture());
+        assertEquals(Boolean.TRUE, auditCaptor.getValue().getSuccess());
+    }
+
+    @Test
+    @DisplayName("审计入库抛异常：被吞并且不影响结果返回")
+    void search_auditInsertThrows_shouldBeSwallowed() {
+        when(aiClient.chat(any(AiRequest.class)))
+                .thenReturn(toolCallResponse("call_1"))
+                .thenReturn(textResponse("最终答案"));
+        doThrow(new RuntimeException("audit db down"))
+                .when(aiAuditLogMapper).insert(any(AiAuditLogEntity.class));
+
+        Map<String, Object> result = agenticSearchService.search(PROJECT_ID, "问题", USER_ID);
+
+        assertEquals("最终答案", result.get("answer"));
+        verify(aiAuditLogMapper).insert(any(AiAuditLogEntity.class));
+        verify(chatHistoryService).record(any(ChatHistoryEntity.class));
+    }
+
+    private AgenticSearchService serviceWithVerifier(AiClient client, EvidenceVerifier verifier) {
+        return new AgenticSearchService(client, toolRegistry, projectService, scanService,
+                tokenBudgetManager, aiAuditLogMapper, verifier, chatHistoryService, progressRegistry);
+    }
+
+    private AiResponse toolCallResponse(String toolCallId, String content) {
+        AiResponse response = toolCallResponse(toolCallId);
+        response.setContent(content);
         return response;
     }
 }

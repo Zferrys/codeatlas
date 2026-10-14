@@ -11,9 +11,13 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -29,12 +33,22 @@ class UserServiceImplTest {
     private PasswordEncoder passwordEncoder;
     @Mock
     private JwtTokenProvider jwtTokenProvider;
+    @Mock
+    private StringRedisTemplate redisTemplate;
+    @Mock
+    private ValueOperations<String, String> valueOperations;
 
     private UserServiceImpl userService;
 
     @BeforeEach
     void setUp() {
         userService = new UserServiceImpl(userMapper, passwordEncoder, jwtTokenProvider);
+    }
+
+    /** 注入 Redis 模板并接通 opsForValue，用于覆盖 Redis 分支 */
+    private void injectRedis() {
+        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        ReflectionTestUtils.setField(userService, "redisTemplate", redisTemplate);
     }
 
     // ========== register ==========
@@ -173,5 +187,203 @@ class UserServiceImplTest {
 
         assertThrows(BusinessException.class,
                 () -> userService.getCurrentUser(999L));
+    }
+
+    // ==================== 以下为覆盖率补全追加（不改动上方既有用例） ====================
+
+    private User loginUser(Long id, String username, String role) {
+        User user = new User();
+        user.setId(id);
+        user.setUsername(username);
+        user.setPasswordHash("hashed_pw");
+        user.setRole(role);
+        user.setStatus(1);
+        return user;
+    }
+
+    @Test
+    @DisplayName("注册：邮箱已注册抛 EMAIL_EXISTS")
+    void register_emailExists_shouldThrowEmailExists() {
+        when(userMapper.countByUsername("newuser")).thenReturn(0);
+        when(userMapper.findByEmail("dup@test.com")).thenReturn(new User());
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> userService.register("newuser", "Test@1234", "dup@test.com"));
+
+        assertEquals(40002, ex.getCode());
+        verify(userMapper, never()).insert(any(User.class));
+    }
+
+    @Test
+    @DisplayName("注册：邮箱为 null 时跳过邮箱重复检查")
+    void register_nullEmail_shouldSkipEmailCheck() {
+        when(userMapper.countByUsername("newuser")).thenReturn(0);
+        when(passwordEncoder.encode("Test@1234")).thenReturn("hashed");
+        when(jwtTokenProvider.generateToken(any(), eq("newuser"), eq("DEVELOPER"))).thenReturn("t");
+
+        Map<String, Object> result = userService.register("newuser", "Test@1234", null);
+
+        assertEquals("t", result.get("token"));
+        verify(userMapper, never()).findByEmail(any());
+    }
+
+    @Test
+    @DisplayName("登录：账户锁定中抛 400，剩余分钟数 = ttl/60+1")
+    void login_lockedAccount_shouldThrowWithRemainingMinutes() {
+        injectRedis();
+        when(valueOperations.get("login:lock:testuser")).thenReturn("LOCKED");
+        when(redisTemplate.getExpire("login:lock:testuser", TimeUnit.SECONDS)).thenReturn(300L);
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> userService.login("testuser", "pw"));
+
+        assertEquals(400, ex.getCode());
+        assertEquals("账户已被临时锁定，请 6 分钟后再试", ex.getMessage());
+        verify(userMapper, never()).findByUsername(anyString());
+    }
+
+    @Test
+    @DisplayName("登录：锁定但 TTL 丢失时按 15 分钟提示")
+    void login_lockedWithoutTtl_shouldSayFifteenMinutes() {
+        injectRedis();
+        when(valueOperations.get("login:lock:testuser")).thenReturn("LOCKED");
+        when(redisTemplate.getExpire("login:lock:testuser", TimeUnit.SECONDS)).thenReturn(null);
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> userService.login("testuser", "pw"));
+
+        assertEquals("账户已被临时锁定，请 15 分钟后再试", ex.getMessage());
+    }
+
+    @Test
+    @DisplayName("登录成功：清理失败计数与锁定键")
+    void login_successWithRedis_shouldClearFailureCounters() {
+        injectRedis();
+        when(valueOperations.get("login:lock:testuser")).thenReturn(null);
+        when(userMapper.findByUsername("testuser")).thenReturn(loginUser(1L, "testuser", "DEVELOPER"));
+        when(passwordEncoder.matches("pw", "hashed_pw")).thenReturn(true);
+        when(jwtTokenProvider.generateToken(1L, "testuser", "DEVELOPER")).thenReturn("jwt");
+
+        Map<String, Object> result = userService.login("testuser", "pw");
+
+        assertEquals("jwt", result.get("token"));
+        verify(redisTemplate).delete("login:attempts:testuser");
+        verify(redisTemplate).delete("login:lock:testuser");
+        verify(userMapper).updateLoginTime(1L);
+    }
+
+    @Test
+    @DisplayName("登录失败：首次失败写入计数并设置过期时间")
+    void login_firstFailure_shouldIncrementAndExpire() {
+        injectRedis();
+        when(valueOperations.get("login:lock:testuser")).thenReturn(null);
+        when(userMapper.findByUsername("testuser")).thenReturn(null);
+        when(valueOperations.increment("login:attempts:testuser", 1)).thenReturn(1L);
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> userService.login("testuser", "pw"));
+
+        assertEquals(40005, ex.getCode());
+        verify(redisTemplate).expire("login:attempts:testuser", 900, TimeUnit.SECONDS);
+        verify(valueOperations, never()).set(anyString(), anyString(), anyLong(), any(TimeUnit.class));
+    }
+
+    @Test
+    @DisplayName("登录失败：达到 5 次写入锁定键")
+    void login_fifthFailure_shouldLockAccount() {
+        injectRedis();
+        when(valueOperations.get("login:lock:testuser")).thenReturn(null);
+        when(userMapper.findByUsername("testuser")).thenReturn(null);
+        when(valueOperations.increment("login:attempts:testuser", 1)).thenReturn(5L);
+
+        assertThrows(BusinessException.class, () -> userService.login("testuser", "pw"));
+
+        verify(valueOperations).set("login:lock:testuser", "LOCKED", 900, TimeUnit.SECONDS);
+        verify(redisTemplate, never()).expire(anyString(), anyLong(), any(TimeUnit.class));
+    }
+
+    @Test
+    @DisplayName("登录失败：计数未达上限时既不设过期也不锁定")
+    void login_attemptsBelowMaxOrNull_shouldNotLock() {
+        injectRedis();
+        when(valueOperations.get("login:lock:testuser")).thenReturn(null);
+        when(userMapper.findByUsername("testuser")).thenReturn(null);
+        when(valueOperations.increment("login:attempts:testuser", 1)).thenReturn(3L, null);
+
+        assertThrows(BusinessException.class, () -> userService.login("testuser", "pw"));
+        assertThrows(BusinessException.class, () -> userService.login("testuser", "pw"));
+
+        verify(redisTemplate, never()).expire(anyString(), anyLong(), any(TimeUnit.class));
+        verify(valueOperations, never()).set(anyString(), anyString(), anyLong(), any(TimeUnit.class));
+    }
+
+    @Test
+    @DisplayName("登录失败：Redis 异常被吞掉，仍返回登录失败")
+    void login_redisFailure_shouldBeSwallowed() {
+        injectRedis();
+        when(valueOperations.get("login:lock:testuser")).thenReturn(null);
+        when(userMapper.findByUsername("testuser")).thenReturn(null);
+        when(valueOperations.increment("login:attempts:testuser", 1))
+                .thenThrow(new RuntimeException("redis down"));
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> userService.login("testuser", "pw"));
+
+        assertEquals(40005, ex.getCode());
+    }
+
+    @Test
+    @DisplayName("修改密码：旧密码校验通过后更新为新密码哈希")
+    void changePassword_success_shouldUpdateHash() {
+        when(userMapper.findById(1L)).thenReturn(loginUser(1L, "testuser", "DEVELOPER"));
+        when(passwordEncoder.matches("Old@1234", "hashed_pw")).thenReturn(true);
+        when(passwordEncoder.encode("New@1234")).thenReturn("new_hash");
+
+        userService.changePassword(1L, "Old@1234", "New@1234");
+
+        verify(userMapper).updatePassword(1L, "new_hash");
+    }
+
+    @Test
+    @DisplayName("修改密码：用户不存在抛 401")
+    void changePassword_missingUser_shouldThrow401() {
+        when(userMapper.findById(999L)).thenReturn(null);
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> userService.changePassword(999L, "Old@1234", "New@1234"));
+
+        assertEquals(401, ex.getCode());
+        verify(userMapper, never()).updatePassword(anyLong(), anyString());
+    }
+
+    @Test
+    @DisplayName("修改密码：旧密码错误抛 400 当前密码错误")
+    void changePassword_wrongOldPassword_shouldThrow400() {
+        when(userMapper.findById(1L)).thenReturn(loginUser(1L, "testuser", "DEVELOPER"));
+        when(passwordEncoder.matches("Wrong@123", "hashed_pw")).thenReturn(false);
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> userService.changePassword(1L, "Wrong@123", "New@1234"));
+
+        assertEquals(400, ex.getCode());
+        assertEquals("当前密码错误", ex.getMessage());
+        verify(userMapper, never()).updatePassword(anyLong(), anyString());
+    }
+
+    @Test
+    @DisplayName("修改密码：新密码过弱或为 null 抛 PASSWORD_TOO_WEAK")
+    void changePassword_weakNewPassword_shouldThrow() {
+        when(userMapper.findById(1L)).thenReturn(loginUser(1L, "testuser", "DEVELOPER"));
+        when(passwordEncoder.matches("Old@1234", "hashed_pw")).thenReturn(true);
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> userService.changePassword(1L, "Old@1234", "12345678"));
+
+        assertEquals(40003, ex.getCode());
+        assertEquals("密码至少 8 位，需包含大小写字母、数字和特殊字符中的至少三类", ex.getMessage());
+
+        assertThrows(BusinessException.class,
+                () -> userService.changePassword(1L, "Old@1234", null));
+        verify(userMapper, never()).updatePassword(anyLong(), anyString());
     }
 }

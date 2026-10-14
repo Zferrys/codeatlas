@@ -147,4 +147,68 @@ class ConstitutionCheckServiceTest {
                 eq(PROJECT_ID), eq(USER_ID), eq(300L), eq(300L), eq(600L), eq(90L),
                 isNull(), eq(true));
     }
+
+    // ==================== 以下为覆盖率补全追加（不改动上方既有用例） ====================
+
+    private static final String TASK_ID = "aitask-constitution-01";
+
+    @Test
+    @DisplayName("taskId 重载：成功路径落 CONSTITUTION_CHECK 洞察")
+    void analyzeConstitution_taskIdOverload_shouldSaveInsight() {
+        stubProjectScanClasses();
+        when(constitutionRuleService.getRules(PROJECT_ID))
+                .thenReturn(Collections.singletonList(rule("命名规范", "MAJOR", "类名必须使用大驼峰")));
+        when(aiClient.getModelName()).thenReturn("mock-model");
+        when(tokenBudgetManager.tryConsume(anyLong())).thenReturn(true);
+        AiResponse response = new AiResponse();
+        response.setContent("规约检查结果：全部通过");
+        response.setTokensUsed(600);
+        response.setPromptTokens(300);
+        response.setCompletionTokens(300);
+        response.setLatencyMs(90);
+        when(aiAnalysisService.callAiWithResilience(any(AiRequest.class))).thenReturn(response);
+        when(hallucinationChecker.check(anyString(), anyList()))
+                .thenReturn(new HallucinationChecker.HallucinationResult(false, Collections.emptyList()));
+        when(aiAnalysisService.calculateConfidenceSimple(anyString(), anyList()))
+                .thenReturn(BigDecimal.valueOf(0.9));
+
+        InsightEntity insight = service.analyzeConstitution(PROJECT_ID, USER_ID, TASK_ID);
+
+        assertNotNull(insight);
+        assertEquals("CONSTITUTION_CHECK", insight.getType());
+        verify(insightService).saveInsight(insight);
+    }
+
+    @Test
+    @DisplayName("幻觉重试调用返回 null：降级使用原文，仅主调用 Token 入账")
+    void analyzeConstitution_retryCallReturnsNull_shouldKeepOriginalContent() {
+        stubProjectScanClasses();
+        when(constitutionRuleService.getRules(PROJECT_ID))
+                .thenReturn(Collections.singletonList(rule("命名规范", "MAJOR", "类名必须使用大驼峰")));
+        when(aiClient.getModelName()).thenReturn("mock-model");
+        when(tokenBudgetManager.tryConsume(anyLong())).thenReturn(true);
+        AiResponse response = new AiResponse();
+        response.setContent("原始规约结果 com.demo.AService");
+        response.setTokensUsed(600);
+        response.setPromptTokens(300);
+        response.setCompletionTokens(300);
+        response.setLatencyMs(90);
+        when(aiAnalysisService.callAiWithResilience(any(AiRequest.class)))
+                .thenReturn(response)
+                .thenReturn(null);
+        when(hallucinationChecker.check(anyString(), anyList()))
+                .thenReturn(new HallucinationChecker.HallucinationResult(
+                        true, Collections.singletonList("com.fake.Ghost")));
+        when(hallucinationChecker.suggestAction(any(HallucinationChecker.HallucinationResult.class)))
+                .thenReturn(HallucinationChecker.Action.RETRY);
+        when(aiAnalysisService.calculateConfidenceSimple(anyString(), anyList()))
+                .thenReturn(BigDecimal.valueOf(0.6));
+
+        InsightEntity insight = service.analyzeConstitution(PROJECT_ID, USER_ID);
+
+        assertEquals("原始规约结果 com.demo.AService", insight.getContent());
+        verify(aiAnalysisService).saveAiAuditLog(eq("mock-model"), eq("CONSTITUTION_CHECK"),
+                eq(PROJECT_ID), eq(USER_ID), eq(300L), eq(300L), eq(600L), eq(90L),
+                isNull(), eq(true));
+    }
 }

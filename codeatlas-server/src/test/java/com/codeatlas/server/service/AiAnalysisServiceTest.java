@@ -16,6 +16,7 @@ import com.codeatlas.server.mapper.AiAuditLogMapper;
 import com.codeatlas.server.mapper.ClassSummaryMapper;
 import com.codeatlas.server.mapper.ProjectMapper;
 import com.codeatlas.server.mapper.ScanMapper;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -28,6 +29,8 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -48,6 +51,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -917,6 +921,106 @@ class AiAnalysisServiceTest {
         }
         String content = "ClsA ClsB ClsC ClsD ClsE ClsF ClsG ClsH 架构 " + repeat('x', 1600);
         assertEquals(0, BigDecimal.valueOf(0.92).compareTo(service.calculateConfidenceSimple(content, classes)));
+    }
+
+    // ==================== 以下为覆盖率补全追加（不改动上方既有用例） ====================
+
+    @Test
+    @DisplayName("重试结果复核抛异常：降级采用首轮结果，主+重试 Token 均入账")
+    void analyzeArchitecture_retryRecheckThrows_shouldDegradeToFirstResult() {
+        stubProjectData(smallClasses());
+        when(aiClient.getModelName()).thenReturn("mock-model");
+        when(tokenBudgetManager.tryConsume(anyLong())).thenReturn(true);
+        when(aiClient.chat(any(AiRequest.class)))
+                .thenReturn(aiResponse("引用了 com.fake.GhostA", 500), aiResponse("修正后的架构叙事", 300));
+        when(hallucinationChecker.check(anyString(), anyList()))
+                .thenReturn(HallucinationResultStub.fake(Collections.singletonList("com.fake.GhostA")))
+                .thenThrow(new RuntimeException("recheck boom"));
+        when(hallucinationChecker.suggestAction(any(HallucinationChecker.HallucinationResult.class)))
+                .thenReturn(HallucinationChecker.Action.RETRY);
+
+        InsightEntity insight = service.analyzeArchitecture(PROJECT_ID, SCAN_ID);
+
+        assertEquals("引用了 com.fake.GhostA", insight.getContent(), "复核异常 → 重试结果不得采纳");
+        assertAudit(captureAudit(), 400, 400, 800, 240, null, true);
+    }
+
+    @Test
+    @DisplayName("重试调用返回 null：降级首轮结果，仅主调用 Token 入账")
+    void analyzeArchitecture_retryCallReturnsNull_shouldDegradeToFirstResult() {
+        stubProjectData(smallClasses());
+        when(aiClient.getModelName()).thenReturn("mock-model");
+        when(tokenBudgetManager.tryConsume(anyLong())).thenReturn(true);
+        when(aiClient.chat(any(AiRequest.class)))
+                .thenReturn(aiResponse("引用了 com.fake.GhostA", 500), null);
+        when(hallucinationChecker.check(anyString(), anyList()))
+                .thenReturn(HallucinationResultStub.fake(Collections.singletonList("com.fake.GhostA")));
+        when(hallucinationChecker.suggestAction(any(HallucinationChecker.HallucinationResult.class)))
+                .thenReturn(HallucinationChecker.Action.RETRY);
+
+        InsightEntity insight = service.analyzeArchitecture(PROJECT_ID, SCAN_ID);
+
+        assertEquals("引用了 com.fake.GhostA", insight.getContent(), "重试无响应 → 首轮结果交付");
+        assertAudit(captureAudit(), 250, 250, 500, 120, null, true);
+        verify(aiClient, times(2)).chat(any(AiRequest.class));
+    }
+
+    @Test
+    @DisplayName("审计入库抛异常：被吞并且不阻塞洞察交付")
+    void analyzeArchitecture_auditInsertThrows_shouldStillDeliverInsight() {
+        stubProjectData(smallClasses());
+        when(aiClient.getModelName()).thenReturn("mock-model");
+        when(tokenBudgetManager.tryConsume(anyLong())).thenReturn(true);
+        when(aiClient.chat(any(AiRequest.class))).thenReturn(aiResponse("架构叙事内容 AService", 800));
+        when(hallucinationChecker.check(anyString(), anyList())).thenReturn(HallucinationResultStub.none());
+        doThrow(new RuntimeException("audit db down"))
+                .when(aiAuditLogMapper).insert(any(AiAuditLogEntity.class));
+
+        InsightEntity insight = service.analyzeArchitecture(PROJECT_ID, SCAN_ID);
+
+        assertEquals("架构叙事内容 AService", insight.getContent());
+        verify(insightService).saveInsight(insight);
+        assertAudit(captureAudit(), 400, 400, 800, 120, null, true);
+    }
+
+    @Test
+    @DisplayName("JSON 序列化守卫：sources 降级 []、metadata 降级 {}，审计与交付不受影响")
+    void analyzeArchitecture_serializationFailure_shouldFallbackToEmptyJson() throws Exception {
+        stubProjectData(smallClasses());
+        ObjectMapper failingMapper = mock(ObjectMapper.class);
+        when(failingMapper.writeValueAsString(any()))
+                .thenThrow(new JsonProcessingException("forced serialization failure") { });
+        Object original = swapStaticFinal(AiAnalysisService.class, "OBJECT_MAPPER", failingMapper);
+        try {
+            when(aiClient.getModelName()).thenReturn("mock-model");
+            when(tokenBudgetManager.tryConsume(anyLong())).thenReturn(true);
+            when(aiClient.chat(any(AiRequest.class))).thenReturn(aiResponse("架构叙事内容 AService", 800));
+            when(hallucinationChecker.check(anyString(), anyList())).thenReturn(HallucinationResultStub.none());
+
+            InsightEntity insight = service.analyzeArchitecture(PROJECT_ID, SCAN_ID);
+
+            assertEquals("[]", insight.getSources(), "toJson 失败必须降级为 []");
+            assertEquals("{}", insight.getMetadata(), "metadata 序列化失败必须降级为 {}");
+        } finally {
+            swapStaticFinal(AiAnalysisService.class, "OBJECT_MAPPER", original);
+        }
+        verify(failingMapper, times(2)).writeValueAsString(any());
+        assertAudit(captureAudit(), 400, 400, 800, 120, null, true);
+    }
+
+    /** 经 Unsafe 直接改写静态 final 字段（常规反射无法替换），返回旧值供还原 */
+    private static Object swapStaticFinal(Class<?> owner, String fieldName, Object newValue) throws Exception {
+        Class<?> unsafeClass = Class.forName("sun.misc.Unsafe");
+        Field theUnsafe = unsafeClass.getDeclaredField("theUnsafe");
+        theUnsafe.setAccessible(true);
+        Object unsafe = theUnsafe.get(null);
+        Field target = owner.getDeclaredField(fieldName);
+        Object base = unsafeClass.getMethod("staticFieldBase", Field.class).invoke(unsafe, target);
+        long offset = (Long) unsafeClass.getMethod("staticFieldOffset", Field.class).invoke(unsafe, target);
+        Object original = unsafeClass.getMethod("getObject", Object.class, long.class).invoke(unsafe, base, offset);
+        Method putObject = unsafeClass.getMethod("putObject", Object.class, long.class, Object.class);
+        putObject.invoke(unsafe, base, offset, newValue);
+        return original;
     }
 
     private static String repeat(char c, int times) {
