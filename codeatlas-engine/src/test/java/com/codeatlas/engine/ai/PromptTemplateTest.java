@@ -2,11 +2,19 @@ package com.codeatlas.engine.ai;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.MockedConstruction;
 
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.lang.reflect.Field;
 import java.util.HashMap;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.Mockito.mockConstruction;
+import static org.mockito.Mockito.when;
 
 @DisplayName("PromptTemplate — {{key}} 占位符替换与特殊字符转义")
 class PromptTemplateTest {
@@ -64,5 +72,37 @@ class PromptTemplateTest {
 
         assertEquals(first.render(vars), second.render(vars));
         assertEquals("Name: N\nPath: P\n", second.render(vars));
+    }
+
+    @Test
+    @DisplayName("读取模板抛 IOException：catch 记录错误并缓存空串，render 返回空串")
+    void render_ioErrorWhileReading_shouldCacheEmptyAndReturnEmpty() throws Exception {
+        clearTemplateCache(); // 清掉历史缓存，确保真实进入 loadTemplate 的读取分支
+        try (MockedConstruction<InputStreamReader> constructed =
+                     mockConstruction(InputStreamReader.class, (mock, context) ->
+                             when(mock.read(any(char[].class), anyInt(), anyInt()))
+                                     .thenThrow(new IOException("stream broken")))) {
+            PromptTemplate template = new PromptTemplate("prompts/test-escape.md");
+
+            assertEquals(1, constructed.constructed().size(), "应恰好构造 1 个 InputStreamReader");
+            assertEquals("", template.render(new HashMap<>()));
+            assertEquals("", templateCache().get("prompts/test-escape.md"),
+                    "读取失败的结果也被缓存为空串，后续同名实例化不再重试");
+        } finally {
+            clearTemplateCache(); // 移除污染的空串缓存，避免影响其他用例加载真实模板
+        }
+    }
+
+    // ==================== CACHE 反射辅助 ====================
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, String> templateCache() throws Exception {
+        Field field = PromptTemplate.class.getDeclaredField("CACHE");
+        field.setAccessible(true);
+        return (Map<String, String>) field.get(null);
+    }
+
+    private static void clearTemplateCache() throws Exception {
+        templateCache().clear();
     }
 }

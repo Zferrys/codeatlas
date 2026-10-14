@@ -5,6 +5,7 @@ import org.eclipse.jgit.api.Git;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.mockito.MockedStatic;
 
 import javax.net.ssl.HostnameVerifier;
 import javax.net.ssl.HttpsURLConnection;
@@ -21,7 +22,10 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
+import java.io.RandomAccessFile;
 import java.lang.reflect.Constructor;
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
@@ -30,6 +34,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.KeyStore;
+import java.security.KeyStoreException;
+import java.security.NoSuchAlgorithmException;
 import java.security.cert.CertificateException;
 import java.security.cert.X509Certificate;
 import java.util.ArrayList;
@@ -44,6 +50,8 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.CALLS_REAL_METHODS;
+import static org.mockito.Mockito.mockStatic;
 
 /**
  * GitService — 仓库大小预估、本地克隆、目录清理与 CombinedTrustManager 信任链。
@@ -145,6 +153,46 @@ class GitServiceTest {
         }
     }
 
+    // ==================== configureSslForWindows（私有静态，经 estimateRepoSize 触发） ====================
+
+    @Test
+    @DisplayName("Windows-ROOT 证书库不可用：内层 catch 记日志后继续，整体 SSL 配置仍成功置位")
+    void configureSslForWindows_windowsRootFailure_shouldFallbackToJdkDefaultOnly() throws Exception {
+        boolean savedFlag = sslConfiguredFlag();
+        setSslConfiguredFlag(false); // 重置静态标记，强制重新进入 configureSslForWindows
+        try {
+            try (MockedStatic<KeyStore> keyStoreMock = mockStatic(KeyStore.class, CALLS_REAL_METHODS)) {
+                // 只替换 Windows-ROOT 这一个入口，JDK 默认信任库初始化（内部也会走 KeyStore.getInstance）保持真实行为
+                keyStoreMock.when(() -> KeyStore.getInstance("Windows-ROOT"))
+                        .thenThrow(new KeyStoreException("Windows-ROOT not available"));
+                // 非 GitHub URL 不发起网络请求，仅触发 configureSslForWindows 后返回 -1
+                assertEquals(-1L, service.estimateRepoSize("D:/repos/local"));
+            }
+            assertTrue(sslConfiguredFlag(),
+                    "Windows-ROOT 失败只记日志（内层 catch），不应阻断 JDK 默认证书库配置完成");
+        } finally {
+            setSslConfiguredFlag(savedFlag);
+        }
+    }
+
+    @Test
+    @DisplayName("SSLContext 初始化失败：外层 catch 兜住异常，静态标记保持 false 允许下次重试")
+    void configureSslForWindows_sslContextFailure_shouldStayUnconfigured() throws Exception {
+        boolean savedFlag = sslConfiguredFlag();
+        setSslConfiguredFlag(false);
+        try {
+            try (MockedStatic<SSLContext> sslContextMock = mockStatic(SSLContext.class, CALLS_REAL_METHODS)) {
+                sslContextMock.when(() -> SSLContext.getInstance("TLS"))
+                        .thenThrow(new NoSuchAlgorithmException("TLS unavailable"));
+                assertEquals(-1L, service.estimateRepoSize("D:/repos/local"));
+            }
+            assertFalse(sslConfiguredFlag(),
+                    "SSLContext 初始化失败被外层 catch 兜住，标记必须保持 false 以便下次调用重试");
+        } finally {
+            setSslConfiguredFlag(savedFlag);
+        }
+    }
+
     // ==================== cloneRepository ====================
 
     @Test
@@ -230,6 +278,41 @@ class GitServiceTest {
         }
     }
 
+    @Test
+    @DisplayName("克隆后目录超 500MB 上限：返回「仓库过大」拒绝结果，检出文件仍在（判定发生在克隆之后）")
+    void cloneRepository_oversizeRepo_shouldReject(@TempDir Path tempDir) throws Exception {
+        Path sourceRepo = tempDir.resolve("huge-source");
+        Files.createDirectories(sourceRepo);
+        String branch;
+        try (Git git = Git.init().setDirectory(sourceRepo.toFile()).call()) {
+            Files.write(sourceRepo.resolve("README.md"), "hello".getBytes(StandardCharsets.UTF_8));
+            // 550MB 稀疏文件：NTFS 上 setLength 毫秒级完成且几乎不占物理磁盘，
+            // 但 Files.size() 返回 550MB 逻辑大小，克隆检出后足以越过 500MB 上限
+            try (RandomAccessFile sparse = new RandomAccessFile(
+                    sourceRepo.resolve("big.bin").toFile(), "rw")) {
+                sparse.setLength(550L * 1024 * 1024);
+            }
+            git.add().addFilepattern(".").call();
+            git.commit()
+                    .setMessage("huge")
+                    .setAuthor("tester", "tester@example.com")
+                    .setCommitter("tester", "tester@example.com")
+                    .call();
+            branch = git.getRepository().getBranch();
+        }
+        Path target = tempDir.resolve("cloned-huge");
+
+        GitResult result = service.cloneRepository(
+                sourceRepo.toUri().toString(), branch, target, message -> { });
+
+        assertFalse(result.isSuccess(), "超限仓库必须被拒绝");
+        assertNull(result.getLocalPath());
+        assertNotNull(result.getMessage());
+        assertTrue(result.getMessage().contains("仓库过大"), "实际消息: " + result.getMessage());
+        assertTrue(result.getMessage().contains("上限 500 MB"), "实际消息: " + result.getMessage());
+        assertTrue(Files.exists(target.resolve("big.bin")), "克隆检出已完成，拒绝判定发生在检出之后");
+    }
+
     // ==================== deleteLocalRepo ====================
 
     @Test
@@ -253,6 +336,68 @@ class GitServiceTest {
         service.deleteLocalRepo(repoDir);
 
         assertFalse(Files.exists(repoDir), "目录树必须被完全删除");
+    }
+
+    @Test
+    @DisplayName("deleteLocalRepo：Files.walk 抛 IOException 被 catch 兜住，不抛异常且目录保留")
+    void deleteLocalRepo_walkFailure_shouldBeSwallowed(@TempDir Path tempDir) throws Exception {
+        Path repoDir = tempDir.resolve("walk-fail");
+        Files.createDirectories(repoDir);
+        Files.write(repoDir.resolve("keep.txt"), "x".getBytes(StandardCharsets.UTF_8));
+
+        try (MockedStatic<Files> filesMock = mockStatic(Files.class, CALLS_REAL_METHODS)) {
+            // 仅替换遍历入口：exists 判断等其他静态方法保持真实行为
+            filesMock.when(() -> Files.walk(repoDir)).thenThrow(new IOException("walk denied"));
+            service.deleteLocalRepo(repoDir);
+        }
+
+        assertTrue(Files.exists(repoDir), "walk 失败时目录必须保留（仅记日志告警）");
+        assertTrue(Files.exists(repoDir.resolve("keep.txt")));
+    }
+
+    // ==================== getDirectorySize（私有，反射驱动） ====================
+
+    private static Method getDirectorySizeMethod() throws Exception {
+        Method method = GitService.class.getDeclaredMethod("getDirectorySize", Path.class);
+        method.setAccessible(true);
+        return method;
+    }
+
+    @Test
+    @DisplayName("getDirectorySize：目录不存在时 Files.walk 抛 IOException，外层 catch 返回 0")
+    void getDirectorySize_missingDir_shouldReturnZero(@TempDir Path tempDir) throws Exception {
+        long size = (long) getDirectorySizeMethod().invoke(service, tempDir.resolve("no-such-dir"));
+
+        assertEquals(0L, size);
+    }
+
+    @Test
+    @DisplayName("getDirectorySize：单个文件取大小抛 IOException 时计 0，其余文件正常累加")
+    void getDirectorySize_sizeFailure_shouldCountFileAsZero(@TempDir Path tempDir) throws Exception {
+        Path good = tempDir.resolve("good.bin");
+        Path broken = tempDir.resolve("broken.bin");
+        Files.write(good, new byte[1024]);
+        Files.write(broken, new byte[4096]);
+
+        try (MockedStatic<Files> filesMock = mockStatic(Files.class, CALLS_REAL_METHODS)) {
+            filesMock.when(() -> Files.size(broken)).thenThrow(new IOException("size unavailable"));
+            long size = (long) getDirectorySizeMethod().invoke(service, tempDir);
+            assertEquals(1024L, size, "broken.bin 抛异常计 0，仅累加 good.bin 的 1024 字节");
+        }
+    }
+
+    // ==================== sslConfigured 静态标记反射辅助 ====================
+
+    private static boolean sslConfiguredFlag() throws Exception {
+        Field field = GitService.class.getDeclaredField("sslConfigured");
+        field.setAccessible(true);
+        return field.getBoolean(null);
+    }
+
+    private static void setSslConfiguredFlag(boolean value) throws Exception {
+        Field field = GitService.class.getDeclaredField("sslConfigured");
+        field.setAccessible(true);
+        field.setBoolean(null, value);
     }
 
     // ==================== CombinedTrustManager（私有内部类，反射驱动） ====================

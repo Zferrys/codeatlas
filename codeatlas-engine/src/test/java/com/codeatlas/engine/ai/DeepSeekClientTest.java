@@ -9,6 +9,7 @@ import okhttp3.OkHttpClient;
 import okhttp3.Protocol;
 import okhttp3.Request;
 import okhttp3.Response;
+import okhttp3.ResponseBody;
 import okio.Timeout;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -33,6 +34,7 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -40,6 +42,8 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 @DisplayName("DeepSeekClient — OpenAI 兼容 chat/completions 全分支")
 class DeepSeekClientTest {
@@ -600,6 +604,25 @@ class DeepSeekClientTest {
                     () -> client.chatStream(new AiRequest(), callback));
 
             assertEquals("response is not eligible for a body and must not be closed", ex.getMessage());
+            assertEquals(1, callback.completions.get());
+            assertTrue(callback.errors.isEmpty());
+            assertTrue(callback.tokens.isEmpty());
+        }
+
+        @Test
+        @DisplayName("响应 body() 为 null 且 close() 不抛异常（非 OkHttp 实现的契约边界）：onComplete 后 return 正常返回")
+        void chatStream_nullBodyWithLenientClose_shouldReturnAfterComplete() throws Exception {
+            DeepSeekClient client = clientAt(1);
+            Response lenient = mock(Response.class);
+            when(lenient.isSuccessful()).thenReturn(true);
+            when(lenient.body()).thenReturn((ResponseBody) null);
+            // mock 的 close() 是 no-op：验证「onComplete 后 return」分支本身（真实 OkHttp close() 必抛 ISE，
+            // 该组合在生产不可达，见 chatStream_nullResponseBody_shouldCompleteThenCloseFails）
+            injectFakeHttpClient(client, fakeClient(lenient));
+            RecordingCallback callback = new RecordingCallback();
+
+            assertDoesNotThrow(() -> client.chatStream(new AiRequest(), callback));
+
             assertEquals(1, callback.completions.get());
             assertTrue(callback.errors.isEmpty());
             assertTrue(callback.tokens.isEmpty());
