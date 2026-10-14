@@ -1,10 +1,14 @@
 package com.codeatlas.server.service;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.codeatlas.server.entity.ClassSummaryEntity;
 import com.codeatlas.server.service.HallucinationChecker.Action;
 import com.codeatlas.server.service.HallucinationChecker.HallucinationResult;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -138,5 +142,31 @@ class HallucinationCheckerTest {
     @DisplayName("建议动作：虚构类超过 5 → DEGRADED")
     void suggestAction_severeHallucination_shouldDegrade() {
         assertEquals(Action.DEGRADED, checker.suggestAction(new HallucinationResult(true, fakeFqns(6))));
+    }
+
+    // ==================== 变异体杀灭补强（PIT survivors 定向，断言精确到值） ====================
+
+    @Test
+    @DisplayName("幻觉日志精确：达到阈值输出完整消息，未达阈值静默")
+    void check_hallucinationLog_shouldBeExactAndGuarded() {
+        Logger logger = (Logger) LoggerFactory.getLogger(HallucinationChecker.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            HallucinationResult flagged = checker.check(String.join(" ", fakeFqns(3)), actualClasses());
+            assertTrue(flagged.hasHallucination());
+            assertEquals(1, appender.list.size(), "达到阈值必须输出一条告警");
+            assertEquals("Hallucination detected: 3 fake class references: "
+                            + "[com.fake.Unknown1, com.fake.Unknown2, com.fake.Unknown3]",
+                    appender.list.get(0).getFormattedMessage());
+
+            appender.list.clear();
+            HallucinationResult below = checker.check(String.join(" ", fakeFqns(2)), actualClasses());
+            assertFalse(below.hasHallucination());
+            assertTrue(appender.list.isEmpty(), "未达阈值不得输出幻觉告警");
+        } finally {
+            logger.detachAppender(appender);
+        }
     }
 }

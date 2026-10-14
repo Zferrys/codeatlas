@@ -1,9 +1,13 @@
 package com.codeatlas.server.service;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.codeatlas.server.entity.ClassSummaryEntity;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 
 import java.util.Arrays;
 import java.util.Collections;
@@ -269,5 +273,117 @@ class EvidenceVerifierTest {
         entity.setSimpleName(simpleName);
         entity.setDependencies(dependencies);
         return entity;
+    }
+
+    // ==================== 变异体杀灭补强（PIT survivors 定向，断言精确到值） ====================
+
+    @Test
+    @DisplayName("异常日志精确：仅真实异常时告警，且逐字输出未溯源/关系矛盾清单")
+    void verify_anomalyLog_shouldFireOnlyForActualAnomalies() {
+        Logger logger = (Logger) LoggerFactory.getLogger(EvidenceVerifier.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            List<ClassSummaryEntity> classes = Arrays.asList(
+                    classEntity("com.demo.AService", "AService", "[\"com.demo.BService\"]"),
+                    classEntity("com.demo.BService", "BService", null));
+
+            verifier.verify("AService 是核心服务类。",
+                    Collections.singletonList("com.demo.AService"), classes);
+            assertTrue(appender.list.isEmpty(), "无异常时不得输出告警日志");
+
+            verifier.verify("GhostService 是核心服务类。",
+                    Collections.singletonList("com.demo.AService"), classes);
+            assertEquals(1, appender.list.size(), "未溯源引用必须输出一条告警");
+            assertEquals("Evidence anomalies detected: unsourced=[GhostService], relationMismatches=[]",
+                    appender.list.get(0).getFormattedMessage());
+
+            appender.list.clear();
+            verifier.verify("BService 依赖 AService。",
+                    Arrays.asList("com.demo.AService", "com.demo.BService"), classes);
+            assertEquals(1, appender.list.size(), "关系矛盾必须输出一条告警");
+            assertEquals("Evidence anomalies detected: unsourced=[], "
+                            + "relationMismatches=[BService 依赖 AService]",
+                    appender.list.get(0).getFormattedMessage());
+        } finally {
+            logger.detachAppender(appender);
+        }
+    }
+
+    @Test
+    @DisplayName("已知类简名按整词匹配提取：证据缺失时精确进入未溯源清单")
+    void verify_knownSimpleName_shouldMatchAsWholeWord() {
+        List<ClassSummaryEntity> classes = Collections.singletonList(
+                classEntity("com.demo.AService", "AService", null));
+
+        EvidenceVerifier.VerificationReport report =
+                verifier.verify("请调用 AService 处理。", Collections.emptyList(), classes);
+
+        assertEquals(Collections.singletonList("AService"), report.getUnsourced(),
+                "已知类简名应作为整词提取并因证据缺失进入未溯源清单");
+    }
+
+    @Test
+    @DisplayName("连写复合技术名词（MyBatisPlus）豁免，而技术前缀+类名后缀（RedisService）仍被检出")
+    void verify_compoundTechTermExemption_shouldKeepForgedClassDetection() {
+        List<ClassSummaryEntity> classes = Collections.singletonList(
+                classEntity("com.demo.AService", "AService", null));
+
+        EvidenceVerifier.VerificationReport exemptReport =
+                verifier.verify("持久层使用 MyBatisPlus。", Collections.emptyList(), classes);
+        assertEquals(Collections.emptyList(), exemptReport.getUnsourced(),
+                "技术名词后缀组合（MyBatis+Plus）应豁免：" + exemptReport.getUnsourced());
+
+        EvidenceVerifier.VerificationReport forgedReport =
+                verifier.verify("注入 RedisService 处理缓存。", Collections.emptyList(), classes);
+        assertEquals(Collections.singletonList("RedisService"), forgedReport.getUnsourced(),
+                "技术前缀+Service 后缀正是编造类名高发形态，必须保留检出");
+    }
+
+    @Test
+    @DisplayName("非技术词前缀 + 缩写/技术词尾巴（DbCP/XqJUnit）：必须检出，不得被后缀豁免越位")
+    void verify_lowercasePrefixWithAbbrevTail_shouldBeFlagged() {
+        List<ClassSummaryEntity> classes = Collections.singletonList(
+                classEntity("com.demo.AService", "AService", null));
+
+        EvidenceVerifier.VerificationReport cpReport =
+                verifier.verify("内部自研 DbCP 组件。", Collections.emptyList(), classes);
+        assertEquals(Collections.singletonList("DbCP"), cpReport.getUnsourced(),
+                "非技术词前缀 + 缩写尾巴必须是编造类名候选：" + cpReport.getUnsourced());
+
+        EvidenceVerifier.VerificationReport unitReport =
+                verifier.verify("测试框架 XqJUnit 参与构建。", Collections.emptyList(), classes);
+        assertEquals(Collections.singletonList("XqJUnit"), unitReport.getUnsourced(),
+                "非技术词前缀 + 技术词尾巴必须保留检出：" + unitReport.getUnsourced());
+    }
+
+    @Test
+    @DisplayName("修正提示词段 2：关系矛盾清单存在时精确渲染，无矛盾时整段省略")
+    void buildCorrectionPrompt_relationSection_shouldBeExact() {
+        EvidenceVerifier.VerificationReport mismatched = new EvidenceVerifier.VerificationReport(2,
+                Collections.emptyList(), 1, Collections.singletonList("BService 依赖 AService"));
+        String withSection = verifier.buildCorrectionPrompt(mismatched);
+        assertTrue(withSection.contains("2. 以下关系声明与项目依赖数据不一致：BService 依赖 AService。"
+                + "请以工具返回的真实依赖数据为准修正。"), withSection);
+
+        EvidenceVerifier.VerificationReport unsourcedOnly = new EvidenceVerifier.VerificationReport(2,
+                Collections.singletonList("GhostService"), 0, Collections.emptyList());
+        String withoutSection = verifier.buildCorrectionPrompt(unsourcedOnly);
+        assertTrue(withoutSection.contains("1. 以下类引用未出现在本轮工具检索结果中：GhostService。"
+                + "请逐一核对：不能由工具数据支持的引用必须删除或改述。"), withoutSection);
+        assertFalse(withoutSection.contains("2. 以下关系声明"), "无关系矛盾时不得渲染段 2");
+    }
+
+    @Test
+    @DisplayName("anomalyCount 精确等于未溯源与关系矛盾数量之和")
+    void verificationReport_anomalyCount_shouldBeExactSum() {
+        EvidenceVerifier.VerificationReport report = new EvidenceVerifier.VerificationReport(3,
+                Arrays.asList("A", "B"), 2, Arrays.asList("X", "Y", "Z"));
+        assertEquals(5, report.anomalyCount());
+
+        EvidenceVerifier.VerificationReport empty = new EvidenceVerifier.VerificationReport(0,
+                Collections.emptyList(), 0, Collections.emptyList());
+        assertEquals(0, empty.anomalyCount());
     }
 }

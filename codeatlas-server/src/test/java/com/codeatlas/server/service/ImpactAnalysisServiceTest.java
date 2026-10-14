@@ -20,12 +20,17 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -36,7 +41,9 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -701,5 +708,238 @@ class ImpactAnalysisServiceTest {
         cls.setLayer(layer);
         cls.setDependencies(dependencies);
         return cls;
+    }
+
+    // ==================== 变异体杀灭补强（PIT survivors 定向，断言精确到值） ====================
+
+    private ImpactAnalysisService serviceWith(AiTaskProgressRegistry registry) {
+        return new ImpactAnalysisService(aiAnalysisService, projectService, scanService,
+                evidenceVerifier, tokenBudgetManager, aiClient, chatHistoryService, registry);
+    }
+
+    @Test
+    @DisplayName("影响分析：请求载荷/系统提示/8192 预算/入口预算/进度文案全部精确")
+    void analyzeImpact_requestPayloadAndBudget_shouldBeExact() {
+        stubAnalyzeBase();
+        AiTaskProgressRegistry registry = mock(AiTaskProgressRegistry.class);
+        when(aiClient.getModelName()).thenReturn("mock-model");
+        when(tokenBudgetManager.tryConsume(anyLong())).thenReturn(true);
+        when(aiAnalysisService.callAiWithResilience(any(AiRequest.class)))
+                .thenReturn(response("分析结果", 100, 100, 50));
+
+        Map<String, Object> result = serviceWith(registry).analyzeImpact(PROJECT_ID, "com.demo.AService",
+                "MODIFY", "run", "desc", USER_ID, TASK_ID);
+
+        assertEquals("分析结果", result.get("aiAnalysis"));
+        ArgumentCaptor<AiRequest> requestCaptor = ArgumentCaptor.forClass(AiRequest.class);
+        verify(aiAnalysisService).callAiWithResilience(requestCaptor.capture());
+        AiRequest request = requestCaptor.getValue();
+        assertNotNull(request.getPrompt(), "模板渲染 prompt 必须挂载");
+        assertTrue(request.getPrompt().contains("- 项目名: Demo"), request.getPrompt());
+        assertTrue(request.getPrompt().contains("- 变更类型: MODIFY\n"),
+                "非空变更类型不得渲染默认值：" + request.getPrompt());
+        assertTrue(request.getPrompt().contains("- 目标方法: run\n"),
+                "非空目标方法不得渲染默认值：" + request.getPrompt());
+        assertTrue(request.getPrompt().contains("- 变更描述: desc\n"),
+                "非空描述不得渲染默认值：" + request.getPrompt());
+        assertTrue(request.getPrompt().contains("（BFS 未发现依赖待修改类的其他类）"),
+                "空 BFS 结果必须渲染占位文案：" + request.getPrompt());
+        assertEquals("你是一位资深软件架构师。分析代码变更的影响范围，评估风险，给出建议。用中文回答，保留类名/方法名原文。",
+                request.getSystemPrompt());
+        assertEquals(0.3, request.getTemperature());
+        assertEquals(8192, request.getMaxTokens(), "推理模型预算 8192 档必须显式设置");
+        long expectedTokens = request.getPrompt().length() * 2 / 3 + 4096;
+        verify(tokenBudgetManager).tryConsume(expectedTokens);
+        verify(registry).publish(TASK_ID, "正在分析依赖影响链路…");
+        verify(registry).publish(TASK_ID, "AI 正在评估变更风险…");
+    }
+
+    @Test
+    @DisplayName("影响分析：目标类未命中 → 原样回显、返回可变空路径、不触发 AI")
+    void analyzeImpact_nonMatchingTarget_shouldEchoRawNameAndReturnMutablePaths() {
+        stubAnalyzeBase();
+
+        Map<String, Object> result = serviceWithoutAi.analyzeImpact(PROJECT_ID, "com.demo.GhostService",
+                "MODIFY", "run", "desc", USER_ID);
+
+        assertEquals("com.demo.GhostService", result.get("targetClass"));
+        assertEquals(0, result.get("totalImpacted"));
+        assertNull(result.get("aiAnalysis"));
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> impactPaths = (List<Map<String, Object>>) result.get("impactPaths");
+        assertTrue(impactPaths.isEmpty());
+        assertTrue(impactPaths instanceof ArrayList, "无目标时应返回可变空列表而非不可变常量");
+        assertDoesNotThrow(() -> impactPaths.add(new HashMap<>()), "空路径列表必须保持可变语义");
+        verifyNoInteractions(tokenBudgetManager, chatHistoryService);
+    }
+
+    @Test
+    @DisplayName("影响分析：目标类按简名命中 → 回显全限定名")
+    void analyzeImpact_simpleNameMatch_shouldEchoFqn() {
+        stubAnalyzeBase();
+
+        Map<String, Object> result = serviceWithoutAi.analyzeImpact(PROJECT_ID, "AService",
+                "MODIFY", "run", "desc", USER_ID);
+
+        assertEquals("com.demo.AService", result.get("targetClass"), "简名命中时必须回显目标类 FQN");
+    }
+
+    @Test
+    @DisplayName("影响分析：BFS 深度封顶 5 — 六类依赖链只产出五条路径，第七类不可达")
+    void analyzeImpact_bfsDepthCap_shouldStopAtFiveLevels() {
+        Project project = new Project();
+        project.setName("Demo");
+        when(projectService.getProjectEntity(PROJECT_ID)).thenReturn(project);
+        ScanRecord scan = new ScanRecord();
+        scan.setId(100L);
+        when(scanService.getLatestScanEntity(PROJECT_ID)).thenReturn(scan);
+        when(scanService.getClassSummaries(PROJECT_ID)).thenReturn(Arrays.asList(
+                classEntity("com.demo.A", "A", "controller", "[]"),
+                classEntity("com.demo.B", "B", "service", "[\"com.demo.A\"]"),
+                classEntity("com.demo.C", "C", "service", "[\"com.demo.B\"]"),
+                classEntity("com.demo.D", "D", "service", "[\"com.demo.C\"]"),
+                classEntity("com.demo.E", "E", "service", "[\"com.demo.D\"]"),
+                classEntity("com.demo.F", "F", "service", "[\"com.demo.E\"]"),
+                classEntity("com.demo.G", "G", "service", "[\"com.demo.F\"]")));
+        when(aiAnalysisService.parseDeps(anyString())).thenAnswer(invocation -> {
+            String json = invocation.getArgument(0);
+            if (json == null || "[]".equals(json)) {
+                return Collections.emptyList();
+            }
+            return Collections.singletonList(json.substring(json.indexOf("com.demo."), json.length() - 2));
+        });
+        when(aiAnalysisService.shorten(anyString())).thenAnswer(invocation -> {
+            String fqn = invocation.getArgument(0);
+            return fqn.substring(fqn.lastIndexOf('.') + 1);
+        });
+        when(aiClient.getModelName()).thenReturn("mock-model");
+        when(tokenBudgetManager.tryConsume(anyLong())).thenReturn(true);
+        when(aiAnalysisService.callAiWithResilience(any(AiRequest.class)))
+                .thenReturn(response("风险分析", 10, 10, 5));
+
+        Map<String, Object> result = serviceWithAi.analyzeImpact(PROJECT_ID, "com.demo.A",
+                "MODIFY", null, null, USER_ID);
+
+        assertEquals(6, result.get("totalImpacted"), "A..F 六类去重（G 超出深度 5 不可达）");
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> paths = (List<Map<String, Object>>) result.get("impactPaths");
+        assertEquals(5, paths.size(), "深度封顶 5 层：B..F 共五条路径");
+        assertEquals("com.demo.F", paths.get(4).get("sourceFqn"), "第五条路径来源必须是深度 5 的 F");
+        assertEquals(5, paths.get(4).get("depth"));
+
+        ArgumentCaptor<AiRequest> requestCaptor = ArgumentCaptor.forClass(AiRequest.class);
+        verify(aiAnalysisService).callAiWithResilience(requestCaptor.capture());
+        String prompt = requestCaptor.getValue().getPrompt();
+        assertTrue(prompt.contains("- F → E (depth=5)"), "非空 BFS 结果必须逐条渲染路径：" + prompt);
+        assertFalse(prompt.contains("（BFS 未发现依赖待修改类的其他类）"), "非空 BFS 结果不得渲染空占位");
+    }
+
+    @Test
+    @DisplayName("影响分析：历史快照身份字段与问题串逐字精确")
+    void analyzeImpact_historyQuestion_shouldBeExact() {
+        stubAnalyzeBase();
+        when(aiClient.getModelName()).thenReturn("mock-model");
+        when(tokenBudgetManager.tryConsume(anyLong())).thenReturn(true);
+        when(aiAnalysisService.callAiWithResilience(any(AiRequest.class)))
+                .thenReturn(response("AI 建议", 10, 10, 5));
+
+        serviceWithAi.analyzeImpact(PROJECT_ID, "com.demo.AService", "MODIFY", "run", "desc", USER_ID);
+
+        ArgumentCaptor<ChatHistoryEntity> historyCaptor = ArgumentCaptor.forClass(ChatHistoryEntity.class);
+        verify(chatHistoryService).record(historyCaptor.capture());
+        ChatHistoryEntity entity = historyCaptor.getValue();
+        assertEquals(PROJECT_ID, entity.getProjectId());
+        assertEquals(USER_ID, entity.getUserId());
+        assertEquals("变更影响分析: com.demo.AService [MODIFY] 方法: run — desc", entity.getQuestion());
+    }
+
+    @Test
+    @DisplayName("上下文问答：请求载荷/系统提示/精确预算/组织回答与校验进度文案")
+    void contextualQa_requestPayloadAndBudget_shouldBeExact() {
+        stubContextQaBase();
+        AiTaskProgressRegistry registry = mock(AiTaskProgressRegistry.class);
+        when(aiClient.getModelName()).thenReturn("mock-model");
+        when(tokenBudgetManager.tryConsume(anyLong())).thenReturn(true);
+        when(aiAnalysisService.callAiWithResilience(any(AiRequest.class)))
+                .thenReturn(response("答案甲", 100, 100, 50));
+        when(evidenceVerifier.verify(anyString(), anyList(), anyList())).thenReturn(
+                new EvidenceVerifier.VerificationReport(0, Collections.emptyList(), 0, Collections.emptyList()));
+
+        Map<String, Object> result = serviceWith(registry)
+                .contextualQa(PROJECT_ID, "这个类做什么？", "com.demo.AService", USER_ID, TASK_ID);
+
+        assertEquals("答案甲", result.get("answer"));
+        ArgumentCaptor<AiRequest> requestCaptor = ArgumentCaptor.forClass(AiRequest.class);
+        verify(aiAnalysisService).callAiWithResilience(requestCaptor.capture());
+        AiRequest request = requestCaptor.getValue();
+        assertTrue(request.getPrompt().contains("- 项目名: Demo"), request.getPrompt());
+        assertTrue(request.getPrompt().contains("- 类名: com.demo.AService"), request.getPrompt());
+        assertTrue(request.getPrompt().contains("（无项目内直接依赖）"),
+                "无项目内依赖时必须渲染占位文案：" + request.getPrompt());
+        assertEquals("你是一位资深软件架构师，正在帮助开发者理解代码库。基于提供的项目上下文准确回答问题。",
+                request.getSystemPrompt());
+        assertEquals(0.3, request.getTemperature());
+        long expectedTokens = request.getPrompt().length() * 2 / 3 + 4096;
+        verify(tokenBudgetManager).tryConsume(expectedTokens);
+        verify(registry).publish(TASK_ID, "AI 正在组织回答…");
+        verify(registry).publish(TASK_ID, "正在进行证据交叉验证…");
+    }
+
+    @Test
+    @DisplayName("上下文问答：修正轮请求（prompt 拼接/系统提示/温度 0.1）与修正进度文案精确")
+    void contextualQa_correctionRequest_shouldBeExact() {
+        stubContextQaBase();
+        AiTaskProgressRegistry registry = mock(AiTaskProgressRegistry.class);
+        when(aiClient.getModelName()).thenReturn("mock-model");
+        when(tokenBudgetManager.tryConsume(anyLong())).thenReturn(true);
+        when(aiAnalysisService.callAiWithResilience(any(AiRequest.class)))
+                .thenReturn(response("答案甲", 100, 100, 50), response("修正后的答案", 60, 60, 30));
+        EvidenceVerifier.VerificationReport wrong = new EvidenceVerifier.VerificationReport(5,
+                Arrays.asList("GhostA", "GhostB"), 1, Collections.emptyList());
+        EvidenceVerifier.VerificationReport fixed = new EvidenceVerifier.VerificationReport(5,
+                Collections.emptyList(), 1, Collections.emptyList());
+        when(evidenceVerifier.verify(anyString(), anyList(), anyList())).thenReturn(wrong, fixed);
+        when(evidenceVerifier.buildCorrectionPrompt(any())).thenReturn("请修正未溯源引用");
+
+        Map<String, Object> result = serviceWith(registry)
+                .contextualQa(PROJECT_ID, "问题", "com.demo.AService", USER_ID, TASK_ID);
+
+        assertEquals("修正后的答案", result.get("answer"));
+        verify(registry).publish(TASK_ID, "发现证据瑕疵，正在自动修正…");
+        ArgumentCaptor<AiRequest> requestCaptor = ArgumentCaptor.forClass(AiRequest.class);
+        verify(aiAnalysisService, times(2)).callAiWithResilience(requestCaptor.capture());
+        AiRequest main = requestCaptor.getAllValues().get(0);
+        AiRequest correction = requestCaptor.getAllValues().get(1);
+        assertEquals(main.getPrompt() + "\n\n## 你上一条回答\n答案甲\n\n## 修正请求\n请修正未溯源引用",
+                correction.getPrompt(), "修正轮 prompt 必须拼接原 prompt + 上一条回答 + 修正请求");
+        assertEquals("你是一位资深软件架构师，正在帮助开发者理解代码库。基于提供的项目上下文准确回答问题。",
+                correction.getSystemPrompt());
+        assertEquals(0.1, correction.getTemperature(), "修正轮必须低温 0.1");
+        assertEquals(4096, correction.getMaxTokens());
+    }
+
+    @Test
+    @DisplayName("上下文问答：类名未命中 → 渲染未找到提示与未指定依赖占位符")
+    void contextualQa_unknownClass_shouldRenderPlaceholders() {
+        Project project = new Project();
+        project.setName("Demo");
+        when(projectService.getProjectEntity(PROJECT_ID)).thenReturn(project);
+        when(scanService.getClassSummaries(PROJECT_ID)).thenReturn(Collections.singletonList(
+                classEntity("com.demo.AService", "AService", "service", null)));
+        when(aiClient.getModelName()).thenReturn("mock-model");
+        when(tokenBudgetManager.tryConsume(anyLong())).thenReturn(true);
+        when(aiAnalysisService.callAiWithResilience(any(AiRequest.class)))
+                .thenReturn(response("答案", 10, 10, 5));
+        when(evidenceVerifier.verify(anyString(), anyList(), anyList())).thenReturn(
+                new EvidenceVerifier.VerificationReport(0, Collections.emptyList(), 0, Collections.emptyList()));
+
+        serviceWithAi.contextualQa(PROJECT_ID, "问题", "com.demo.GhostService", USER_ID);
+
+        ArgumentCaptor<AiRequest> requestCaptor = ArgumentCaptor.forClass(AiRequest.class);
+        verify(aiAnalysisService).callAiWithResilience(requestCaptor.capture());
+        String prompt = requestCaptor.getValue().getPrompt();
+        assertTrue(prompt.contains("- 类名: com.demo.GhostService（未在当前扫描结果中找到该类）"),
+                "未命中的类名必须渲染未找到提示：" + prompt);
+        assertTrue(prompt.contains("（未指定具体类）"), "无目标类时依赖区必须渲染未指定占位：" + prompt);
     }
 }
