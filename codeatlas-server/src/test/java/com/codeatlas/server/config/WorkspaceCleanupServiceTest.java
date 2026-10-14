@@ -1,5 +1,7 @@
 package com.codeatlas.server.config;
 
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.codeatlas.server.entity.ScanRecord;
 import com.codeatlas.server.mapper.ScanMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -10,7 +12,9 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.MockedStatic;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.slf4j.LoggerFactory;
 import org.springframework.boot.ApplicationArguments;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -21,6 +25,7 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Comparator;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -369,5 +374,100 @@ class WorkspaceCleanupServiceTest {
 
         assertFalse(Files.exists(dir), "文件大小读取失败不得阻断目录删除");
         verify(scanMapper).findById(901L);
+    }
+
+    // ==================== 以下为变异体杀灭追加（PIT 幸存者定点清除） ====================
+
+    @Test
+    @DisplayName("清理摘要日志：删除 1 个目录且实际释放 2MB（计数递增 + 字节数累加）")
+    void cleanup_aggregateLogReportsRealFreedBytes() throws IOException {
+        Path dir = scansDir().resolve("1-500");
+        Files.createDirectories(dir);
+        Files.write(dir.resolve("big.bin"), new byte[2 * 1024 * 1024]);
+        ListAppender<ILoggingEvent> appender = attachLogAppender();
+        try {
+            service.run(args);
+
+            assertEquals(1, appender.list.stream().filter(e ->
+                            "scans cleanup: deleted 1 dirs, freed ~2 MB".equals(e.getFormattedMessage()))
+                    .count(), "摘要日志必须反映真实删除数与释放字节数");
+        } finally {
+            detachLogAppender(appender);
+        }
+        assertFalse(Files.exists(dir));
+    }
+
+    @Test
+    @DisplayName("全部目录均为活跃：删除数为 0 时不输出清理摘要日志")
+    void cleanup_allDirectoriesActive_shouldNotLogAggregate() throws IOException {
+        Path runningDir = createDirWithContent(scansDir(), "5-777", "running.txt");
+        ScanRecord running = new ScanRecord();
+        running.setId(777L);
+        running.setStatus("RUNNING");
+        when(scanMapper.findById(777L)).thenReturn(running);
+        ListAppender<ILoggingEvent> appender = attachLogAppender();
+        try {
+            service.run(args);
+
+            assertFalse(appender.list.stream().anyMatch(e ->
+                            e.getFormattedMessage().startsWith("scans cleanup: deleted")),
+                    "删除数为 0 时不得输出摘要日志");
+        } finally {
+            detachLogAppender(appender);
+        }
+        assertTrue(Files.exists(runningDir));
+    }
+
+    @Test
+    @DisplayName("启动清理 retention=0：目录消失后不进入保留期读取分支（无读属性告警）")
+    void run_zeroRetention_vanishingDirectory_shouldNotReadAttributes() throws IOException {
+        final Path vanishing = createDirWithContent(scansDir(), "9-999", "f.txt");
+        when(scanMapper.findById(999L)).thenAnswer(invocation -> {
+            deleteRecursively(vanishing);
+            return null;
+        });
+        ListAppender<ILoggingEvent> appender = attachLogAppender();
+        try {
+            service.run(args);
+
+            assertFalse(appender.list.stream().anyMatch(e ->
+                            e.getFormattedMessage().startsWith("Cannot read attributes for")),
+                    "retentionHours=0 不得进入保留期分支读取文件属性");
+        } finally {
+            detachLogAppender(appender);
+        }
+        assertFalse(Files.exists(vanishing));
+    }
+
+    @Test
+    @DisplayName("目录大小：仅累加普通文件字节数，目录项一律不计入")
+    void getDirectorySize_shouldSumOnlyRegularFilesSizes() throws IOException {
+        Path dir = scansDir().resolve("1-777");
+        Files.createDirectories(dir);
+        Files.writeString(dir.resolve("small.txt"), "tiny");
+
+        try (MockedStatic<Files> mockedFiles = mockStatic(Files.class, CALLS_REAL_METHODS)) {
+            mockedFiles.when(() -> Files.size(any(Path.class))).thenAnswer(invocation -> {
+                Path path = invocation.getArgument(0);
+                return Files.isDirectory(path) ? 2_000_000L : 5L;
+            });
+
+            Long size = ReflectionTestUtils.invokeMethod(service, "getDirectorySize", dir);
+
+            assertEquals(5L, size.longValue(), "目录项（根目录自身）不得计入大小统计");
+        }
+    }
+
+    private ListAppender<ILoggingEvent> attachLogAppender() {
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        ((ch.qos.logback.classic.Logger) LoggerFactory.getLogger(WorkspaceCleanupService.class))
+                .addAppender(appender);
+        return appender;
+    }
+
+    private void detachLogAppender(ListAppender<ILoggingEvent> appender) {
+        ((ch.qos.logback.classic.Logger) LoggerFactory.getLogger(WorkspaceCleanupService.class))
+                .detachAppender(appender);
     }
 }

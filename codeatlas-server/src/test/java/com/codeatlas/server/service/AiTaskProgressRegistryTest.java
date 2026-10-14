@@ -1,5 +1,7 @@
 package com.codeatlas.server.service;
 
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.codeatlas.common.exception.BusinessException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -7,26 +9,34 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.MockedConstruction;
+import org.slf4j.LoggerFactory;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseBodyEmitter;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
+import java.lang.reflect.Method;
+import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doNothing;
@@ -324,6 +334,322 @@ class AiTaskProgressRegistryTest {
         Set<String> payloads = bufferedPayloads(emitter);
         assertTrue(payloads.stream().anyMatch(p -> p.contains("{}")), "序列化失败必须降级为 {}");
         assertFalse(payloads.stream().anyMatch(p -> p.contains("阶段一")), "失败时不得推送原始消息");
+    }
+
+    // ==================== 以下为变异体杀灭追加（PIT 幸存者定点清除） ====================
+
+    @Test
+    @DisplayName("首次 cancel 恰好记录一条取消日志（CAS 返回真才落日志）")
+    void cancel_once_shouldLogExactlyOneCancelEvent() {
+        ListAppender<ILoggingEvent> appender = attachLogAppender();
+        try {
+            registry.subscribe(TASK_ID, PROJECT_ID);
+
+            registry.cancel(TASK_ID);
+
+            assertEquals(1, countLogEvents(appender, "AI task cancelled: taskId=" + TASK_ID),
+                    "首次取消必须落下唯一一条取消日志");
+            assertTrue(registry.isCancelled(TASK_ID));
+        } finally {
+            detachLogAppender(appender);
+        }
+    }
+
+    @Test
+    @DisplayName("cancel 未知 taskId：静默 no-op 不抛异常、不落日志")
+    void cancel_unknownTaskId_shouldBeSilentNoOp() {
+        ListAppender<ILoggingEvent> appender = attachLogAppender();
+        try {
+            assertDoesNotThrow(() -> registry.cancel("no-such-aitask"));
+
+            assertFalse(registry.isCancelled("no-such-aitask"));
+            assertEquals(0, countLogEvents(appender, "AI task cancelled: taskId=no-such-aitask"));
+        } finally {
+            detachLogAppender(appender);
+        }
+    }
+
+    @Test
+    @DisplayName("收尾后再 cancel：不落取消日志")
+    void cancel_afterComplete_shouldLogNothing() {
+        ListAppender<ILoggingEvent> appender = attachLogAppender();
+        try {
+            registry.subscribe(TASK_ID, PROJECT_ID);
+            registry.complete(TASK_ID);
+
+            registry.cancel(TASK_ID);
+
+            assertFalse(registry.isCancelled(TASK_ID));
+            assertEquals(0, countLogEvents(appender, "AI task cancelled: taskId=" + TASK_ID));
+        } finally {
+            detachLogAppender(appender);
+        }
+    }
+
+    @Test
+    @DisplayName("complete：注销全部心跳并清空发射器注册（防残留定时任务与悬挂引用）")
+    void complete_shouldCancelHeartbeatsAndClearEmitters() {
+        ScheduledExecutorService executor = mock(ScheduledExecutorService.class);
+        ScheduledFuture<?> future = mock(ScheduledFuture.class);
+        doReturn(future).when(executor)
+                .scheduleAtFixedRate(any(Runnable.class), eq(15L), eq(15L), eq(TimeUnit.SECONDS));
+        ReflectionTestUtils.setField(registry, "heartbeatExecutor", executor);
+
+        registry.subscribe(TASK_ID, PROJECT_ID);
+
+        registry.complete(TASK_ID);
+
+        verify(future, times(1)).cancel(false);
+        assertTrue(heartbeatsMap().isEmpty(), "收尾后心跳注册表必须清空");
+        assertTrue(stateEmitters(TASK_ID).isEmpty(), "收尾后发射器列表必须清空");
+    }
+
+    @Test
+    @DisplayName("complete：收尾时刷新 lastActiveAt（touch 调用不得被移除）")
+    void complete_shouldTouchLastActiveAt() {
+        stubHeartbeatExecutor();
+        registry.subscribe(TASK_ID, PROJECT_ID);
+        setLastActiveAt(TASK_ID, 1L);   // 人为置旧：隔离 subscribe 之外唯一的刷新来源就是 complete 内的 touch
+
+        registry.complete(TASK_ID);
+
+        assertEquals(Boolean.TRUE, ReflectionTestUtils.getField(tasksMap().get(TASK_ID), "finished"),
+                "前置条件：complete 已执行到收尾标记");
+        long lastActiveAt = (Long) ReflectionTestUtils.getField(tasksMap().get(TASK_ID), "lastActiveAt");
+        assertTrue(lastActiveAt > 1L,
+                "complete() 必须调用 touch 刷新 lastActiveAt；移除调用时该字段保持 1L");
+    }
+
+    @Test
+    @DisplayName("惰性清理边界：活跃时间恰好为 TTL 的任务必须保留（严格大于才清理）")
+    void cleanupExpired_taskExactlyAtTtlBoundary_shouldBeKept() {
+        stubHeartbeatExecutor();
+        for (int attempt = 0; attempt < 200; attempt++) {
+            String taskId = "ttl-boundary-" + attempt;
+            registry.subscribe(taskId, PROJECT_ID);
+            long base = System.currentTimeMillis();
+            setLastActiveAt(taskId, base - 600_000L);
+            invokeCleanupExpired();
+            if (tasksMap().containsKey(taskId)) {
+                // 唯一可能：清理时读到的 now == base，即"恰好等于 TTL"仍被保留；
+                // 边界变异体（>=）在此场景必然删除任务 → 必被杀
+                return;
+            }
+        }
+        fail("200 次尝试均未在同一毫秒内完成边界判定（原实现下几乎不可能发生）");
+    }
+
+    @Test
+    @DisplayName("心跳线程工厂：非 daemon 父线程下仍产出 daemon 线程且命名为 ai-sse-heartbeat")
+    void heartbeatThreadFactory_shouldBuildDaemonNamedThread() throws Exception {
+        Method factoryMethod = AiTaskProgressRegistry.class.getDeclaredMethod("lambda$new$0", Runnable.class);
+        factoryMethod.setAccessible(true);
+
+        // 关键：在显式非 daemon 的父线程中调用工厂，切断"daemon 状态继承"的假象。
+        // 若实现未调用 setDaemon(true)，新线程会继承父线程的非 daemon 状态 → 断言失败。
+        AtomicReference<Thread> created = new AtomicReference<>();
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        Thread parent = new Thread(() -> {
+            try {
+                created.set((Thread) factoryMethod.invoke(null, (Runnable) () -> {
+                }));
+            } catch (Throwable t) {
+                failure.set(t);
+            }
+        }, "non-daemon-parent");
+        parent.setDaemon(false);
+        parent.start();
+        parent.join();
+
+        assertNull(failure.get(), "工厂调用不得抛出异常");
+        Thread thread = created.get();
+        assertNotNull(thread);
+        assertTrue(thread.isDaemon(), "心跳线程必须为 daemon，避免阻止 JVM 退出");
+        assertEquals("ai-sse-heartbeat", thread.getName());
+    }
+
+    @Test
+    @DisplayName("心跳 tick：发射器已被外部移除时自行注销定时任务")
+    void heartbeatTick_emitterRemovedExternally_shouldSelfCancel() {
+        ScheduledExecutorService executor = mock(ScheduledExecutorService.class);
+        ScheduledFuture<?> future = mock(ScheduledFuture.class);
+        doReturn(future).when(executor)
+                .scheduleAtFixedRate(any(Runnable.class), eq(15L), eq(15L), eq(TimeUnit.SECONDS));
+        ReflectionTestUtils.setField(registry, "heartbeatExecutor", executor);
+
+        SseEmitter emitter = registry.subscribe(TASK_ID, PROJECT_ID);
+        ArgumentCaptor<Runnable> tickCaptor = ArgumentCaptor.forClass(Runnable.class);
+        verify(executor).scheduleAtFixedRate(tickCaptor.capture(), eq(15L), eq(15L), eq(TimeUnit.SECONDS));
+
+        stateEmitters(TASK_ID).remove(emitter);          // 外部移除但定时任务尚未注销
+        tickCaptor.getValue().run();                     // tick 迟来一步
+
+        verify(future, times(1)).cancel(false);
+        assertFalse(heartbeatsMap().containsKey(emitter), "tick 内必须回收残留心跳任务");
+    }
+
+    @Test
+    @DisplayName("断开回调刷新活跃时间：刚过 TTL 的任务在断开后不得被清理")
+    void onEmitterClosed_shouldRefreshActivityToSurviveTtlCleanup() {
+        SseEmitter emitter = registry.subscribe(TASK_ID, PROJECT_ID);
+        setLastActiveAt(TASK_ID, System.currentTimeMillis() - 600_001L);
+
+        Runnable completionCallback = (Runnable) ReflectionTestUtils.getField(emitter, "completionCallback");
+        completionCallback.run();                        // onEmitterClosed → touch 刷新活跃时间
+
+        invokeCleanupExpired();
+
+        assertTrue(tasksMap().containsKey(TASK_ID),
+                "断开回调后必须刷新活跃时间，否则活跃任务会被 TTL 清理误删");
+    }
+
+    @Test
+    @DisplayName("断开全部订阅：恰好记录一条流断开取消日志")
+    void disconnect_shouldLogExactlyOneCancelEvent() {
+        ListAppender<ILoggingEvent> appender = attachLogAppender();
+        try {
+            SseEmitter emitter = registry.subscribe(TASK_ID, PROJECT_ID);
+
+            Runnable completionCallback = (Runnable) ReflectionTestUtils.getField(emitter, "completionCallback");
+            completionCallback.run();
+
+            assertEquals(1, countLogEvents(appender,
+                            "AI task cancelled by stream disconnect: taskId=" + TASK_ID),
+                    "全部订阅断开必须落下唯一一条断连取消日志");
+        } finally {
+            detachLogAppender(appender);
+        }
+    }
+
+    @Test
+    @DisplayName("仅断开部分订阅者：任务不翻取消态（仍有在线连接）")
+    void disconnect_oneOfTwoSubscribers_shouldNotCancel() {
+        SseEmitter first = registry.subscribe(TASK_ID, PROJECT_ID);
+        registry.subscribe(TASK_ID, PROJECT_ID);
+
+        Runnable firstCompletion = (Runnable) ReflectionTestUtils.getField(first, "completionCallback");
+        firstCompletion.run();
+
+        assertFalse(registry.isCancelled(TASK_ID), "仍有在线订阅者，不得视为用户终止");
+        assertEquals(1, stateEmitters(TASK_ID).size());
+    }
+
+    @Test
+    @DisplayName("publish 刷新活跃时间：刚过 TTL 的任务在阶段推送后不得被清理")
+    void publish_shouldRefreshActivityToSurviveTtlCleanup() {
+        registry.subscribe(TASK_ID, PROJECT_ID);
+        setLastActiveAt(TASK_ID, System.currentTimeMillis() - 600_001L);
+
+        registry.publish(TASK_ID, "第 3 轮：正在整合证据");
+
+        invokeCleanupExpired();
+
+        assertTrue(tasksMap().containsKey(TASK_ID),
+                "阶段推送必须刷新活跃时间，防止长任务被 TTL 清理误删");
+    }
+
+    @Test
+    @DisplayName("subscribe 触发惰性清理：过期孤儿任务在下次订阅时被移除")
+    void subscribe_shouldCleanExpiredOrphanTask() {
+        registry.subscribe("orphan-task", PROJECT_ID);
+        setLastActiveAt("orphan-task", System.currentTimeMillis() - 600_001L);
+
+        registry.subscribe(TASK_ID, PROJECT_ID);
+
+        assertFalse(tasksMap().containsKey("orphan-task"), "过期孤儿任务必须在下次订阅时被清理");
+        assertTrue(tasksMap().containsKey(TASK_ID));
+    }
+
+    @Test
+    @DisplayName("重订阅刷新活跃时间：临近过期的任务重连后继续保留")
+    void subscribe_shouldRefreshActivityOnResubscribe() throws InterruptedException {
+        registry.subscribe(TASK_ID, PROJECT_ID);
+        setLastActiveAt(TASK_ID, System.currentTimeMillis() - 600_000L + 500L);  // 距过期仅 500ms
+
+        registry.subscribe(TASK_ID, PROJECT_ID);         // 重订阅必须 touch 刷新
+
+        Thread.sleep(600L);                              // 若未刷新，任务此刻已过期
+        registry.subscribe("trigger-task", PROJECT_ID);  // 触发惰性清理
+
+        assertTrue(tasksMap().containsKey(TASK_ID), "重订阅必须刷新活跃时间，否则重连即被误删");
+    }
+
+    @Test
+    @DisplayName("SSE 超时回调注册：触发即移除订阅者并翻取消态")
+    void timeoutCallback_shouldRemoveEmitterAndCancel() {
+        SseEmitter emitter = registry.subscribe(TASK_ID, PROJECT_ID);
+        Runnable timeoutCallback = (Runnable) ReflectionTestUtils.getField(emitter, "timeoutCallback");
+        assertNotNull(timeoutCallback);
+
+        timeoutCallback.run();
+
+        assertTrue(stateEmitters(TASK_ID).isEmpty());
+        assertTrue(registry.isCancelled(TASK_ID), "超时断开唯一订阅者 → 视为用户终止");
+    }
+
+    @Test
+    @DisplayName("SSE 错误回调注册：触发即移除订阅者并翻取消态")
+    void errorCallback_shouldRemoveEmitterAndCancel() {
+        SseEmitter emitter = registry.subscribe(TASK_ID, PROJECT_ID);
+        @SuppressWarnings("unchecked")
+        Consumer<Throwable> errorCallback = (Consumer<Throwable>) ReflectionTestUtils.getField(emitter, "errorCallback");
+        assertNotNull(errorCallback);
+
+        errorCallback.accept(new IOException("client reset"));
+
+        assertTrue(stateEmitters(TASK_ID).isEmpty());
+        assertTrue(registry.isCancelled(TASK_ID), "错误断开唯一订阅者 → 视为用户终止");
+    }
+
+    // ==================== 变异体杀灭辅助方法 ====================
+
+    private void stubHeartbeatExecutor() {
+        ScheduledExecutorService executor = mock(ScheduledExecutorService.class);
+        doReturn(mock(ScheduledFuture.class)).when(executor)
+                .scheduleAtFixedRate(any(Runnable.class), anyLong(), anyLong(), any(TimeUnit.class));
+        ReflectionTestUtils.setField(registry, "heartbeatExecutor", executor);
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> tasksMap() {
+        return (Map<String, Object>) ReflectionTestUtils.getField(registry, "tasks");
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<SseEmitter, ScheduledFuture<?>> heartbeatsMap() {
+        return (Map<SseEmitter, ScheduledFuture<?>>) ReflectionTestUtils.getField(registry, "heartbeats");
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<SseEmitter> stateEmitters(String taskId) {
+        return (List<SseEmitter>) ReflectionTestUtils.getField(tasksMap().get(taskId), "emitters");
+    }
+
+    private void setLastActiveAt(String taskId, long value) {
+        ReflectionTestUtils.setField(tasksMap().get(taskId), "lastActiveAt", value);
+    }
+
+    private void invokeCleanupExpired() {
+        ReflectionTestUtils.invokeMethod(registry, "cleanupExpired");
+    }
+
+    private ListAppender<ILoggingEvent> attachLogAppender() {
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        ((ch.qos.logback.classic.Logger) LoggerFactory.getLogger(AiTaskProgressRegistry.class))
+                .addAppender(appender);
+        return appender;
+    }
+
+    private void detachLogAppender(ListAppender<ILoggingEvent> appender) {
+        ((ch.qos.logback.classic.Logger) LoggerFactory.getLogger(AiTaskProgressRegistry.class))
+                .detachAppender(appender);
+    }
+
+    private long countLogEvents(ListAppender<ILoggingEvent> appender, String formattedMessage) {
+        return appender.list.stream()
+                .filter(event -> formattedMessage.equals(event.getFormattedMessage()))
+                .count();
     }
 
     /** 读取未初始化 SseEmitter 中已缓冲的事件载荷（subscribe/publish 在建立连接前的直发内容） */

@@ -1,5 +1,7 @@
 package com.codeatlas.server.config;
 
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.codeatlas.server.entity.ScanRecord;
 import com.codeatlas.server.mapper.ClassSummaryMapper;
 import com.codeatlas.server.mapper.ScanMapper;
@@ -11,6 +13,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.slf4j.LoggerFactory;
 import org.springframework.boot.ApplicationArguments;
 
 import java.util.Arrays;
@@ -19,6 +22,7 @@ import java.util.Collections;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -134,5 +138,38 @@ class ScanStateRecoveryTest {
         verify(violationMapper).deleteByScanId(2L);
         verify(scanMapper).updateStats(healthy);
         assertEquals("FAILED", healthy.getStatus());
+    }
+
+    // ==================== 以下为变异体杀灭追加（PIT 幸存者定点清除） ====================
+
+    @Test
+    @DisplayName("恢复计数日志：按实际恢复条数递增输出（2 条 → Recovered 2）")
+    void run_successfulRecoveries_shouldLogRecoveredCount() {
+        ScanRecord first = runningScan(11L);
+        ScanRecord second = runningScan(22L);
+        when(scanMapper.findRunningScans()).thenReturn(Arrays.asList(first, second));
+        ListAppender<ILoggingEvent> appender = attachLogAppender();
+        try {
+            recovery.run(args);
+
+            assertTrue(appender.list.stream().anyMatch(e ->
+                            "Recovered 2 stale RUNNING scan(s) to FAILED on startup".equals(e.getFormattedMessage())),
+                    "恢复计数必须按实际成功条数递增输出");
+        } finally {
+            detachLogAppender(appender);
+        }
+    }
+
+    private ListAppender<ILoggingEvent> attachLogAppender() {
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        ((ch.qos.logback.classic.Logger) LoggerFactory.getLogger(ScanStateRecovery.class))
+                .addAppender(appender);
+        return appender;
+    }
+
+    private void detachLogAppender(ListAppender<ILoggingEvent> appender) {
+        ((ch.qos.logback.classic.Logger) LoggerFactory.getLogger(ScanStateRecovery.class))
+                .detachAppender(appender);
     }
 }

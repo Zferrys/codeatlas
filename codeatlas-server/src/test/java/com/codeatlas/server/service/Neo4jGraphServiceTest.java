@@ -922,6 +922,152 @@ class Neo4jGraphServiceTest {
         assertEquals("(错误) Neo4j 查询失败: neo4j down", output);
     }
 
+    // ==================== 以下为变异体杀灭追加（PIT 幸存者定点清除） ====================
+
+    @Test
+    @DisplayName("子图节点字段：label/layer/classType 逐项映射（移除 setter 会丢字段）")
+    void querySubgraph_depth0_shouldMapLabelLayerAndClassType() {
+        when(neo4jDriver.session()).thenReturn(session);
+        Result rootResult = resultOf(recordOf(Collections.singletonMap("c",
+                nodeValue(fullNode("com.x.A", "A", "Service", "CLASS", 2, 30)))));
+        when(session.run(anyString(), any(Value.class))).thenReturn(rootResult);
+
+        GraphVO graph = service.querySubgraph(PROJECT_ID, "com.x.A", 0);
+
+        assertEquals(1, graph.getNodes().size());
+        GraphVO.NodeVO node = graph.getNodes().get(0);
+        assertEquals("com.x.A", node.getId());
+        assertEquals("A", node.getLabel(), "simpleName 必须映射到 label");
+        assertEquals("service", node.getGroup());
+        assertEquals("Service", node.getLayer(), "layer 原值必须映射到 layer");
+        assertEquals("CLASS", node.getClassType(), "classType 必须映射");
+        assertEquals(2, node.getMethods());
+        assertEquals(30, node.getLineCount());
+    }
+
+    @Test
+    @DisplayName("分页 CLASS 级第 2 页：skip=(page-1)*size、节点六字段完整映射、hasMore 边界（4==4 为 false）")
+    void queryFullGraphPaged_classLevelSecondPage_shouldMapAllFieldsAndSkip() {
+        when(neo4jDriver.session()).thenReturn(session);
+        when(session.run(anyString(), any(Value.class))).thenAnswer(invocation -> {
+            String query = invocation.getArgument(0);
+            if (query.contains("count(c) AS total")) {
+                return resultOf(recordOf(Collections.singletonMap("total", longValue(4L))));
+            }
+            if (query.contains("pageFqns")) {
+                return emptyResult();
+            }
+            return resultOf(
+                    recordOf(Collections.singletonMap("c",
+                            nodeValue(fullNode("com.x.N1", "N1", "Service", "CLASS", 7, 70)))),
+                    recordOf(Collections.singletonMap("c",
+                            nodeValue(fullNode("com.x.N2", "N2", null, null, 1, 5)))));
+        });
+
+        GraphVO graph = service.queryFullGraphPaged(PROJECT_ID, "CLASS", 2, 2);
+
+        assertEquals(4L, graph.getTotalNodes());
+        assertEquals(2, graph.getPage());
+        assertEquals(2, graph.getSize());
+        assertEquals(Boolean.FALSE, graph.getHasMore(), "skip+size 恰等于总数时不得报告更多页");
+        assertEquals(2, graph.getNodes().size());
+        GraphVO.NodeVO n1 = graph.getNodes().get(0);
+        assertEquals("com.x.N1", n1.getId());
+        assertEquals("N1", n1.getLabel());
+        assertEquals("service", n1.getGroup());
+        assertEquals("Service", n1.getLayer());
+        assertEquals("CLASS", n1.getClassType());
+        assertEquals(7, n1.getMethods());
+        assertEquals(70, n1.getLineCount());
+        GraphVO.NodeVO n2 = graph.getNodes().get(1);
+        assertEquals("com.x.N2", n2.getId());
+        assertEquals("unknown", n2.getGroup());
+        assertNull(n2.getLayer());
+        assertNull(n2.getClassType());
+
+        ArgumentCaptor<Value> valueCaptor = ArgumentCaptor.forClass(Value.class);
+        verify(session, times(3)).run(anyString(), valueCaptor.capture());
+        assertEquals(2L, valueCaptor.getAllValues().get(1).asMap().get("skip"),
+                "skip 必须为 (page-1)*size 乘积");
+    }
+
+    @Test
+    @DisplayName("分页 PACKAGE 级多段包名：键保持全名、跨包边保留、hasMore 边界（2==2 为 false）")
+    void queryFullGraphPaged_packageLevelNestedNames_shouldKeepFullKeysAndEdges() {
+        when(neo4jDriver.session()).thenReturn(session);
+        when(session.run(anyString(), any(Value.class))).thenAnswer(invocation -> {
+            String query = invocation.getArgument(0);
+            if (query.contains("classCount")) {
+                Map<String, Value> pkgA = new HashMap<>();
+                pkgA.put("packageName", stringValue("com.x.a"));
+                pkgA.put("layer", stringValue("SERVICE"));
+                pkgA.put("classCount", intValue(1));
+                pkgA.put("totalMethods", intValue(5));
+                pkgA.put("totalLineCount", intValue(50));
+                Map<String, Value> pkgB = new HashMap<>();
+                pkgB.put("packageName", stringValue("com.x.b"));
+                pkgB.put("layer", stringValue("CONTROLLER"));
+                pkgB.put("classCount", intValue(2));
+                pkgB.put("totalMethods", intValue(6));
+                pkgB.put("totalLineCount", intValue(66));
+                return resultOf(recordOf(pkgA), recordOf(pkgB));
+            }
+            Map<String, Value> edge = new HashMap<>();
+            edge.put("srcPkg", stringValue("com.x.a"));
+            edge.put("tgtPkg", stringValue("com.x.b"));
+            return resultOf(recordOf(edge));
+        });
+
+        GraphVO graph = service.queryFullGraphPaged(PROJECT_ID, "PACKAGE", 1, 2);
+
+        assertEquals(2L, graph.getTotalNodes());
+        assertEquals(Boolean.FALSE, graph.getHasMore(), "页尾恰等于总数时不得报告更多页");
+        assertEquals(2, graph.getNodes().size());
+        assertEquals("com.x.a", graph.getNodes().get(0).getId());
+        assertEquals("com.x.b", graph.getNodes().get(1).getId());
+        assertEquals("controller", graph.getNodes().get(1).getGroup());
+        assertEquals(1, graph.getEdges().size());
+        assertEquals("com.x.a", graph.getEdges().get(0).getSource(), "PACKAGE 级边键必须保留完整包名");
+        assertEquals("com.x.b", graph.getEdges().get(0).getTarget(), "PACKAGE 级边键必须保留完整包名");
+    }
+
+    @Test
+    @DisplayName("分页 MODULE 级空包名：null 与空串统一归入 default 键（不得替换为空串）")
+    void queryFullGraphPaged_moduleLevelBlankPackageName_shouldMapToDefault() {
+        when(neo4jDriver.session()).thenReturn(session);
+        when(session.run(anyString(), any(Value.class))).thenAnswer(invocation -> {
+            String query = invocation.getArgument(0);
+            if (query.contains("classCount")) {
+                Map<String, Value> pkgNull = new HashMap<>();
+                pkgNull.put("packageName", stringValue(null));
+                pkgNull.put("layer", stringValue(null));
+                pkgNull.put("classCount", intValue(1));
+                pkgNull.put("totalMethods", intValue(0));
+                pkgNull.put("totalLineCount", intValue(0));
+                Map<String, Value> pkgEmpty = new HashMap<>();
+                pkgEmpty.put("packageName", stringValue(""));
+                pkgEmpty.put("layer", stringValue(null));
+                pkgEmpty.put("classCount", intValue(1));
+                pkgEmpty.put("totalMethods", intValue(2));
+                pkgEmpty.put("totalLineCount", intValue(3));
+                return resultOf(recordOf(pkgNull), recordOf(pkgEmpty));
+            }
+            return emptyResult();
+        });
+
+        GraphVO graph = service.queryFullGraphPaged(PROJECT_ID, "MODULE", 1, 10);
+
+        assertEquals(1L, graph.getTotalNodes(), "null 与空串包名必须合并为同一个 default 组");
+        assertEquals(1, graph.getNodes().size());
+        GraphVO.NodeVO node = graph.getNodes().get(0);
+        assertEquals("default", node.getId(), "空包名的模块键必须为 default");
+        assertEquals("default", node.getLabel());
+        assertEquals("unknown", node.getGroup());
+        assertNull(node.getLayer());
+        assertEquals(2, node.getMethods(), "同组包的方法数必须累加");
+        assertEquals(Boolean.FALSE, graph.getHasMore());
+    }
+
     // ==================== helpers ====================
 
     private static String normalize(String cypher) {

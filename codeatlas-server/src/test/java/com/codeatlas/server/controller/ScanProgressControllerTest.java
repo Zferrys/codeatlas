@@ -24,10 +24,13 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -432,6 +435,99 @@ class ScanProgressControllerTest {
         Method initialize = ResponseBodyEmitter.class.getDeclaredMethod("initialize", handlerType);
         initialize.setAccessible(true);
         initialize.invoke(emitter, handler);
+    }
+
+    // ==================== 以下为变异体杀灭追加（PIT 幸存者定点清除） ====================
+
+    @Test
+    @DisplayName("心跳线程工厂：非 daemon 父线程下仍产出 daemon 线程且命名为 sse-heartbeat")
+    void heartbeatThreadFactory_shouldBuildDaemonNamedThread() throws Exception {
+        Method factoryMethod = ScanProgressController.class.getDeclaredMethod("lambda$new$0", Runnable.class);
+        factoryMethod.setAccessible(true);
+
+        // 关键：在显式非 daemon 的父线程中调用工厂，切断"daemon 状态继承"的假象。
+        // 若实现未调用 setDaemon(true)，新线程会继承父线程的非 daemon 状态 → 断言失败。
+        AtomicReference<Thread> created = new AtomicReference<>();
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        Thread parent = new Thread(() -> {
+            try {
+                created.set((Thread) factoryMethod.invoke(null, (Runnable) () -> {
+                }));
+            } catch (Throwable t) {
+                failure.set(t);
+            }
+        }, "non-daemon-parent");
+        parent.setDaemon(false);
+        parent.start();
+        parent.join();
+
+        assertNull(failure.get(), "工厂调用不得抛出异常");
+        Thread thread = created.get();
+        assertNotNull(thread);
+        assertTrue(thread.isDaemon(), "SSE 心跳线程必须为 daemon，避免阻止 JVM 退出");
+        assertEquals("sse-heartbeat", thread.getName());
+    }
+
+    @Test
+    @DisplayName("streamProgress — 终态回放后连接标记 complete（避免悬置复用）")
+    void streamProgressTerminalReplayMarksEmitterComplete() {
+        controller.onScanProgress(event(7L, "COMPLETED"));
+
+        SseEmitter emitter = controller.streamProgress(PROJECT_ID, 7L, principal);
+
+        assertEquals(Boolean.TRUE, ReflectionTestUtils.getField(emitter, "complete"),
+                "终态快照回放后必须显式 complete，防止连接被悬置复用");
+        assertFalse(emitters().containsKey(PROJECT_ID));
+        assertTrue(heartbeats().isEmpty());
+    }
+
+    @Test
+    @DisplayName("streamProgress — 完成回调触发即摘除订阅者并取消心跳")
+    void completionCallbackShouldRemoveEmitterAndCancelHeartbeat() {
+        SseEmitter emitter = controller.streamProgress(PROJECT_ID, null, principal);
+        ScheduledFuture<?> heartbeat = heartbeats().get(emitter);
+        assertNotNull(heartbeat);
+
+        Runnable completionCallback = (Runnable) ReflectionTestUtils.getField(emitter, "completionCallback");
+        assertNotNull(completionCallback);
+        completionCallback.run();
+
+        assertTrue(heartbeat.isCancelled(), "完成回调必须取消心跳定时任务");
+        assertTrue(heartbeats().isEmpty());
+        assertFalse(emitters().containsKey(PROJECT_ID));
+    }
+
+    @Test
+    @DisplayName("streamProgress — 超时回调触发即摘除订阅者并取消心跳")
+    void timeoutCallbackShouldRemoveEmitterAndCancelHeartbeat() {
+        SseEmitter emitter = controller.streamProgress(PROJECT_ID, null, principal);
+        ScheduledFuture<?> heartbeat = heartbeats().get(emitter);
+        assertNotNull(heartbeat);
+
+        Runnable timeoutCallback = (Runnable) ReflectionTestUtils.getField(emitter, "timeoutCallback");
+        assertNotNull(timeoutCallback);
+        timeoutCallback.run();
+
+        assertTrue(heartbeat.isCancelled(), "超时回调必须取消心跳定时任务");
+        assertTrue(heartbeats().isEmpty());
+        assertFalse(emitters().containsKey(PROJECT_ID));
+    }
+
+    @Test
+    @DisplayName("streamProgress — 错误回调触发即摘除订阅者并取消心跳")
+    void errorCallbackShouldRemoveEmitterAndCancelHeartbeat() {
+        SseEmitter emitter = controller.streamProgress(PROJECT_ID, null, principal);
+        ScheduledFuture<?> heartbeat = heartbeats().get(emitter);
+        assertNotNull(heartbeat);
+
+        @SuppressWarnings("unchecked")
+        Consumer<Throwable> errorCallback = (Consumer<Throwable>) ReflectionTestUtils.getField(emitter, "errorCallback");
+        assertNotNull(errorCallback);
+        errorCallback.accept(new IOException("client reset"));
+
+        assertTrue(heartbeat.isCancelled(), "错误回调必须取消心跳定时任务");
+        assertTrue(heartbeats().isEmpty());
+        assertFalse(emitters().containsKey(PROJECT_ID));
     }
 
     /** 从 SseEventBuilder 取出拼接后的原始发送文本 */

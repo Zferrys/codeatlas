@@ -7,6 +7,8 @@ import com.codeatlas.engine.git.GitResult;
 import com.codeatlas.engine.git.GitService;
 import com.codeatlas.engine.parser.ClassSummaryResult;
 import com.codeatlas.engine.parser.JavaParserService;
+import com.codeatlas.engine.rule.RuleDefinition;
+import com.codeatlas.engine.rule.RuleEngine;
 import com.codeatlas.server.config.CodeAtlasMetrics;
 import com.codeatlas.server.config.WorkspaceConfig;
 import com.codeatlas.server.dto.response.ScanVO;
@@ -25,6 +27,13 @@ import com.codeatlas.server.service.AlertService;
 import com.codeatlas.server.service.ConstitutionRuleService;
 import com.codeatlas.server.service.Neo4jGraphService;
 import com.codeatlas.server.service.ProjectAccessChecker;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import net.bytebuddy.ByteBuddy;
+import net.bytebuddy.dynamic.scaffold.subclass.ConstructorStrategy;
+import net.bytebuddy.implementation.FixedValue;
+import net.bytebuddy.matcher.ElementMatchers;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -32,22 +41,29 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
+import org.mockito.MockedConstruction;
+import org.mockito.MockedStatic;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.objenesis.ObjenesisStd;
+import org.slf4j.LoggerFactory;
 import org.springframework.cache.Cache;
 import org.springframework.cache.CacheManager;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
+import java.util.AbstractList;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Executor;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
@@ -65,6 +81,8 @@ import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.mockConstruction;
+import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -1011,5 +1029,282 @@ class ScanServiceImplTest {
         assertEquals("COMPLETED", status.get("scanStatus"));
         assertEquals(9L, status.get("scanId"));
         assertNull(status.get("lastScanTime"));
+    }
+
+    // ==================== 以下为变异体杀灭追加（PIT 幸存者定点清除） ====================
+
+    private static final long MB = 1024L * 1024L;
+
+    @Test
+    @DisplayName("GIT_URL 指向本机地址：同步拒绝（SSRF 校验调用不得被移除）")
+    void triggerScan_gitUrlInternalHost_shouldRejectBeforeEstimate() {
+        when(projectMapper.findById(PROJECT_ID)).thenReturn(
+                project(PROJECT_ID, "内网项目", "GIT_URL", "http://127.0.0.1/repo.git"));
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> service.triggerScan(PROJECT_ID, USER_ID));
+
+        assertEquals(400, ex.getCode());
+        assertEquals("不允许访问本机或内网地址", ex.getMessage());
+        verify(gitService, never()).estimateRepoSize(anyString());
+        verify(scanMapper, never()).insert(any(ScanRecord.class));
+    }
+
+    @Test
+    @DisplayName("落库即 RUNNING：insert 时刻状态与启动时间已写入（setStatus 调用不得被移除）")
+    void triggerScan_shouldInsertScanWithRunningStatus() throws IOException {
+        Path sourceDir = createLocalSourceDir("src-status");
+        when(projectMapper.findById(PROJECT_ID)).thenReturn(
+                project(PROJECT_ID, "演示项目", "LOCAL", sourceDir.toString()));
+        when(scanMapper.findLatestByProjectId(PROJECT_ID)).thenReturn(null);
+        AtomicReference<String> statusAtInsert = new AtomicReference<>();
+        AtomicReference<LocalDateTime> startedAtAtInsert = new AtomicReference<>();
+        when(scanMapper.insert(any(ScanRecord.class))).thenAnswer(invocation -> {
+            ScanRecord record = invocation.getArgument(0, ScanRecord.class);
+            statusAtInsert.set(record.getStatus());
+            startedAtAtInsert.set(record.getStartedAt());
+            record.setId(SCAN_ID);
+            return 1;
+        });
+        when(javaParserService.analyzeDirectory(any(Path.class))).thenReturn(Collections.emptyList());
+        when(constitutionRuleService.getRules(PROJECT_ID)).thenReturn(Collections.emptyList());
+        when(classSummaryMapper.findByScanId(SCAN_ID)).thenReturn(Collections.emptyList());
+        when(cacheManager.getCache("mapData")).thenReturn(cache);
+
+        service.triggerScan(PROJECT_ID, USER_ID);
+
+        assertEquals("RUNNING", statusAtInsert.get(), "insert 落库时扫描状态必须为 RUNNING");
+        assertNotNull(startedAtAtInsert.get(), "insert 落库时须已写入启动时间");
+    }
+
+    @Test
+    @DisplayName("内存检查边界：堆使用率恰为 85%（1700/2000MB）走正常分支，不发出 -1 降速事件")
+    void checkMemory_exactlyEightyFivePercent_shouldLogNormalWithoutEvent() {
+        ListAppender<ILoggingEvent> appender = attachLogAppender();
+        try {
+            try (MockedStatic<Runtime> mocked = mockStatic(Runtime.class)) {
+                mocked.when(Runtime::getRuntime).thenReturn(stubRuntime(2000 * MB, 2000 * MB, 300 * MB));
+
+                ReflectionTestUtils.invokeMethod(service, "checkMemory", PROJECT_ID, SCAN_ID, "PARSING");
+            }
+
+            verify(eventPublisher, never()).publishEvent(any());
+            assertEquals(1, appender.list.stream().filter(e ->
+                            "内存正常: PARSING 阶段堆使用率 85% (1700MB / 2000MB)".equals(e.getFormattedMessage()))
+                    .count(), "85% 边界必须走正常分支且已用/上限数值精确");
+        } finally {
+            detachLogAppender(appender);
+        }
+    }
+
+    @Test
+    @DisplayName("高内存全量扫描：三个阶段精确降速告警（-1 事件 + 消息数值），durationMs 为真实差值")
+    void triggerScan_localPathHighHeap_shouldWarnAllThreeStages() throws IOException {
+        Path sourceDir = createLocalSourceDir("src-mem");
+        Project project = project(PROJECT_ID, "演示项目", "LOCAL", sourceDir.toString());
+        when(projectMapper.findById(PROJECT_ID)).thenReturn(project);
+        when(scanMapper.findLatestByProjectId(PROJECT_ID)).thenReturn(null);
+        stubInsertAssignsId();
+        ClassSummaryResult a = classResult("com.x.A", "A", "service", 5, 10, 100);
+        a.setAnnotations(Collections.emptyList());
+        a.setDependencies(Collections.emptyList());
+        a.setMethodNames(Collections.emptyList());
+        when(javaParserService.analyzeDirectory(any(Path.class))).thenReturn(Collections.singletonList(a));
+        when(constitutionRuleService.getRules(PROJECT_ID)).thenReturn(Collections.singletonList(
+                ruleEntity(1L, "max-public-methods", "ERROR", "{\"max\":3}")));
+        when(classSummaryMapper.findByScanId(SCAN_ID)).thenReturn(Collections.singletonList(scoreEntity("com.x.A")));
+        when(cacheManager.getCache("mapData")).thenReturn(cache);
+
+        ScanVO vo;
+        try (MockedStatic<Runtime> mocked = mockStatic(Runtime.class)) {
+            mocked.when(Runtime::getRuntime).thenReturn(stubRuntime(1000 * MB, 1000 * MB, 100 * MB));
+
+            vo = service.triggerScan(PROJECT_ID, USER_ID);
+        }
+
+        assertEquals("COMPLETED", vo.getStatus());
+
+        List<ScanProgressEvent> events = capturedEvents();
+        assertEquals(9, events.size());
+        assertEvent(events.get(0), "PENDING", 1, "扫描任务已创建，等待执行...");
+        assertEvent(events.get(1), "CLONING", 10, "开始克隆仓库...");
+        assertEvent(events.get(2), "PARSING", -1, "内存紧张: PARSING 阶段堆使用率 90% (已用 900MB / 上限 1000MB)");
+        assertEvent(events.get(3), "PARSING", 30, "解析 Java 源码...");
+        assertEvent(events.get(4), "NEO4J_IMPORT", -1, "内存紧张: NEO4J_IMPORT 阶段堆使用率 90% (已用 900MB / 上限 1000MB)");
+        assertEvent(events.get(5), "RULES", 60, "运行架构规则检查...");
+        assertEvent(events.get(6), "AI_ANALYSIS", -1, "内存紧张: AI_ANALYSIS 阶段堆使用率 90% (已用 900MB / 上限 1000MB)");
+        assertEvent(events.get(7), "AI", 80, "开始 AI 架构分析...");
+        assertEvent(events.get(8), "COMPLETED", 100, "扫描完成");
+
+        ArgumentCaptor<ScanRecord> scanCaptor = ArgumentCaptor.forClass(ScanRecord.class);
+        verify(scanMapper).updateStats(scanCaptor.capture());
+        Long durationMs = scanCaptor.getValue().getDurationMs();
+        assertNotNull(durationMs);
+        assertTrue(durationMs >= 0 && durationMs < 60_000L,
+                "durationMs 必须为当前时间与开始时间的差值而非时间戳相加，实际=" + durationMs);
+    }
+
+    @Test
+    @DisplayName("规则映射：RuleDefinition 字段逐项拷贝，isEnabled 不得丢失（setIsEnabled 调用保留）")
+    void executeScan_shouldCopyRuleDefinitionFieldsIncludingEnabled() throws IOException {
+        Path sourceDir = createLocalSourceDir("src-rule");
+        when(projectMapper.findById(PROJECT_ID)).thenReturn(
+                project(PROJECT_ID, "演示项目", "LOCAL", sourceDir.toString()));
+        when(scanMapper.findLatestByProjectId(PROJECT_ID)).thenReturn(null);
+        stubInsertAssignsId();
+        ClassSummaryResult a = classResult("com.x.A", "A", "service", 5, 10, 100);
+        a.setAnnotations(Collections.emptyList());
+        a.setDependencies(Collections.emptyList());
+        a.setMethodNames(Collections.emptyList());
+        when(javaParserService.analyzeDirectory(any(Path.class))).thenReturn(Collections.singletonList(a));
+        when(constitutionRuleService.getRules(PROJECT_ID)).thenReturn(Collections.singletonList(
+                ruleEntity(1L, "max-public-methods", "ERROR", "{\"max\":3}")));
+        when(classSummaryMapper.findByScanId(SCAN_ID)).thenReturn(Collections.singletonList(scoreEntity("com.x.A")));
+        when(cacheManager.getCache("mapData")).thenReturn(cache);
+
+        try (MockedConstruction<RuleEngine> constructed = mockConstruction(RuleEngine.class,
+                (engine, context) -> when(engine.check(anyList(), anyList())).thenReturn(Collections.emptyList()))) {
+            service.triggerScan(PROJECT_ID, USER_ID);
+
+            ArgumentCaptor<List<RuleDefinition>> defsCaptor = ArgumentCaptor.forClass(List.class);
+            verify(constructed.constructed().get(0)).check(defsCaptor.capture(), anyList());
+            assertEquals(1, defsCaptor.getValue().size());
+            RuleDefinition def = defsCaptor.getValue().get(0);
+            assertEquals(1L, def.getId());
+            assertEquals("max-public-methods", def.getName());
+            assertEquals(Boolean.TRUE, def.getIsEnabled(), "isEnabled 必须从实体拷贝，丢失会静默禁用规则");
+            assertEquals("ERROR", def.getSeverity());
+            assertEquals("{\"max\":3}", def.getRuleDefinition());
+        }
+    }
+
+    @Test
+    @DisplayName("工作目录清理抛异常：截断 updateStats，但扫描对象已带真实违规数（setTotalViolations 调用保留）")
+    void triggerScan_cleanupThrows_shouldStillExposeViolationCount() throws IOException {
+        Project project = project(PROJECT_ID, "远程项目", "GIT_URL", GIT_URL);
+        when(projectMapper.findById(PROJECT_ID)).thenReturn(project);
+        when(scanMapper.findLatestByProjectId(PROJECT_ID)).thenReturn(null);
+        when(gitService.estimateRepoSize(GIT_URL)).thenReturn(1024L);
+        stubInsertAssignsId();
+        when(gitService.cloneRepository(eq(GIT_URL), eq("main"), any(Path.class), any()))
+                .thenAnswer(invocation -> {
+                    Path target = invocation.getArgument(2);
+                    Files.createDirectories(target);
+                    return new GitResult(target.toString(), "main", "abc123def", true, "clone ok");
+                });
+        ClassSummaryResult a = classResult("com.x.A", "A", "service", 5, 10, 100);
+        a.setAnnotations(Collections.emptyList());
+        a.setDependencies(Collections.emptyList());
+        a.setMethodNames(Collections.emptyList());
+        when(javaParserService.analyzeDirectory(any(Path.class))).thenReturn(Collections.singletonList(a));
+        when(constitutionRuleService.getRules(PROJECT_ID)).thenReturn(Collections.singletonList(
+                ruleEntity(1L, "max-public-methods", "ERROR", "{\"max\":3}")));
+        doThrow(new RuntimeException("cleanup exploded")).when(gitService).deleteLocalRepo(any(Path.class));
+
+        ScanVO vo = service.triggerScan(PROJECT_ID, USER_ID);
+
+        assertEquals(1, vo.getTotalViolations(),
+                "清理异常在 updateStats 之前截断流程，违规数只能来自执行段内的写入");
+        verify(gitService).deleteLocalRepo(any(Path.class));
+        verify(scanMapper, never()).updateStats(any(ScanRecord.class));
+    }
+
+    @Test
+    @DisplayName("catch 段内告警抛异常：异常传播副本的 finally 仍删除工作目录（catch 收尾被截断）")
+    void triggerScan_alertThrows_shouldStillDeleteWorkDirViaExceptionCopy() {
+        Project project = project(PROJECT_ID, "远程项目", "GIT_URL", GIT_URL);
+        when(projectMapper.findById(PROJECT_ID)).thenReturn(project);
+        when(scanMapper.findLatestByProjectId(PROJECT_ID)).thenReturn(null);
+        when(gitService.estimateRepoSize(GIT_URL)).thenReturn(1024L);
+        stubInsertAssignsId();
+        when(gitService.cloneRepository(eq(GIT_URL), eq("main"), any(Path.class), any()))
+                .thenReturn(new GitResult(null, "main", null, false, "认证失败"));
+        doThrow(new RuntimeException("alert down")).when(alertService).sendAlert(anyString(), anyString());
+
+        ScanVO vo = service.triggerScan(PROJECT_ID, USER_ID);
+
+        // 字节码证实：异常从 catch 段传播时走独立 finally 副本（javap 偏移 1370），
+        // setStatus(FAILED)/setErrorMessage 被打断，状态保持 RUNNING
+        assertEquals("RUNNING", vo.getStatus(),
+                "sendAlert 在 catch 段内抛出，setStatus(FAILED) 与 setErrorMessage 均被跳过");
+        verify(alertService).sendAlert("扫描失败 — 远程项目",
+                "项目 **远程项目** (id=7) 扫描失败。\n错误: Git clone failed: 认证失败");
+        ArgumentCaptor<Path> workDirCaptor = ArgumentCaptor.forClass(Path.class);
+        verify(gitService).deleteLocalRepo(workDirCaptor.capture());
+        assertEquals("7-100", workDirCaptor.getValue().getFileName().toString(),
+                "异常传播副本的 finally 仍须清理克隆目标目录");
+        verify(scanMapper, never()).updateStats(any(ScanRecord.class));
+        verify(classSummaryMapper, never()).deleteByScanId(any());
+    }
+
+    @Test
+    @DisplayName("最近扫描查询：先做项目鉴权再读库（check 调用不得被移除）")
+    void getLatestScan_shouldCheckAccessBeforeQuery() {
+        when(scanMapper.findLatestByProjectId(PROJECT_ID)).thenReturn(null);
+
+        assertNull(service.getLatestScan(PROJECT_ID, USER_ID));
+
+        verify(projectAccessChecker).check(PROJECT_ID, USER_ID);
+    }
+
+    @Test
+    @DisplayName("toJson 序列化抛 JsonProcessingException：兜底为空数组字符串（不得返回空串）")
+    void toJson_serializationFailure_shouldFallBackToEmptyArray() {
+        List<String> bomb = new AbstractList<String>() {
+            @Override
+            public int size() {
+                return 1;
+            }
+
+            @Override
+            public String get(int index) {
+                // 匿名子类可访问 protected 构造器；经 sneakyThrow 绕过受检异常声明
+                throw sneakyThrow(new JsonProcessingException("boom") {
+                });
+            }
+        };
+
+        assertEquals("[]", ReflectionTestUtils.invokeMethod(service, "toJson", bomb));
+    }
+
+    @SuppressWarnings("unchecked")
+    private static <T extends Throwable> RuntimeException sneakyThrow(Throwable throwable) throws T {
+        throw (T) throwable;
+    }
+
+    /**
+     * Runtime.maxMemory/totalMemory/freeMemory 均为 native，无法被 Mockito 改写；
+     * 用 ByteBuddy 生成子类覆写三个方法为返回受控常量，Objenesis 绕过私有构造器实例化，
+     * 再由 mockStatic 让 getRuntime() 返回该替身。
+     */
+    private Runtime stubRuntime(long max, long total, long free) {
+        try {
+            Class<? extends Runtime> type = new ByteBuddy()
+                    .subclass(Runtime.class, ConstructorStrategy.Default.NO_CONSTRUCTORS)
+                    .method(ElementMatchers.named("maxMemory")).intercept(FixedValue.value((Object) max))
+                    .method(ElementMatchers.named("totalMemory")).intercept(FixedValue.value((Object) total))
+                    .method(ElementMatchers.named("freeMemory")).intercept(FixedValue.value((Object) free))
+                    .make()
+                    .load(ScanServiceImplTest.class.getClassLoader())
+                    .getLoaded();
+            return new ObjenesisStd().newInstance(type);
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IllegalStateException("构造 Runtime 受控替身失败", e);
+        }
+    }
+
+    private ListAppender<ILoggingEvent> attachLogAppender() {
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        ((ch.qos.logback.classic.Logger) LoggerFactory.getLogger(ScanServiceImpl.class))
+                .addAppender(appender);
+        return appender;
+    }
+
+    private void detachLogAppender(ListAppender<ILoggingEvent> appender) {
+        ((ch.qos.logback.classic.Logger) LoggerFactory.getLogger(ScanServiceImpl.class))
+                .detachAppender(appender);
     }
 }

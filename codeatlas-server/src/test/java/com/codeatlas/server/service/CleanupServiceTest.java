@@ -1,5 +1,7 @@
 package com.codeatlas.server.service;
 
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.codeatlas.server.config.WorkspaceConfig;
 import com.codeatlas.server.entity.Project;
 import com.codeatlas.server.entity.ScanRecord;
@@ -18,6 +20,7 @@ import org.mockito.Mock;
 import org.mockito.MockedStatic;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.objenesis.ObjenesisStd;
+import org.slf4j.LoggerFactory;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.io.File;
@@ -37,6 +40,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -52,6 +56,7 @@ import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -746,5 +751,204 @@ class CleanupServiceTest {
         assertEquals("2026-01-02T03:04:05", status.get("lastCleanupTime"));
         assertEquals(3L, status.get("lastCleanupFreedMb"));
         assertEquals(2, status.get("lastCleanupFileCount"));
+    }
+
+    // ==================== 以下为变异体杀灭追加（PIT 幸存者定点清除） ====================
+
+    @Test
+    @DisplayName("磁盘检查边界：可用恰为 10% 不触发上传清理（严格小于）")
+    void checkDiskSpace_exactlyTenPercent_shouldNotCleanUploads() {
+        stubDisk(100 * GB, 10 * GB, 10 * GB);
+        when(workspaceConfig.getScansDir()).thenReturn(null);
+
+        service.checkDiskSpace();
+
+        verify(alertService).sendAlert(eq("磁盘空间告警"),
+                eq("磁盘空间不足: 可用 10% (10GB/100GB), 工作空间占用 0MB"));
+        verify(workspaceConfig).getScansDir();
+        verify(workspaceConfig, never()).getUploadsDir();
+    }
+
+    @Test
+    @DisplayName("磁盘检查日志：workspace 体积按字节数除法折算 MB（3MB 文件 → workspace=3MB）")
+    void checkDiskSpace_shouldLogWorkspaceMbByDivision() throws IOException {
+        stubDisk(100 * GB, 20 * GB, 20 * GB);
+        Path blob = Files.createFile(tempDir.resolve("blob.bin"));
+        ListAppender<ILoggingEvent> appender = attachLogAppender();
+        try (MockedStatic<Files> mocked = mockStatic(Files.class, org.mockito.Mockito.CALLS_REAL_METHODS)) {
+            mocked.when(() -> Files.exists(any(Path.class))).thenReturn(true);
+            mocked.when(() -> Files.walk(any(Path.class))).thenReturn(Stream.of(blob));
+            mocked.when(() -> Files.size(eq(blob))).thenReturn(3L * MB);
+
+            service.checkDiskSpace();
+        } finally {
+            detachLogAppender(appender);
+        }
+
+        assertEquals(1, appender.list.stream().filter(e ->
+                        "Disk status: free=20% (20GB/100GB), workspace=3MB".equals(e.getFormattedMessage()))
+                .count(), "工作空间体积必须按字节数除法折算 MB");
+    }
+
+    @Test
+    @DisplayName("内存检查边界：系统可用内存恰为 200MB 不触发告警（严格小于）")
+    void checkMemory_exactlyTwoHundredMbFree_shouldNotAlert() {
+        checkMemoryWith(stubRuntime(1000 * MB, 1000 * MB, 200 * MB));
+
+        verifyNoInteractions(alertService);
+    }
+
+    @Test
+    @DisplayName("孤儿清理摘要：删除数 0 时不输出摘要日志")
+    void cleanOrphanDirectories_zeroDeleted_shouldNotLogSummary() throws IOException {
+        Path scansDir = Files.createDirectories(tempDir.resolve("orphan-log"));
+        Files.createDirectories(scansDir.resolve("5-500")); // 命名匹配但创建时间新 → 保留
+        when(workspaceConfig.getScansDir()).thenReturn(scansDir);
+        ListAppender<ILoggingEvent> appender = attachLogAppender();
+        try {
+            service.cleanOrphanDirectories();
+
+            assertFalse(appender.list.stream().anyMatch(e ->
+                            e.getFormattedMessage().startsWith("Orphan cleanup: removed")),
+                    "删除数为 0 时不得输出摘要日志");
+        } finally {
+            detachLogAppender(appender);
+        }
+    }
+
+    @Test
+    @DisplayName("上传清理摘要：删除数 0 时不输出摘要日志")
+    void cleanOldUploads_zeroDeleted_shouldNotLogSummary() throws IOException {
+        Path uploads = Files.createDirectories(tempDir.resolve("uploads-log"));
+        writeBytes(uploads.resolve("fresh.txt"), 10); // 新鲜文件 → 保留
+        when(workspaceConfig.getUploadsDir()).thenReturn(uploads);
+        when(projectMapper.findAll()).thenReturn(Collections.emptyList());
+        ListAppender<ILoggingEvent> appender = attachLogAppender();
+        try {
+            service.cleanOldUploads();
+
+            assertFalse(appender.list.stream().anyMatch(e ->
+                            e.getFormattedMessage().startsWith("Old uploads cleanup: removed")),
+                    "删除数为 0 时不得输出摘要日志");
+        } finally {
+            detachLogAppender(appender);
+        }
+    }
+
+    @Test
+    @DisplayName("不活跃检查：最近有扫描的项目不进不活跃名单（无需扫描时间也保留）")
+    void checkInactiveProjects_recentScan_shouldNotBeInactive() {
+        LocalDateTime now = LocalDateTime.now();
+        when(projectMapper.findAll()).thenReturn(Collections.singletonList(
+                project(1L, "RecentScan", now.minusDays(40))));
+        when(scanMapper.findLatestByProjectId(1L)).thenReturn(scanAt(now.minusDays(10)));
+        ListAppender<ILoggingEvent> appender = attachLogAppender();
+        try {
+            service.checkInactiveProjects();
+
+            assertFalse(appender.list.stream().anyMatch(e ->
+                            e.getFormattedMessage().startsWith("Found ")),
+                    "最近 10 天有扫描的项目不得计入不活跃名单");
+        } finally {
+            detachLogAppender(appender);
+        }
+    }
+
+    @Test
+    @DisplayName("不活跃检查：从未访问且扫描超期的项目精确报出 lastAccess=never")
+    void checkInactiveProjects_neverAccessedOldScan_shouldReportNever() {
+        LocalDateTime now = LocalDateTime.now();
+        when(projectMapper.findAll()).thenReturn(Collections.singletonList(
+                project(1L, "Never", null)));
+        when(scanMapper.findLatestByProjectId(1L)).thenReturn(scanAt(now.minusDays(50)));
+        ListAppender<ILoggingEvent> appender = attachLogAppender();
+        try {
+            service.checkInactiveProjects();
+
+            assertTrue(appender.list.stream().anyMatch(e ->
+                            ("Found 1 inactive projects (>30d no access): "
+                                    + "[Project[id=1, name=Never, lastAccess=never]]").equals(e.getFormattedMessage())),
+                    "从未访问且扫描超 30 天的项目必须报出");
+        } finally {
+            detachLogAppender(appender);
+        }
+    }
+
+    @Test
+    @DisplayName("清理状态：workspaceSizeMb 按字节数除法折算（3MB 文件 → 3）")
+    void getCleanupStatus_workspaceSizeMbByDivision() throws IOException {
+        Path baseDir = Files.createDirectories(tempDir.resolve("base-real"));
+        writeBytes(baseDir.resolve("blob.bin"), 3 * 1024 * 1024);
+        when(workspaceConfig.getBaseDir()).thenReturn(baseDir);
+        when(projectMapper.findAll()).thenReturn(Collections.emptyList());
+
+        Map<String, Object> status = service.getCleanupStatus();
+
+        assertEquals(3L, status.get("workspaceSizeMb"), "workspaceSizeMb 必须按 1024*1024 除法折算");
+    }
+
+    @Test
+    @DisplayName("清理状态：堆内存四项按受控 Runtime 精确折算（2000/1500/500/50%）")
+    void getCleanupStatus_heapFieldsWithControlledRuntime() throws IOException {
+        Path baseDir = Files.createDirectories(tempDir.resolve("base-heap"));
+        when(workspaceConfig.getBaseDir()).thenReturn(baseDir);
+        when(projectMapper.findAll()).thenReturn(Collections.emptyList());
+        Runtime runtime = stubRuntime(2000 * MB, 1500 * MB, 500 * MB);
+
+        Map<String, Object> status;
+        try (MockedStatic<Runtime> mocked = mockStatic(Runtime.class)) {
+            mocked.when(Runtime::getRuntime).thenReturn(runtime);
+            status = service.getCleanupStatus();
+        }
+
+        assertEquals(2000L, status.get("heapMaxMb"));
+        assertEquals(1500L, status.get("heapTotalMb"));
+        assertEquals(500L, status.get("heapFreeMb"));
+        assertEquals(50, status.get("heapUsedPercent"), "已用 1000MB / 上限 2000MB = 50%");
+    }
+
+    @Test
+    @DisplayName("目录体积：仅累加普通文件字节数，目录项一律不计入")
+    void calculateDirSize_shouldSumOnlyRegularFilesSizes() throws IOException {
+        Path dir = Files.createDirectories(tempDir.resolve("size-dir"));
+        Path file = Files.createFile(dir.resolve("tiny.bin"));
+
+        try (MockedStatic<Files> mocked = mockStatic(Files.class, org.mockito.Mockito.CALLS_REAL_METHODS)) {
+            mocked.when(() -> Files.size(any(Path.class))).thenAnswer(invocation -> {
+                Path path = invocation.getArgument(0);
+                return Files.isDirectory(path) ? 2_000_000L : 5L;
+            });
+
+            Long size = ReflectionTestUtils.invokeMethod(service, "calculateDirSize", dir);
+
+            assertEquals(5L, size.longValue(), "目录项（根目录自身）不得计入体积");
+        }
+    }
+
+    @Test
+    @DisplayName("定时清理：磁盘与内存检查被真实调用（spy 验证调用链完整性）")
+    void scheduledCleanup_shouldInvokeDiskAndMemoryChecks() {
+        CleanupService spyService = spy(service);
+        when(workspaceConfig.getScansDir()).thenReturn(null);
+        when(workspaceConfig.getUploadsDir()).thenReturn(null);
+        when(projectMapper.findAll()).thenReturn(Collections.emptyList());
+
+        spyService.scheduledCleanup();
+
+        verify(spyService).checkDiskSpace();
+        verify(spyService).checkMemory();
+    }
+
+    private ListAppender<ILoggingEvent> attachLogAppender() {
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        ((ch.qos.logback.classic.Logger) LoggerFactory.getLogger(CleanupService.class))
+                .addAppender(appender);
+        return appender;
+    }
+
+    private void detachLogAppender(ListAppender<ILoggingEvent> appender) {
+        ((ch.qos.logback.classic.Logger) LoggerFactory.getLogger(CleanupService.class))
+                .detachAppender(appender);
     }
 }
