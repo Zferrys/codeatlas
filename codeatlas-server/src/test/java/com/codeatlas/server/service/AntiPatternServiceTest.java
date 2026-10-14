@@ -1,5 +1,8 @@
 package com.codeatlas.server.service;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.codeatlas.engine.ai.AiClient;
 import com.codeatlas.engine.ai.AiRequest;
 import com.codeatlas.engine.ai.AiResponse;
@@ -19,6 +22,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -303,5 +307,99 @@ class AntiPatternServiceTest {
         verify(aiAnalysisService, never()).saveAiAuditLog(anyString(), anyString(), any(), any(),
                 anyLong(), anyLong(), anyLong(), anyLong(), any(), anyBoolean());
         verifyNoInteractions(tokenBudgetManager);
+    }
+
+    // ==================== 变异补杀批：重试系统提示词与日志标签 ====================
+
+    private static List<String> formattedMessages(ListAppender<ILoggingEvent> appender) {
+        List<String> messages = new ArrayList<>();
+        for (ILoggingEvent event : appender.list) {
+            messages.add(event.getFormattedMessage());
+        }
+        return messages;
+    }
+
+    private static ListAppender<ILoggingEvent> attachAppender() {
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        ((Logger) org.slf4j.LoggerFactory.getLogger(AntiPatternService.class)).addAppender(appender);
+        return appender;
+    }
+
+    private static void detachAppender(ListAppender<ILoggingEvent> appender) {
+        ((Logger) org.slf4j.LoggerFactory.getLogger(AntiPatternService.class)).detachAppender(appender);
+    }
+
+    @Test
+    @DisplayName("重试请求：systemPrompt 精确为反模式重试提示词（不可退化为空串）")
+    void analyzeAntiPatterns_retryRequest_shouldUseExactRetrySystemPrompt() {
+        stubProjectAndScan(Collections.singletonList(classSummary("com.demo.AService")));
+        when(aiClient.getModelName()).thenReturn("mock-model");
+        when(tokenBudgetManager.tryConsume(anyLong())).thenReturn(true);
+        when(aiAnalysisService.callAiWithResilience(any(AiRequest.class)))
+                .thenReturn(aiResponse("原始内容 com.demo.AService", 500, 250, 250, 60),
+                        aiResponse("重试内容 com.demo.AService", 200, 100, 100, 30));
+        when(hallucinationChecker.check(anyString(), anyList()))
+                .thenReturn(new HallucinationChecker.HallucinationResult(true,
+                                Collections.singletonList("com.fake.Ghost")),
+                        new HallucinationChecker.HallucinationResult(false, Collections.emptyList()));
+        when(hallucinationChecker.suggestAction(any(HallucinationChecker.HallucinationResult.class)))
+                .thenReturn(HallucinationChecker.Action.RETRY);
+        when(aiAnalysisService.calculateConfidenceSimple(anyString(), anyList()))
+                .thenReturn(BigDecimal.valueOf(0.5));
+
+        InsightEntity insight = service.analyzeAntiPatterns(PROJECT_ID, USER_ID);
+
+        assertEquals("重试内容 com.demo.AService", insight.getContent());
+        ArgumentCaptor<AiRequest> requestCaptor = ArgumentCaptor.forClass(AiRequest.class);
+        verify(aiAnalysisService, times(2)).callAiWithResilience(requestCaptor.capture());
+        assertEquals("你是一位资深软件架构师。请重新输出反模式检测结果，只引用给定的类列表。用中文回答。",
+                requestCaptor.getAllValues().get(1).getSystemPrompt());
+    }
+
+    @Test
+    @DisplayName("日志标签：无 AI 客户端时输出 Anti-pattern analysis 前缀")
+    void analyzeAntiPatterns_logLabel_shouldPrefixSkipLog() {
+        AntiPatternService noAi = new AntiPatternService(aiAnalysisService, projectService, scanService,
+                insightService, hallucinationChecker, tokenBudgetManager, null,
+                new AiTaskProgressRegistry(new ObjectMapper()));
+        ListAppender<ILoggingEvent> appender = attachAppender();
+        try {
+            assertNull(noAi.analyzeAntiPatterns(PROJECT_ID, USER_ID));
+        } finally {
+            detachAppender(appender);
+        }
+        assertTrue(formattedMessages(appender).contains(
+                        "Anti-pattern analysis skipped: no AI client for projectId=1"),
+                "logLabel 必须为 Anti-pattern analysis");
+    }
+
+    @Test
+    @DisplayName("日志标签：幻觉检查与落库日志使用 Anti-pattern 专属标签")
+    void analyzeAntiPatterns_hallucinationAndInsightLogs_shouldUseAntiPatternLabels() {
+        stubProjectAndScan(Collections.singletonList(classSummary("com.demo.AService")));
+        when(aiClient.getModelName()).thenReturn("mock-model");
+        when(tokenBudgetManager.tryConsume(anyLong())).thenReturn(true);
+        when(aiAnalysisService.callAiWithResilience(any(AiRequest.class)))
+                .thenReturn(aiResponse("检出反模式 com.demo.AService", 500, 250, 250, 60));
+        when(hallucinationChecker.check(anyString(), anyList()))
+                .thenReturn(new HallucinationChecker.HallucinationResult(true,
+                        Collections.singletonList("com.fake.Ghost")));
+        when(hallucinationChecker.suggestAction(any(HallucinationChecker.HallucinationResult.class)))
+                .thenReturn(HallucinationChecker.Action.DEGRADED);
+        when(aiAnalysisService.calculateConfidenceSimple(anyString(), anyList()))
+                .thenReturn(BigDecimal.valueOf(0.5));
+
+        ListAppender<ILoggingEvent> appender = attachAppender();
+        try {
+            assertEquals("ANTI_PATTERN", service.analyzeAntiPatterns(PROJECT_ID, USER_ID).getType());
+        } finally {
+            detachAppender(appender);
+        }
+        List<String> logs = formattedMessages(appender);
+        assertTrue(logs.contains("Anti-pattern hallucination check: fakeClasses=1, action=DEGRADED"),
+                "hallucinationCheckLabel 必须为 Anti-pattern hallucination check");
+        assertTrue(logs.contains("Anti-pattern insight saved: id=null, projectId=1"),
+                "insightLogLabel 必须为 Anti-pattern insight");
     }
 }

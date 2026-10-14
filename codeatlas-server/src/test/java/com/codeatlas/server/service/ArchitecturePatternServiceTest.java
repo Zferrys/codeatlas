@@ -1,5 +1,8 @@
 package com.codeatlas.server.service;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.codeatlas.common.constant.ErrorCode;
 import com.codeatlas.common.exception.AiException;
 import com.codeatlas.common.exception.BusinessException;
@@ -21,9 +24,11 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -361,5 +366,103 @@ class ArchitecturePatternServiceTest {
                 eq(PROJECT_ID), eq(USER_ID), eq(400L), eq(400L), eq(800L), eq(240L),
                 eq("Cancelled by user"), eq(false));
         verify(insightService, never()).saveInsight(any(InsightEntity.class));
+    }
+
+    // ==================== 变异补杀批：3 参重载返回、模板路径与日志标签 ====================
+
+    private static final String PATTERN_SYSTEM_PROMPT =
+            "你是一位资深软件架构师。请识别代码库使用的主要架构模式与设计模式，评估分层合理性、跨层调用与整体一致性。用中文回答，类名与模式名保留英文。";
+
+    private static List<String> formattedMessages(ListAppender<ILoggingEvent> appender) {
+        List<String> messages = new ArrayList<>();
+        for (ILoggingEvent event : appender.list) {
+            messages.add(event.getFormattedMessage());
+        }
+        return messages;
+    }
+
+    private static ListAppender<ILoggingEvent> attachAppender() {
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        ((Logger) org.slf4j.LoggerFactory.getLogger(ArchitecturePatternService.class)).addAppender(appender);
+        return appender;
+    }
+
+    private static void detachAppender(ListAppender<ILoggingEvent> appender) {
+        ((Logger) org.slf4j.LoggerFactory.getLogger(ArchitecturePatternService.class)).detachAppender(appender);
+    }
+
+    @Test
+    @DisplayName("taskId 重载成功路径：不得退化为 null，模板路径与系统提示词均生效")
+    void analyzePatterns_taskIdOverloadHappyPath_shouldReturnInsightWithExactPrompt() {
+        stubProjectScanClasses();
+        when(aiClient.getModelName()).thenReturn("mock-model");
+        when(tokenBudgetManager.tryConsume(anyLong())).thenReturn(true);
+        when(aiAnalysisService.callAiWithResilience(any(AiRequest.class)))
+                .thenReturn(aiResponse("识别到分层架构", 800));
+        when(hallucinationChecker.check(anyString(), anyList()))
+                .thenReturn(new HallucinationChecker.HallucinationResult(false, Collections.emptyList()));
+        when(aiAnalysisService.calculateConfidenceSimple(anyString(), anyList()))
+                .thenReturn(BigDecimal.valueOf(0.85));
+
+        InsightEntity insight = service.analyzePatterns(PROJECT_ID, USER_ID, TASK_ID);
+
+        assertNotNull(insight, "3 参重载在成功路径必须返回洞察而非 null");
+        assertEquals("PATTERN", insight.getType());
+        assertEquals("识别到分层架构", insight.getContent());
+        verify(insightService).saveInsight(insight);
+
+        ArgumentCaptor<AiRequest> requestCaptor = ArgumentCaptor.forClass(AiRequest.class);
+        verify(aiAnalysisService).callAiWithResilience(requestCaptor.capture());
+        AiRequest request = requestCaptor.getValue();
+        assertEquals(PATTERN_SYSTEM_PROMPT, request.getSystemPrompt());
+        assertTrue(request.getPrompt().contains("# 设计模式报告"),
+                "模板路径必须命中 prompts/architecture-pattern.md（空路径会渲染出类路径目录清单而非模板正文）");
+    }
+
+    @Test
+    @DisplayName("日志标签：无 AI 客户端时输出 Pattern analysis 前缀")
+    void analyzePatterns_logLabel_shouldPrefixSkipLog() {
+        ArchitecturePatternService noAi = new ArchitecturePatternService(aiAnalysisService, projectService,
+                scanService, insightService, hallucinationChecker, tokenBudgetManager, null,
+                new AiTaskProgressRegistry(new ObjectMapper()));
+        ListAppender<ILoggingEvent> appender = attachAppender();
+        try {
+            assertNull(noAi.analyzePatterns(PROJECT_ID, USER_ID));
+        } finally {
+            detachAppender(appender);
+        }
+        assertTrue(formattedMessages(appender).contains(
+                        "Pattern analysis skipped: no AI client for projectId=1"),
+                "logLabel 必须为 Pattern analysis");
+    }
+
+    @Test
+    @DisplayName("日志标签：幻觉检查与落库日志使用 Pattern 专属标签")
+    void analyzePatterns_hallucinationAndInsightLogs_shouldUsePatternLabels() {
+        stubProjectScanClasses();
+        when(aiClient.getModelName()).thenReturn("mock-model");
+        when(tokenBudgetManager.tryConsume(anyLong())).thenReturn(true);
+        when(aiAnalysisService.callAiWithResilience(any(AiRequest.class)))
+                .thenReturn(aiResponse("识别到分层架构 com.demo.AService", 800));
+        when(hallucinationChecker.check(anyString(), anyList()))
+                .thenReturn(new HallucinationChecker.HallucinationResult(true,
+                        Collections.singletonList("com.fake.Ghost")));
+        when(hallucinationChecker.suggestAction(any(HallucinationChecker.HallucinationResult.class)))
+                .thenReturn(HallucinationChecker.Action.DEGRADED);
+        when(aiAnalysisService.calculateConfidenceSimple(anyString(), anyList()))
+                .thenReturn(BigDecimal.valueOf(0.85));
+
+        ListAppender<ILoggingEvent> appender = attachAppender();
+        try {
+            assertNotNull(service.analyzePatterns(PROJECT_ID, USER_ID));
+        } finally {
+            detachAppender(appender);
+        }
+        List<String> logs = formattedMessages(appender);
+        assertTrue(logs.contains("Pattern hallucination check: fakeClasses=1, action=DEGRADED"),
+                "hallucinationCheckLabel 必须为 Pattern hallucination check");
+        assertTrue(logs.contains("Pattern insight saved: id=null, projectId=1"),
+                "insightLogLabel 必须为 Pattern insight");
     }
 }

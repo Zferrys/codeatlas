@@ -16,6 +16,9 @@ import com.codeatlas.server.mapper.AiAuditLogMapper;
 import com.codeatlas.server.mapper.ClassSummaryMapper;
 import com.codeatlas.server.mapper.ProjectMapper;
 import com.codeatlas.server.mapper.ScanMapper;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -37,6 +40,8 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -53,6 +58,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -99,9 +105,13 @@ class AiAnalysisServiceTest {
     }
 
     private AiAnalysisService buildService(AiClient client) {
+        return buildService(client, registry);
+    }
+
+    private AiAnalysisService buildService(AiClient client, AiTaskProgressRegistry progressRegistry) {
         AiAnalysisService svc = new AiAnalysisService(projectMapper, scanMapper, classSummaryMapper,
                 insightService, aiAuditLogMapper, hallucinationChecker, alertService, tokenBudgetManager,
-                metrics, eventPublisher, client, registry);
+                metrics, eventPublisher, client, progressRegistry);
         ReflectionTestUtils.setField(svc, "self", svc);
         return svc;
     }
@@ -1006,6 +1016,423 @@ class AiAnalysisServiceTest {
         }
         verify(failingMapper, times(2)).writeValueAsString(any());
         assertAudit(captureAudit(), 400, 400, 800, 120, null, true);
+    }
+
+    // ==================== 变异补杀批：精确值 / 边界 / 日志观测 ====================
+
+    private static final String ARCH_SYSTEM_PROMPT =
+            "你是一位资深软件架构师。请分析代码库并用中文生成深入、准确的架构叙事报告。所有结论必须引用具体的类和包。专业术语保留英文，类名/包名保留原文。";
+    private static final String ARCH_RETRY_SYSTEM_PROMPT =
+            "你是一位资深软件架构师。请分析代码库并用中文生成深入、准确的架构叙事报告。";
+    private static final String CHUNK_SYSTEM_PROMPT =
+            "你是一位资深软件架构师。请分析以下代码模块，用中文输出该模块的：1) 职责描述 2) 关键类 3) 对外依赖。简明扼要，不超过500字。";
+    private static final String SUMMARY_SYSTEM_PROMPT =
+            "你是一位资深软件架构师。请整合以下模块分析结果，生成一份专业的架构叙事报告。使用中文。";
+
+    /** 替换 PromptTemplate 静态缓存中的模板内容（finally 还原），供渲染/长度确定性断言使用 */
+    private static void withTemplate(String path, String content, Runnable body) throws Exception {
+        Field cacheField = PromptTemplate.class.getDeclaredField("CACHE");
+        cacheField.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        Map<String, String> cache = (Map<String, String>) cacheField.get(null);
+        String original = cache.put(path, content);
+        try {
+            body.run();
+        } finally {
+            if (original != null) {
+                cache.put(path, original);
+            } else {
+                cache.remove(path);
+            }
+        }
+    }
+
+    private static List<String> formattedMessages(ListAppender<ILoggingEvent> appender) {
+        List<String> messages = new ArrayList<>();
+        for (ILoggingEvent event : appender.list) {
+            messages.add(event.getFormattedMessage());
+        }
+        return messages;
+    }
+
+    private static ClassSummaryEntity chunkClass(String fqn, String pkg, String layer,
+                                                 Integer methods, Integer lines) {
+        ClassSummaryEntity cls = new ClassSummaryEntity();
+        cls.setFqn(fqn);
+        cls.setSimpleName(fqn);
+        cls.setPackageName(pkg);
+        cls.setLayer(layer);
+        cls.setClassType("class");
+        cls.setTotalMethods(methods);
+        cls.setLineCount(lines);
+        cls.setDependencies("[]");
+        return cls;
+    }
+
+    /** 与生产分片提示词同构的期望文本（任何格式漂移都会导致断言失败） */
+    private static String expectedChunkPrompt(String group, String projectName,
+                                              List<ClassSummaryEntity> groupClasses) {
+        StringBuilder sb = new StringBuilder("模块: " + group + "\n项目: " + projectName + "\n\n类列表:\n");
+        for (ClassSummaryEntity cls : groupClasses) {
+            sb.append(String.format("- %s (%s, %d methods, %d lines)\n", cls.getFqn(), cls.getLayer(),
+                    cls.getTotalMethods() != null ? cls.getTotalMethods() : 0,
+                    cls.getLineCount() != null ? cls.getLineCount() : 0));
+        }
+        return sb.toString();
+    }
+
+    private static String expectedSummaryPrompt(String projectName, List<String> chunkResults) {
+        StringBuilder combined = new StringBuilder();
+        for (String content : chunkResults) {
+            combined.append(content).append("\n\n");
+        }
+        return "以下是项目 **" + projectName + "** 的 " + chunkResults.size()
+                + " 个模块分析结果。请将这些分片结果合并为一份完整的架构叙事报告，包含：\n"
+                + "1. 项目整体概述\n2. 分层架构与各层职责\n3. 核心链路\n4. 问题与改进建议\n\n---\n\n"
+                + combined;
+    }
+
+    @Test
+    @DisplayName("重试路径逐值核对：预算=len*2/3+4096、主/重试请求字段精确、五处进度推送齐全")
+    void analyzeArchitecture_retryPathExactValues_shouldUseExactEstimateAndRequestFields() throws Exception {
+        stubProjectData(smallClasses());
+        AiTaskProgressRegistry spyRegistry = spy(new AiTaskProgressRegistry(new ObjectMapper()));
+        AiAnalysisService svc = buildService(aiClient, spyRegistry);
+        when(aiClient.getModelName()).thenReturn("mock-model");
+        when(tokenBudgetManager.tryConsume(anyLong())).thenReturn(true);
+        when(aiClient.chat(any(AiRequest.class)))
+                .thenReturn(aiResponse("MAIN com.demo.AService", 500), aiResponse("RETRY com.demo.AService", 300));
+        when(hallucinationChecker.check(anyString(), anyList()))
+                .thenReturn(HallucinationResultStub.fake(Collections.singletonList("com.fake.Ghost")),
+                        HallucinationResultStub.none());
+        when(hallucinationChecker.suggestAction(any(HallucinationChecker.HallucinationResult.class)))
+                .thenReturn(HallucinationChecker.Action.RETRY);
+
+        InsightEntity[] holder = new InsightEntity[1];
+        withTemplate("prompts/architecture-story.md", "ABC", () ->
+                holder[0] = svc.analyzeArchitecture(PROJECT_ID, SCAN_ID, TASK_ID));
+
+        assertEquals("RETRY com.demo.AService", holder[0].getContent());
+        // 合成模板 "ABC"（3 字符，sanitize 恒等）→ 估算 3*2/3+4096 = 4098
+        ArgumentCaptor<Long> budgetCaptor = ArgumentCaptor.forClass(Long.class);
+        verify(tokenBudgetManager).tryConsume(budgetCaptor.capture());
+        assertEquals(4098L, budgetCaptor.getValue().longValue(), "预算估算必须为 len*2/3+4096");
+
+        ArgumentCaptor<AiRequest> reqCaptor = ArgumentCaptor.forClass(AiRequest.class);
+        verify(aiClient, times(2)).chat(reqCaptor.capture());
+        AiRequest main = reqCaptor.getAllValues().get(0);
+        assertEquals("ABC", main.getPrompt());
+        assertEquals(ARCH_SYSTEM_PROMPT, main.getSystemPrompt());
+        assertEquals(8192, main.getMaxTokens());
+        AiRequest retry = reqCaptor.getAllValues().get(1);
+        assertEquals("MAIN com.demo.AService", retry.getPrompt());
+        assertEquals(ARCH_RETRY_SYSTEM_PROMPT, retry.getSystemPrompt());
+        assertEquals(8192, retry.getMaxTokens());
+        assertEquals(0.1, retry.getTemperature());
+
+        assertAudit(captureAudit(), 400, 400, 800, 240, null, true);
+        verify(spyRegistry).publish(TASK_ID, "正在渲染架构叙事提示词…");
+        verify(spyRegistry).publish(TASK_ID, "AI 正在生成架构解读（通常需要 1–3 分钟）…");
+        verify(spyRegistry).publish(TASK_ID, "正在做类名防幻觉校验…");
+        verify(spyRegistry).publish(TASK_ID, "发现可疑类名，正在重新生成…");
+        verify(spyRegistry).publish(TASK_ID, "正在保存报告…");
+    }
+
+    @Test
+    @DisplayName("重试已发起但重试调用无响应：必须记录降级告警（else-if 分支不可静默）")
+    void analyzeArchitecture_retryAttemptedButCallNull_shouldLogDegradedWarning() {
+        stubProjectData(smallClasses());
+        when(aiClient.getModelName()).thenReturn("mock-model");
+        when(tokenBudgetManager.tryConsume(anyLong())).thenReturn(true);
+        when(aiClient.chat(any(AiRequest.class)))
+                .thenReturn(aiResponse("引用了 com.fake.GhostA", 500), null);
+        when(hallucinationChecker.check(anyString(), anyList()))
+                .thenReturn(HallucinationResultStub.fake(Collections.singletonList("com.fake.GhostA")));
+        when(hallucinationChecker.suggestAction(any(HallucinationChecker.HallucinationResult.class)))
+                .thenReturn(HallucinationChecker.Action.RETRY);
+
+        Logger logger = (Logger) org.slf4j.LoggerFactory.getLogger(AiAnalysisService.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        InsightEntity insight;
+        try {
+            insight = service.analyzeArchitecture(PROJECT_ID, SCAN_ID);
+        } finally {
+            logger.detachAppender(appender);
+        }
+
+        assertEquals("引用了 com.fake.GhostA", insight.getContent());
+        assertTrue(formattedMessages(appender).contains(
+                        "Hallucination retry call failed for projectId=1, using degraded result"),
+                "retryAttempted=true 且重试无响应时必须记录降级告警");
+    }
+
+    @Test
+    @DisplayName("恰 200 类（边界内）：不分片、允许重试、标题无分片标记、metadata chunked=false")
+    void analyzeArchitecture_exactly200Classes_shouldStaySingleShotWithRetryAllowed() throws Exception {
+        List<ClassSummaryEntity> classes = new ArrayList<>();
+        for (int i = 0; i < 200; i++) {
+            classes.add(classSummary("com.demo.C" + i, "com.demo"));
+        }
+        stubProjectData(classes);
+        when(aiClient.getModelName()).thenReturn("mock-model");
+        when(tokenBudgetManager.tryConsume(anyLong())).thenReturn(true);
+        when(aiClient.chat(any(AiRequest.class)))
+                .thenReturn(aiResponse("MAIN200", 800), aiResponse("RETRY200", 600));
+        when(hallucinationChecker.check(anyString(), anyList()))
+                .thenReturn(HallucinationResultStub.fake(Collections.singletonList("com.fake.Ghost")),
+                        HallucinationResultStub.none());
+        when(hallucinationChecker.suggestAction(any(HallucinationChecker.HallucinationResult.class)))
+                .thenReturn(HallucinationChecker.Action.RETRY);
+
+        InsightEntity[] holder = new InsightEntity[1];
+        withTemplate("prompts/architecture-story.md", "ABC", () ->
+                holder[0] = service.analyzeArchitecture(PROJECT_ID, SCAN_ID));
+
+        assertEquals("RETRY200", holder[0].getContent(), "200 类（未超限）必须允许幻觉重试");
+        assertEquals("架构叙事 — Demo", holder[0].getTitle(), "200 类不得带分片标记");
+        ArgumentCaptor<AiRequest> reqCaptor = ArgumentCaptor.forClass(AiRequest.class);
+        verify(aiClient, times(2)).chat(reqCaptor.capture());
+        assertEquals(ARCH_RETRY_SYSTEM_PROMPT, reqCaptor.getAllValues().get(1).getSystemPrompt(),
+                "第二次调用必须是低温重试而非分片汇总");
+        JsonNode meta = new ObjectMapper().readTree(holder[0].getMetadata());
+        assertEquals(200, meta.get("classCount").asLong());
+        assertFalse(meta.get("chunked").asBoolean(), "恰 200 类时 chunked 必须为 false");
+        assertAudit(captureAudit(), 700, 700, 1400, 240, null, true);
+    }
+
+    @Test
+    @DisplayName("分片路径全景：组名派生（点分/无点/null 包）、分片与汇总提示词/请求/预算/进度逐值断言")
+    void analyzeArchitecture_chunkedPath_shouldComputePromptsRequestsBudgetsExactly() throws Exception {
+        List<ClassSummaryEntity> comGroup = new ArrayList<>();
+        comGroup.add(chunkClass("com.alpha.NullMeta", "com.alpha", "service", null, null));
+        comGroup.add(chunkClass("com.alpha.FullMeta", "com.alpha", null, 7, 42));
+        for (int i = 0; i < 98; i++) {
+            comGroup.add(chunkClass("com.alpha.C" + i, "com.alpha", "service", 3, 40));
+        }
+        List<ClassSummaryEntity> orgGroup = new ArrayList<>();
+        for (int i = 0; i < 50; i++) {
+            orgGroup.add(chunkClass("org.beta.C" + i, "org.beta", "service", 3, 40));
+        }
+        List<ClassSummaryEntity> plainGroup = new ArrayList<>();
+        for (int i = 0; i < 30; i++) {
+            plainGroup.add(chunkClass("plain.C" + i, "plain", "service", 3, 40));
+        }
+        List<ClassSummaryEntity> defaultGroup = new ArrayList<>();
+        for (int i = 0; i < 21; i++) {
+            defaultGroup.add(chunkClass("Legacy" + i, null, "service", 3, 40));
+        }
+        List<ClassSummaryEntity> classes = new ArrayList<>();
+        classes.addAll(comGroup);
+        classes.addAll(orgGroup);
+        classes.addAll(plainGroup);
+        classes.addAll(defaultGroup);
+        assertEquals(201, classes.size());
+
+        stubProjectData(classes);
+        AiTaskProgressRegistry spyRegistry = spy(new AiTaskProgressRegistry(new ObjectMapper()));
+        AiAnalysisService svc = buildService(aiClient, spyRegistry);
+        when(aiClient.getModelName()).thenReturn("mock-model");
+        when(tokenBudgetManager.tryConsume(anyLong())).thenReturn(true);
+        when(aiClient.chat(any(AiRequest.class))).thenReturn(
+                aiResponse("r1", 100), aiResponse("r2", 200), aiResponse("r3", 300), aiResponse("r4", 400),
+                aiResponse("总报告", 500));
+        when(hallucinationChecker.check(anyString(), anyList())).thenReturn(HallucinationResultStub.none());
+
+        InsightEntity insight = svc.analyzeArchitecture(PROJECT_ID, SCAN_ID, TASK_ID);
+
+        ArgumentCaptor<AiRequest> reqCaptor = ArgumentCaptor.forClass(AiRequest.class);
+        verify(aiClient, times(5)).chat(reqCaptor.capture());
+        List<AiRequest> requests = reqCaptor.getAllValues();
+        assertEquals(expectedChunkPrompt("com", "Demo", comGroup), requests.get(0).getPrompt());
+        assertEquals(expectedChunkPrompt("org", "Demo", orgGroup), requests.get(1).getPrompt());
+        assertEquals(expectedChunkPrompt("plain", "Demo", plainGroup), requests.get(2).getPrompt());
+        assertEquals(expectedChunkPrompt("default", "Demo", defaultGroup), requests.get(3).getPrompt());
+        List<String> chunkResults = Arrays.asList(
+                "## com\n\nr1", "## org\n\nr2", "## plain\n\nr3", "## default\n\nr4");
+        assertEquals(expectedSummaryPrompt("Demo", chunkResults), requests.get(4).getPrompt());
+        for (int i = 0; i < 4; i++) {
+            assertEquals(CHUNK_SYSTEM_PROMPT, requests.get(i).getSystemPrompt());
+            assertEquals(4096, requests.get(i).getMaxTokens());
+        }
+        assertEquals(SUMMARY_SYSTEM_PROMPT, requests.get(4).getSystemPrompt());
+        assertEquals(8192, requests.get(4).getMaxTokens());
+
+        ArgumentCaptor<Long> budgetCaptor = ArgumentCaptor.forClass(Long.class);
+        verify(tokenBudgetManager, times(5)).tryConsume(budgetCaptor.capture());
+        List<Long> expectedBudgets = new ArrayList<>();
+        for (AiRequest request : requests) {
+            expectedBudgets.add(request.getPrompt().length() * 2L / 3L + 4096L);
+        }
+        assertEquals(expectedBudgets, budgetCaptor.getAllValues(), "每批与汇总的预算估算都必须为 len*2/3+4096");
+
+        verify(spyRegistry).publish(TASK_ID, "正在渲染架构叙事提示词…");
+        verify(spyRegistry).publish(TASK_ID, "项目较大，正在分片分析：第 1 批（com）…");
+        verify(spyRegistry).publish(TASK_ID, "项目较大，正在分片分析：第 2 批（org）…");
+        verify(spyRegistry).publish(TASK_ID, "项目较大，正在分片分析：第 3 批（plain）…");
+        verify(spyRegistry).publish(TASK_ID, "项目较大，正在分片分析：第 4 批（default）…");
+        verify(spyRegistry).publish(TASK_ID, "正在合并 4 个分片为完整报告…");
+        verify(spyRegistry).publish(TASK_ID, "正在做类名防幻觉校验…");
+        verify(spyRegistry).publish(TASK_ID, "正在保存报告…");
+
+        assertEquals("总报告", insight.getContent());
+        assertEquals("架构叙事 — Demo [分片分析]", insight.getTitle());
+        JsonNode meta = new ObjectMapper().readTree(insight.getMetadata());
+        assertEquals(201, meta.get("classCount").asLong());
+        assertTrue(meta.get("chunked").asBoolean());
+        assertAudit(captureAudit(), 750, 750, 1500, 600, null, true);
+    }
+
+    @Test
+    @DisplayName("callAiWithResilience：latency<=0 时回填本机耗时（非负且落在外层观测窗口内）")
+    void callAiWithResilience_latencyZero_shouldBackfillElapsedWithinObservedWindow() {
+        AiResponse response = spy(new AiResponse());
+        response.setContent("ok");
+        response.setLatencyMs(0);
+        when(aiClient.chat(any(AiRequest.class))).thenReturn(response);
+
+        long before = System.currentTimeMillis();
+        service.callAiWithResilience(new AiRequest());
+        long after = System.currentTimeMillis();
+
+        ArgumentCaptor<Long> latencyCaptor = ArgumentCaptor.forClass(Long.class);
+        // 第 1 次为本测试显式置 0，第 2 次必须为服务回填
+        verify(response, times(2)).setLatencyMs(latencyCaptor.capture());
+        assertEquals(0L, (long) latencyCaptor.getAllValues().get(0));
+        long filled = latencyCaptor.getAllValues().get(1);
+        assertTrue(filled >= 0, "回填值不得为负");
+        assertTrue(filled <= after - before,
+                "回填值必须为 now-start 且落在外层观测窗口内（若为 now+start 或未回填则必然越界）");
+    }
+
+    @Test
+    @DisplayName("isAiAnalysisRunning：任务执行期间为 true，收尾后回收为 false")
+    void isAiAnalysisRunning_duringRun_shouldReportTrue() throws Exception {
+        stubProjectData(smallClasses());
+        when(aiClient.getModelName()).thenReturn("mock-model");
+        when(tokenBudgetManager.tryConsume(anyLong())).thenReturn(true);
+        when(hallucinationChecker.check(anyString(), anyList())).thenReturn(HallucinationResultStub.none());
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        when(aiClient.chat(any(AiRequest.class))).thenAnswer(invocation -> {
+            entered.countDown();
+            release.await(5, TimeUnit.SECONDS);
+            return aiResponse("架构叙事内容 AService", 800);
+        });
+
+        Thread worker = new Thread(() -> service.triggerAsync(PROJECT_ID, SCAN_ID));
+        worker.start();
+        try {
+            assertTrue(entered.await(5, TimeUnit.SECONDS), "分析线程应进入 AI 调用");
+            assertTrue(service.isAiAnalysisRunning(PROJECT_ID), "运行期间必须报告 true");
+        } finally {
+            release.countDown();
+            worker.join(5000);
+        }
+        assertFalse(service.isAiAnalysisRunning(PROJECT_ID), "收尾后运行态必须回收");
+    }
+
+    @Test
+    @DisplayName("saveAiAuditLog：userId 原样写入、totalTokens=0 不写成本")
+    void saveAiAuditLog_zeroTokens_shouldPersistUserIdWithoutCost() {
+        service.saveAiAuditLog("mock-model", "ARCHITECTURE_STORY", PROJECT_ID, 42L, 0, 0, 0, 0, null, true);
+
+        AiAuditLogEntity audit = captureAudit();
+        assertEquals(42L, audit.getUserId(), "userId 必须原样落库");
+        assertNull(audit.getCost(), "totalTokens=0 时不得写入成本");
+    }
+
+    @Test
+    @DisplayName("saveAiAuditLog：成本按 8 元/百万精确计费（123456 token = 0.98765）")
+    void saveAiAuditLog_positiveTokens_shouldComputeExactCost() {
+        service.saveAiAuditLog("mock-model", "ARCHITECTURE_STORY", PROJECT_ID, 42L, 1, 2, 123456, 7, null, true);
+
+        AiAuditLogEntity audit = captureAudit();
+        assertEquals(0, new BigDecimal("0.98765").compareTo(audit.getCost()), "成本必须精确到 0.00001");
+    }
+
+    @Test
+    @DisplayName("依赖高亮：单类 15 条项目内依赖时由内层守卫精确截断为 10 条")
+    void buildPromptVariables_singleClassManyDeps_shouldStopAtTenWithinClass() {
+        List<ClassSummaryEntity> classes = new ArrayList<>();
+        ClassSummaryEntity root = classSummary("com.demo.Root", "com.demo");
+        classes.add(root);
+        StringBuilder depJson = new StringBuilder("[");
+        for (int i = 1; i <= 15; i++) {
+            classes.add(classSummary("com.demo.Dep" + i, "com.demo"));
+            if (i > 1) {
+                depJson.append(',');
+            }
+            depJson.append("\"com.demo.Dep").append(i).append('"');
+        }
+        depJson.append(']');
+        root.setDependencies(depJson.toString());
+
+        Project project = new Project();
+        project.setName("Demo");
+        ScanRecord scan = new ScanRecord();
+        scan.setTotalLines(1);
+
+        Map<String, String> vars = service.buildPromptVariables(project, scan, classes);
+
+        String highlights = vars.get("dependencyHighlights");
+        assertEquals(10, highlights.split("\n").length, "同一类内的第 11 条及以后不得追加");
+        assertTrue(highlights.contains("Root → Dep10"));
+        assertFalse(highlights.contains("Dep11"), "超过 10 条后必须由内层 guard 拦停");
+    }
+
+    @Test
+    @DisplayName("keyClasses：按依赖数降序（comparator 生效）+ 精确行格式（null 计 0）")
+    void buildPromptVariables_keyClassesExactFormatAndOrdering() {
+        ClassSummaryEntity low = classSummary("com.demo.Low", "com.demo");
+        ClassSummaryEntity high = classSummary("com.demo.High", "com.demo");
+        high.setDependencies("[\"com.demo.Low\"]");
+        high.setTotalMethods(7);
+        high.setLineCount(42);
+        ClassSummaryEntity nullable = classSummary("com.demo.Nullable", "com.demo");
+        nullable.setTotalMethods(null);
+        nullable.setLineCount(null);
+        nullable.setDependencies(null);
+
+        Project project = new Project();
+        project.setName("Demo");
+        ScanRecord scan = new ScanRecord();
+        scan.setTotalLines(10);
+
+        Map<String, String> vars = service.buildPromptVariables(project, scan,
+                new ArrayList<>(Arrays.asList(low, high, nullable)));
+
+        assertEquals("| com.demo.High | service | class | 7 methods | 42 lines | 1 deps |\n"
+                        + "| com.demo.Low | service | class | 3 methods | 40 lines | 0 deps |\n"
+                        + "| com.demo.Nullable | service | class | 0 methods | 0 lines | 0 deps |\n",
+                vars.get("keyClasses"));
+    }
+
+    @Test
+    @DisplayName("置信度：长度恰为 1500/600 时不升档（档位为严格大于）")
+    void calculateConfidence_lengthBoundaries_shouldNotUpgradeAtExactBoundary() {
+        List<ClassSummaryEntity> classes = new ArrayList<>();
+        for (int i = 0; i < 8; i++) {
+            classes.add(classSummary("com.demo.Cls" + (char) ('A' + i), "com.demo"));
+        }
+        String names = "ClsA ClsB ClsC ClsD ClsE ClsF ClsG ClsH";
+        String content1500 = names + " 架构 " + repeat('x', 1500 - names.length() - 4);
+        assertEquals(1500, content1500.length());
+        // 命中 8 类(+0.20)、长度=1500 走 600 档(+0.06)、架构术语(+0.05) → 0.55+0.31 = 0.86
+        assertEquals(0, BigDecimal.valueOf(0.86).compareTo(
+                service.calculateConfidenceSimple(content1500, classes)));
+
+        String content600 = repeat('x', 600);
+        assertEquals(600, content600.length());
+        assertEquals(0, BigDecimal.valueOf(0.55).compareTo(
+                service.calculateConfidenceSimple(content600, classes)));
+    }
+
+    @Test
+    @DisplayName("shorten：以点开头的 FQN 不截取（idx>0 为严格边界）")
+    void shorten_leadingDot_shouldReturnInputUnchanged() {
+        assertEquals(".Foo", service.shorten(".Foo"));
     }
 
     /** 经 Unsafe 直接改写静态 final 字段（常规反射无法替换），返回旧值供还原 */
