@@ -768,6 +768,25 @@ class GitServiceTest {
         }
     }
 
+    @Test
+    @DisplayName("getDirectorySize：目录条目不得计入——目录大小放大到远超文件总和后仍只累加普通文件")
+    void getDirectorySize_directoryEntries_shouldNotBeCounted(@TempDir Path tempDir) throws Exception {
+        Files.write(tempDir.resolve("a.bin"), new byte[10]);
+        Files.write(tempDir.resolve("b.bin"), new byte[10]);
+
+        try (MockedStatic<Files> filesMock = mockStatic(Files.class, CALLS_REAL_METHODS)) {
+            // 目录条目放大到远超文件总和：isRegularFile 过滤器若被替换为恒真（变异体），根目录自身会被计入求和
+            filesMock.when(() -> Files.size(any(Path.class))).thenAnswer(invocation -> {
+                Path path = invocation.getArgument(0);
+                return Files.isDirectory(path) ? 5_000_000L : 10L;
+            });
+
+            long size = (long) getDirectorySizeMethod().invoke(service, tempDir);
+
+            assertEquals(20L, size, "仅两个普通文件各 10 字节；目录条目（NTFS 下可能报 4096 等非零值）不得计入");
+        }
+    }
+
     // ==================== sslConfigured 静态标记反射辅助 ====================
 
     private static boolean sslConfiguredFlag() throws Exception {
