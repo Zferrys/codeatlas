@@ -8,11 +8,13 @@ import com.codeatlas.server.service.impl.FileServiceImpl;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.ByteArrayInputStream;
@@ -414,5 +416,123 @@ class FileServiceImplTest {
 
         assertEquals(500, ex.getCode());
         assertTrue(ex.getMessage().startsWith("文件处理失败: "), "实际消息: " + ex.getMessage());
+    }
+
+    // ==================== 边界与内容精确性补强（不改动上方既有用例） ====================
+
+    @Test
+    @DisplayName("恰 10000 个 zip 条目：达到上限但不超限，正常解压并创建项目")
+    @Timeout(60)
+    void uploadAndScan_exactlyMaxEntries_shouldSucceed() throws IOException {
+        ByteArrayOutputStream bos = new ByteArrayOutputStream();
+        try (ZipOutputStream zos = new ZipOutputStream(bos)) {
+            for (int i = 0; i < 10000; i++) {
+                zos.putNextEntry(new ZipEntry("d" + i + "/"));
+                zos.closeEntry();
+            }
+        }
+        stubZipFile("max.zip", bos.toByteArray());
+        when(workspaceConfig.getUploadsDir()).thenReturn(tempDir);
+        when(projectService.createProject(any(CreateProjectRequest.class), eq(USER_ID)))
+                .thenReturn(projectVO(6L));
+
+        ProjectVO result = fileService.uploadAndScan(file, USER_ID);
+
+        assertEquals(6L, result.getId());
+        verify(projectService).createProject(any(CreateProjectRequest.class), eq(USER_ID));
+    }
+
+    @Test
+    @DisplayName("zip 解压后累计字节恰为 500MB：未超限不抛，正常创建项目")
+    @Timeout(120)
+    void uploadAndScan_exactlyUncompressedLimit_shouldSucceed() throws IOException {
+        // 524288000 = 8192 × 64000，读块对齐使累计字节恰好落在上限值上
+        long exactLimit = 500L * 1024 * 1024;
+        ByteArrayOutputStream bos = new ByteArrayOutputStream();
+        try (ZipOutputStream zos = new ZipOutputStream(bos)) {
+            zos.putNextEntry(new ZipEntry("big.bin"));
+            byte[] zeros = new byte[8192];
+            long remaining = exactLimit;
+            while (remaining > 0) {
+                int chunk = (int) Math.min(zeros.length, remaining);
+                zos.write(zeros, 0, chunk);
+                remaining -= chunk;
+            }
+            zos.closeEntry();
+        }
+        stubZipFile("exact.zip", bos.toByteArray());
+        when(workspaceConfig.getUploadsDir()).thenReturn(tempDir);
+        when(projectService.createProject(any(CreateProjectRequest.class), eq(USER_ID)))
+                .thenReturn(projectVO(7L));
+
+        ProjectVO result = fileService.uploadAndScan(file, USER_ID);
+
+        assertEquals(7L, result.getId());
+        verify(projectService).createProject(any(CreateProjectRequest.class), eq(USER_ID));
+    }
+
+    @Test
+    @DisplayName("解压落盘内容：文件字节与 zip 中原始内容精确一致（写入未被跳过）")
+    void uploadAndScan_extractedFile_shouldPersistExactContent() throws IOException {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < 3000; i++) {
+            sb.append((char) ('a' + (i % 26)));
+        }
+        String content = sb.toString();
+        byte[] zip = zipBytes(Map.of(
+                "proj/pom.xml", content.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        stubZipFile("content.zip", zip);
+        when(workspaceConfig.getUploadsDir()).thenReturn(tempDir);
+        when(projectService.createProject(any(CreateProjectRequest.class), eq(USER_ID)))
+                .thenReturn(projectVO(8L));
+
+        fileService.uploadAndScan(file, USER_ID);
+
+        ArgumentCaptor<CreateProjectRequest> captor = ArgumentCaptor.forClass(CreateProjectRequest.class);
+        verify(projectService).createProject(captor.capture(), eq(USER_ID));
+        Path extracted = Path.of(captor.getValue().getSourceUrl()).resolve("pom.xml");
+        assertTrue(Files.exists(extracted), "解压文件应存在: " + extracted);
+        assertEquals(content, Files.readString(extracted));
+    }
+
+    @Test
+    @DisplayName("单包装目录 + 平级文件：目录过滤只认目录，项目根仍取该单目录")
+    void uploadAndScan_wrappedDirWithSiblingFile_shouldUseWrappedDirAsProjectRoot() throws IOException {
+        byte[] zip = zipBytes(Map.of(
+                "proj/pom.xml", "<project/>".getBytes(),
+                "README.md", "readme".getBytes()));
+        stubZipFile("mixed.zip", zip);
+        when(workspaceConfig.getUploadsDir()).thenReturn(tempDir);
+        when(projectService.createProject(any(CreateProjectRequest.class), eq(USER_ID)))
+                .thenReturn(projectVO(9L));
+
+        fileService.uploadAndScan(file, USER_ID);
+
+        ArgumentCaptor<CreateProjectRequest> captor = ArgumentCaptor.forClass(CreateProjectRequest.class);
+        verify(projectService).createProject(captor.capture(), eq(USER_ID));
+        Path sourcePath = Path.of(captor.getValue().getSourceUrl());
+        assertEquals("proj", sourcePath.getFileName().toString(),
+                "平级文件不应影响单包装目录判定，实际: " + sourcePath);
+    }
+
+    @Test
+    @DisplayName("文件大小恰为 100MB 上限：允许通过，正常创建项目")
+    void uploadAndScan_exactlyMaxFileSize_shouldSucceed() throws IOException {
+        byte[] zip = zipBytes(Map.of("proj/x.java", "class X {}".getBytes()));
+        MockMultipartFile exactSizeFile = new MockMultipartFile(
+                "file", "exact.zip", "application/zip", zip) {
+            @Override
+            public long getSize() {
+                return MAX_FILE_SIZE;
+            }
+        };
+        when(workspaceConfig.getUploadsDir()).thenReturn(tempDir);
+        when(projectService.createProject(any(CreateProjectRequest.class), eq(USER_ID)))
+                .thenReturn(projectVO(10L));
+
+        ProjectVO result = fileService.uploadAndScan(exactSizeFile, USER_ID);
+
+        assertEquals(10L, result.getId());
+        verify(projectService).createProject(any(CreateProjectRequest.class), eq(USER_ID));
     }
 }

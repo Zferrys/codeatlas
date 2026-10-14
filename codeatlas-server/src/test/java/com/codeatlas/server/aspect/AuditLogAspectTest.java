@@ -219,7 +219,7 @@ class AuditLogAspectTest {
     }
 
     @Test
-    @DisplayName("usernameExpression 求值失败（变量不存在）：username 为 null，跳过写入")
+    @DisplayName("usernameExpression 求值失败（变量不存在）：username 为 null，跳过写入且不触发反查")
     void around_brokenUsernameExpression_shouldSkipWrite() throws Throwable {
         stubJoinPoint("brokenUsernameExpression", "ok", UsernameRequest.class);
         when(joinPoint.getArgs()).thenReturn(new Object[]{new UsernameRequest("bob")});
@@ -228,6 +228,7 @@ class AuditLogAspectTest {
         Object result = aspect.around(joinPoint, annotationOf("brokenUsernameExpression", UsernameRequest.class));
 
         assertEquals("ok", result);
+        verify(userMapper, never()).findByUsername(any());
         verify(auditLogWriter, never()).write(any());
     }
 

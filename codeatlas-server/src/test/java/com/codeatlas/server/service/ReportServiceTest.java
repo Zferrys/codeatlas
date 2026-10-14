@@ -12,21 +12,30 @@ import com.codeatlas.server.mapper.ProjectMapper;
 import com.codeatlas.server.mapper.ProjectMemberMapper;
 import com.codeatlas.server.mapper.ScanMapper;
 import com.codeatlas.server.mapper.ViolationMapper;
+import com.itextpdf.kernel.colors.DeviceRgb;
 import com.itextpdf.kernel.font.PdfFont;
 import com.itextpdf.kernel.font.PdfFontFactory;
 import com.itextpdf.kernel.pdf.PdfDocument;
 import com.itextpdf.kernel.pdf.PdfReader;
+import com.itextpdf.kernel.pdf.PdfWriter;
 import com.itextpdf.kernel.pdf.canvas.parser.PdfTextExtractor;
+import com.itextpdf.layout.Document;
+import com.itextpdf.layout.element.Cell;
+import com.itextpdf.layout.element.Table;
+import com.itextpdf.layout.properties.Background;
+import com.itextpdf.layout.properties.Property;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.MockedStatic;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
@@ -44,7 +53,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -687,6 +698,145 @@ class ReportServiceTest {
     @SuppressWarnings("unchecked")
     private <T> T invoke(String methodName, Object argument) {
         return (T) ReflectionTestUtils.invokeMethod(service, methodName, argument);
+    }
+
+    // ==================== 覆盖率与边界补强（不改动上方既有用例） ====================
+
+    @Test
+    @DisplayName("PDF 报告：统计表四个标签与违规数值逐个渲染")
+    void generatePdf_statsLabelsAndViolationCount_shouldRender() {
+        ScanRecord scan = scan();
+        scan.setTotalViolations(1337);
+        when(projectMapper.findById(PROJECT_ID)).thenReturn(ownedProject("DemoProj", "85.5"));
+        when(scanMapper.findLatestByProjectId(PROJECT_ID)).thenReturn(scan);
+        when(violationMapper.findByScanId(SCAN_ID)).thenReturn(Collections.emptyList());
+        when(insightService.getLatestArchStory(PROJECT_ID)).thenReturn(null);
+
+        byte[] pdf = service.generatePdf(PROJECT_ID, USER_ID);
+
+        assertIsPdf(pdf);
+        String text = extractPdfText(pdf);
+        assertTrue(text.contains("总类数"), "缺统计标签『总类数』");
+        assertTrue(text.contains("总行数"), "缺统计标签『总行数』");
+        assertTrue(text.contains("违规数"), "缺统计标签『违规数』");
+        assertTrue(text.contains("扫描耗时"), "缺统计标签『扫描耗时』");
+        assertTrue(text.contains("1337"), "缺违规数值");
+    }
+
+    @Test
+    @DisplayName("PDF 报告：违规表头三列与中文严重性均渲染")
+    void generatePdf_violationHeadersAndChineseSeverity_shouldRender() {
+        when(projectMapper.findById(PROJECT_ID)).thenReturn(ownedProject("DemoProj", "85.5"));
+        when(scanMapper.findLatestByProjectId(PROJECT_ID)).thenReturn(scan());
+        when(violationMapper.findByScanId(SCAN_ID)).thenReturn(Collections.singletonList(
+                violation("BLOCKER", "com.demo.Foo", "MSGX")));
+        when(insightService.getLatestArchStory(PROJECT_ID)).thenReturn(null);
+
+        byte[] pdf = service.generatePdf(PROJECT_ID, USER_ID);
+
+        assertIsPdf(pdf);
+        String text = extractPdfText(pdf);
+        int headerStart = text.indexOf("严重性");
+        assertTrue(headerStart >= 0, "缺表头『严重性』");
+        assertTrue(text.indexOf("描述") > headerStart, "缺表头『描述』");
+        // 表头上方统计区的『总类数』含『类』字，故从表头位置之后查找，避免误判
+        assertTrue(text.indexOf("类", headerStart) > headerStart, "缺表头『类』");
+        assertTrue(text.contains("阻断"), "BLOCKER 应渲染为中文『阻断』");
+    }
+
+    @Test
+    @DisplayName("PDF 报告：叙事恰 6000 字符不截断（边界含等号）")
+    void generatePdf_storyExactlySixThousand_shouldNotTruncate() {
+        String content = "Z".repeat(6000);
+        when(projectMapper.findById(PROJECT_ID)).thenReturn(ownedProject("DemoProj", "85.5"));
+        when(scanMapper.findLatestByProjectId(PROJECT_ID)).thenReturn(null);
+        when(insightService.getLatestArchStory(PROJECT_ID)).thenReturn(insight("t", content, "0.5"));
+
+        byte[] pdf = service.generatePdf(PROJECT_ID, USER_ID);
+
+        assertIsPdf(pdf);
+        assertFalse(extractPdfText(pdf).contains("已截断"), "恰 6000 字符不应截断");
+    }
+
+    @Test
+    @DisplayName("PDF 报告：非创建者且非成员抛 404，不生成 PDF")
+    void generatePdf_notMember_shouldThrowNotFound() {
+        when(projectMapper.findById(PROJECT_ID)).thenReturn(ownedProject("DemoProj", "85.5"));
+        when(projectMemberMapper.findByProjectAndUser(PROJECT_ID, OTHER_USER_ID)).thenReturn(null);
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> service.generatePdf(PROJECT_ID, OTHER_USER_ID));
+
+        assertEquals(ErrorCode.NOT_FOUND.getCode(), ex.getCode());
+        assertEquals("项目不存在", ex.getMessage());
+    }
+
+    @Test
+    @DisplayName("历史报告：非创建者且非成员抛 404，不返回任何记录")
+    void getReportHistory_notMember_shouldThrowNotFound() {
+        when(projectMapper.findById(PROJECT_ID)).thenReturn(ownedProject("DemoProj", "85.5"));
+        when(projectMemberMapper.findByProjectAndUser(PROJECT_ID, OTHER_USER_ID)).thenReturn(null);
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> service.getReportHistory(PROJECT_ID, OTHER_USER_ID));
+
+        assertEquals(ErrorCode.NOT_FOUND.getCode(), ex.getCode());
+    }
+
+    @Test
+    @DisplayName("洞察 PDF：正文恰 15000 字符不截断（边界含等号）")
+    void generateInsightPdf_exactlyFifteenThousand_shouldNotTruncate() {
+        String content = "Y".repeat(15000);
+        when(projectMapper.findById(PROJECT_ID)).thenReturn(ownedProject("DemoProj", "85.5"));
+        when(insightService.getLatestByType(PROJECT_ID, INSIGHT_TYPE))
+                .thenReturn(insight("t", content, "0.5"));
+
+        byte[] pdf = service.generateInsightPdf(PROJECT_ID, INSIGHT_TYPE, USER_ID);
+
+        assertIsPdf(pdf);
+        assertFalse(extractPdfText(pdf).contains("已截断"), "恰 15000 字符不应截断");
+    }
+
+    @Test
+    @DisplayName("addCell：label 单元格设置 245,245,255 背景，值单元格无背景")
+    void addCell_labelShouldGetLightBlueBackground() {
+        Table table = mock(Table.class);
+        PdfFont font = mock(PdfFont.class);
+
+        ReflectionTestUtils.invokeMethod(service, "addCell", table, "总类数", font, true);
+        ReflectionTestUtils.invokeMethod(service, "addCell", table, "9642", font, false);
+
+        ArgumentCaptor<Cell> captor = ArgumentCaptor.forClass(Cell.class);
+        verify(table, times(2)).addCell(captor.capture());
+        Cell labelCell = captor.getAllValues().get(0);
+        Cell valueCell = captor.getAllValues().get(1);
+
+        Background labelBg = labelCell.getProperty(Property.BACKGROUND);
+        assertNotNull(labelBg, "label 单元格应有背景色");
+        DeviceRgb rgb = (DeviceRgb) labelBg.getColor();
+        float[] components = rgb.getColorValue();
+        assertEquals(245f / 255f, components[0], 1e-6f);
+        assertEquals(245f / 255f, components[1], 1e-6f);
+        assertEquals(255f / 255f, components[2], 1e-6f);
+        assertNull(valueCell.getProperty(Property.BACKGROUND), "值单元格不应有背景色");
+    }
+
+    @Test
+    @DisplayName("叙事渲染：标题行去掉 # 标记，列表行加 • 前缀")
+    void addNarrativeToPdf_titleAndListLines_shouldFormatMarkers() {
+        PdfFont cnFont = ReflectionTestUtils.invokeMethod(service, "loadChineseFont");
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        PdfDocument pdf = new PdfDocument(new PdfWriter(baos));
+        Document document = new Document(pdf);
+
+        ReflectionTestUtils.invokeMethod(service, "addNarrativeToPdf",
+                document, "# 标题马克\n- 列表马克\n", cnFont);
+        document.close();
+
+        String text = extractPdfText(baos.toByteArray());
+        assertTrue(text.contains("标题马克"), "标题文本应保留");
+        assertFalse(text.contains("#"), "标题 # 标记应被移除");
+        assertTrue(text.contains("• 列表马克"), "列表行应加 • 前缀");
     }
 
     // ========== 预期 HTML 前缀（复制自实现，用于逐字比对） ==========

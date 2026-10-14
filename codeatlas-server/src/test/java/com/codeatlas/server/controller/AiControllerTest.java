@@ -532,4 +532,48 @@ class AiControllerTest {
         assertEquals("boom", ex.getMessage());
         verify(progressRegistry).complete(TASK_ID);
     }
+
+    // ==================== 越权检查调用（变异补强） ====================
+
+    @Test
+    @DisplayName("getAntiPattern — 项目访问检查被调用且参数精确")
+    void getAntiPatternChecksProjectAccess() {
+        when(insightService.getLatestByType(PROJECT_ID, "ANTI_PATTERN")).thenReturn(null);
+
+        controller.getAntiPattern(PROJECT_ID, principal);
+
+        verify(projectAccessChecker).check(PROJECT_ID, USER_ID);
+    }
+
+    @Test
+    @DisplayName("generateAntiPattern — 项目访问检查被调用且参数精确")
+    void generateAntiPatternChecksProjectAccess() {
+        when(antiPatternService.analyzeAntiPatterns(PROJECT_ID, USER_ID, TASK_ID))
+                .thenReturn(insight(62L, "反模式", new BigDecimal("0.5")));
+
+        controller.generateAntiPattern(PROJECT_ID, TASK_ID, principal);
+
+        verify(projectAccessChecker).check(PROJECT_ID, USER_ID);
+    }
+
+    @Test
+    @DisplayName("getConstitutionCheck — 项目访问检查被调用且参数精确")
+    void getConstitutionCheckChecksProjectAccess() {
+        when(insightService.getLatestByType(PROJECT_ID, "CONSTITUTION_CHECK")).thenReturn(null);
+
+        controller.getConstitutionCheck(PROJECT_ID, principal);
+
+        verify(projectAccessChecker).check(PROJECT_ID, USER_ID);
+    }
+
+    @Test
+    @DisplayName("generateConstitutionCheck — 项目访问检查被调用且参数精确")
+    void generateConstitutionCheckChecksProjectAccess() {
+        when(constitutionCheckService.analyzeConstitution(PROJECT_ID, USER_ID, TASK_ID))
+                .thenReturn(insight(82L, "合规", new BigDecimal("0.3")));
+
+        controller.generateConstitutionCheck(PROJECT_ID, TASK_ID, principal);
+
+        verify(projectAccessChecker).check(PROJECT_ID, USER_ID);
+    }
 }

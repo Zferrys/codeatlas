@@ -82,6 +82,14 @@ class InsightServiceImplTest {
     }
 
     @Test
+    @DisplayName("按类型分页第 2 页：offset = (2-1)*10 = 10 精确透传（乘法而非除法）")
+    void getInsightsByType_pageTwo_shouldUseExactOffsetTen() {
+        insightService.getInsightsByType(PROJECT_ID, "ANTI_PATTERN", 2, 10);
+
+        verify(insightMapper).findByProjectIdAndTypePaged(PROJECT_ID, "ANTI_PATTERN", 10, 10);
+    }
+
+    @Test
     @DisplayName("最新架构故事：无记录返回 null")
     void getLatestArchStory_empty_shouldReturnNull() {
         when(insightMapper.findLatestByProjectIdAndType(PROJECT_ID, "ARCH_STORY"))

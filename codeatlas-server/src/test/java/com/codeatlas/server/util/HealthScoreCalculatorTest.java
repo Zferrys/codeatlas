@@ -158,6 +158,22 @@ class HealthScoreCalculatorTest {
     }
 
     @Test
+    @DisplayName("代码质量档位下界：平均恰 5 个方法按满分档计入加权总分（85.00）")
+    void compute_qualityExactlyAtFive_shouldContributeFullScoreToTotal() {
+        // 单看 quality 分项会被 round(clamp(...)) 掩盖，必须用非饱和的加权总分观测档位边界：
+        // 结构与依赖维度取非满分值，使总分远离 100 的钳制上限
+        List<ClassSummaryEntity> classes = new ArrayList<>();
+        classes.add(clazz("service", 5, depsJson(2)));
+        classes.add(clazz(null, 5, depsJson(2)));
+
+        HealthScoreCalculator.Result result = HealthScoreCalculator.compute(2, 0, classes);
+
+        assertEquals(100, result.getQuality());
+        assertEquals(50, result.getStructure());
+        assertEquals(new BigDecimal("85.00"), result.getTotal());
+    }
+
+    @Test
     @DisplayName("代码质量：totalMethods 为 null 按 0 计（不拋 NPE）")
     void compute_quality_nullMethodsCountedAsZero() {
         assertEquals(50, qualityOf(null));
@@ -178,6 +194,21 @@ class HealthScoreCalculatorTest {
         assertEquals(98, dependencyOf(depsJson(21)));
         assertEquals(90, dependencyOf(depsJson(25)));
         assertEquals(0, dependencyOf(depsJson(100)));
+    }
+
+    @Test
+    @DisplayName("依赖健康档位下界：平均恰 1 个依赖按满分档计入加权总分（85.00）")
+    void compute_dependencyExactlyAtOne_shouldContributeFullScoreToTotal() {
+        // 同 quality 档位：用非饱和加权总分观测“恰 1 个依赖”的下界边界
+        List<ClassSummaryEntity> classes = new ArrayList<>();
+        classes.add(clazz("service", 10, depsJson(1)));
+        classes.add(clazz(null, 10, depsJson(1)));
+
+        HealthScoreCalculator.Result result = HealthScoreCalculator.compute(2, 0, classes);
+
+        assertEquals(100, result.getDependency());
+        assertEquals(50, result.getStructure());
+        assertEquals(new BigDecimal("85.00"), result.getTotal());
     }
 
     @Test

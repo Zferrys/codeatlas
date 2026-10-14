@@ -112,6 +112,23 @@ class GetLayerSummaryToolTest {
     }
 
     @Test
+    @DisplayName("比较器第二参数为非空方法数：降序顺序不被破坏（覆盖 b 侧三元分支）")
+    void execute_comparatorSecondArgNonNull_shouldKeepDescendingOrder() {
+        when(classSummaryMapper.findByProjectId(PROJECT_ID)).thenReturn(new ArrayList<>(Arrays.asList(
+                cls("BigService", "service", 10, 100),
+                cls("SmallService", "service", 1, 10))));
+
+        String result = tool.execute(Collections.emptyMap(), PROJECT_ID);
+
+        assertEquals("项目架构概览: 共 2 个类，1 个分层\n"
+                + "\n"
+                + "【service】2 个类\n"
+                + "  - BigService (方法10, 100行)\n"
+                + "  - SmallService (方法1, 10行)\n"
+                + "\n", result);
+    }
+
+    @Test
     @DisplayName("layer 为 null 的类归入 unknown 分层")
     void execute_nullLayer_shouldGroupIntoUnknown() {
         when(classSummaryMapper.findByProjectId(PROJECT_ID)).thenReturn(new ArrayList<>(Collections.singletonList(

@@ -18,6 +18,7 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.security.web.FilterChainProxy;
+import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.access.intercept.AuthorizationFilter;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
@@ -58,6 +59,9 @@ class SecurityConfigTest {
 
     @MockBean
     private JwtAuthFilter jwtAuthFilter;
+
+    @Autowired(required = false)
+    private SecurityFilterChain securityFilterChainBean;
 
     private final SecurityConfig config = new SecurityConfig(null);
 
@@ -145,6 +149,13 @@ class SecurityConfigTest {
     }
 
     // ========== 过滤链结构 ==========
+
+    @Test
+    @DisplayName("filterChain(HttpSecurity) 必须返回非 null 的 SecurityFilterChain Bean")
+    void filterChain_shouldRegisterNonNullSecurityFilterChainBean() {
+        assertNotNull(securityFilterChainBean,
+                "SecurityConfig.filterChain 的返回值必须注册为 SecurityFilterChain Bean（http.build() 结果不可为 null）");
+    }
 
     @Test
     @DisplayName("JwtAuthFilter 位于 AuthorizationFilter 之前（先认证后鉴权）")

@@ -9,6 +9,7 @@ import com.codeatlas.server.security.TokenBlacklistService;
 import com.codeatlas.server.security.UserDetailsServiceImpl;
 import com.codeatlas.server.service.UserService;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -18,6 +19,7 @@ import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
+import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -29,6 +31,8 @@ import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.Map;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -230,6 +234,25 @@ class AuthControllerTest {
                 .andExpect(status().isBadRequest());
 
         verify(userService, never()).changePassword(anyLong(), anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("extractToken：无 Authorization 头与非 Bearer 前缀均返回 null（而非空串）")
+    void extractToken_absentOrNonBearer_shouldReturnNull() throws Exception {
+        AuthController controller = new AuthController(userService, tokenBlacklistService, jwtTokenProvider);
+        java.lang.reflect.Method method =
+                AuthController.class.getDeclaredMethod("extractToken", HttpServletRequest.class);
+        method.setAccessible(true);
+
+        assertNull(method.invoke(controller, new MockHttpServletRequest()));
+
+        MockHttpServletRequest nonBearer = new MockHttpServletRequest();
+        nonBearer.addHeader("Authorization", "Basic dXNlcjpwYXNz");
+        assertNull(method.invoke(controller, nonBearer));
+
+        MockHttpServletRequest bearer = new MockHttpServletRequest();
+        bearer.addHeader("Authorization", "Bearer real.token.value");
+        assertEquals("real.token.value", method.invoke(controller, bearer));
     }
 
     /**

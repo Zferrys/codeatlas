@@ -651,6 +651,27 @@ class AiModelServiceImplTest {
         assertEquals("live", result.get("listSource"));
     }
 
+    @Test
+    @DisplayName("listModels — TTL 边界：恰好 60_000ms 即视为过期，必须重新拉取")
+    void listModels_cacheTimestampExactlyAtTtl_shouldRefresh() throws IOException {
+        AtomicInteger requestCount = new AtomicInteger();
+        HttpServer server = startProvider("{\"data\":[{\"id\":\"m1\",\"name\":\"M1\"}]}", 200, null, requestCount);
+        AiModelServiceImpl service = newService(providers("deepseek", DEEPSEEK_KEY),
+                providers("deepseek", baseUrl(server)), Collections.emptyList(), "m1");
+        service.listModels(); // 先填充缓存
+
+        for (int i = 0; i < 200; i++) {
+            int before = requestCount.get();
+            // 缓存时间戳恰好为 TTL 之前（最宽松的过期边界，与读取同毫秒即恰等 60_000ms）
+            ReflectionTestUtils.setField(service, "cachedModelsAt", System.currentTimeMillis() - 60_000L);
+
+            service.listModels();
+
+            assertTrue(requestCount.get() > before,
+                    "恰好 60_000ms 应视为缓存已过期并重新拉取（第 " + (i + 1) + " 次迭代）");
+        }
+    }
+
     // ===================== testModel =====================
 
     @Test
@@ -736,6 +757,7 @@ class AiModelServiceImplTest {
         Object latency = result.get("latencyMs");
         assertTrue(latency instanceof Long);
         assertTrue((Long) latency >= 0L);
+        assertTrue((Long) latency < 10_000L, "latencyMs 应为真实毫秒级耗时，实际 " + latency);
     }
 
     @Test
@@ -829,5 +851,25 @@ class AiModelServiceImplTest {
         Method resolveProvider = AiModelServiceImpl.class.getDeclaredMethod("resolveProvider", String.class);
         resolveProvider.setAccessible(true);
         assertEquals("deepseek", resolveProvider.invoke(service, new Object[]{null}));
+    }
+
+    @Test
+    @DisplayName("findVisibleModel — 命中时返回完整模型条目而非空 map")
+    void findVisibleModel_hit_returnsFullModelEntry() throws Exception {
+        AiModelServiceImpl service = newService(providers("deepseek", DEEPSEEK_KEY), Collections.emptyMap(),
+                Collections.emptyList(), "deepseek-v4-pro");
+
+        Method findVisible = AiModelServiceImpl.class.getDeclaredMethod("findVisibleModel", String.class);
+        findVisible.setAccessible(true);
+        Object found = findVisible.invoke(service, new Object[]{"deepseek-v4-pro"});
+
+        assertTrue(found instanceof Map, "命中时应返回模型条目，实际: " + found);
+        Map<?, ?> entry = (Map<?, ?>) found;
+        Map<String, Object> expected = new LinkedHashMap<>();
+        expected.put("id", "deepseek-v4-pro");
+        expected.put("name", "DeepSeek-V4-Pro");
+        expected.put("provider", "deepseek");
+        expected.put("available", true);
+        assertEquals(expected, entry);
     }
 }

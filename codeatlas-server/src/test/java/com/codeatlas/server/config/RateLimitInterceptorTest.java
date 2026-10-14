@@ -330,4 +330,128 @@ class RateLimitInterceptorTest {
         assertEquals(1, ReflectionTestUtils.getField(interceptor, "maxRequests"));
         assertEquals(60_000L, ReflectionTestUtils.getField(interceptor, "windowMs"));
     }
+
+    // ---------- 覆盖率补强：代理头分支生效性与窗口边界（不改动上方既有用例） ----------
+
+    @Test
+    @DisplayName("IP 信任链：X-Forwarded-For 存在时以它为 key，不与 remoteAddr 共享窗口")
+    void clientIp_xForwardedForBranch_shouldProduceDistinctKeyFromRemoteAddr() throws Exception {
+        RateLimitInterceptor interceptor = new RateLimitInterceptor(1);
+        MockHttpServletRequest withXff = request("/api/x");
+        withXff.setRemoteAddr("5.5.5.5");
+        withXff.addHeader("X-Forwarded-For", "1.1.1.1");
+        MockHttpServletRequest plain = request("/api/x");
+        plain.setRemoteAddr("5.5.5.5");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        assertTrue(interceptor.preHandle(withXff, response, new Object()));
+        // XFF=1.1.1.1 与 remoteAddr=5.5.5.5 必须视为不同来源：第二个请求不应与第一个共享窗口
+        assertTrue(interceptor.preHandle(plain, response, new Object()));
+        assertEquals(0.0, counterCount("memory"));
+    }
+
+    @Test
+    @DisplayName("IP 信任链：X-Real-IP 与 remoteAddr 同 IP 时共享窗口（取值未被替换为空）")
+    void clientIp_xRealIpValue_shouldShareWindowWithRemoteAddr() throws Exception {
+        RateLimitInterceptor interceptor = new RateLimitInterceptor(1);
+        MockHttpServletRequest withRealIp = request("/api/x");
+        withRealIp.setRemoteAddr("5.5.5.5");
+        withRealIp.addHeader("X-Real-IP", "9.9.9.9");
+        MockHttpServletRequest plain = request("/api/x");
+        plain.setRemoteAddr("9.9.9.9");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        assertTrue(interceptor.preHandle(withRealIp, response, new Object()));
+        assertFalse(interceptor.preHandle(plain, response, new Object()));
+    }
+
+    @Test
+    @DisplayName("IP 信任链：X-Forwarded-For 最后一段与 remoteAddr 同 IP 时共享窗口")
+    void clientIp_xForwardedLastSegment_shouldShareWindowWithRemoteAddr() throws Exception {
+        RateLimitInterceptor interceptor = new RateLimitInterceptor(1);
+        MockHttpServletRequest withXff = request("/api/x");
+        withXff.setRemoteAddr("5.5.5.5");
+        withXff.addHeader("X-Forwarded-For", "client-a, 1.1.1.1");
+        MockHttpServletRequest plain = request("/api/x");
+        plain.setRemoteAddr("1.1.1.1");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        assertTrue(interceptor.preHandle(withXff, response, new Object()));
+        assertFalse(interceptor.preHandle(plain, response, new Object()));
+    }
+
+    @Test
+    @DisplayName("定期清理：时间戳恰等于两窗口保留边界时不删除（边界含等号）")
+    void cleanupStaleWindows_timestampExactlyAtCutoff_shouldBeKept() {
+        RateLimitInterceptor interceptor = new RateLimitInterceptor(10);
+        @SuppressWarnings("unchecked")
+        Map<String, ConcurrentLinkedDeque<Long>> windows =
+                (Map<String, ConcurrentLinkedDeque<Long>>) ReflectionTestUtils.getField(interceptor, "windows");
+        assertNotNull(windows);
+        long now = System.currentTimeMillis();
+        ConcurrentLinkedDeque<Long> exactlyAtCutoff = new ConcurrentLinkedDeque<>();
+        exactlyAtCutoff.addLast(now - 120_000L);
+        windows.put("exact:key", exactlyAtCutoff);
+
+        ReflectionTestUtils.invokeMethod(interceptor, "cleanupStaleWindows", now);
+
+        assertTrue(windows.containsKey("exact:key"), "恰等于 cutoff 的时间戳应保留");
+        assertEquals(1, windows.get("exact:key").size());
+    }
+
+    @Test
+    @DisplayName("滑动窗口：时间戳恰落在 60s 裁剪边界（cutoff）时保留并占满配额")
+    void slidingWindow_timestampExactlyAtCutoff_shouldBeKeptAndReject() throws Exception {
+        RateLimitInterceptor interceptor = new RateLimitInterceptor(1);
+        @SuppressWarnings("unchecked")
+        Map<String, ConcurrentLinkedDeque<Long>> windows =
+                (Map<String, ConcurrentLinkedDeque<Long>>) ReflectionTestUtils.getField(interceptor, "windows");
+        assertNotNull(windows);
+
+        // cutoff = now - 60_000；seed 取当前时刻减 60_000，preHandle 内读到同一毫秒时即命中“恰等于”边界
+        boolean observedRejection = false;
+        for (int attempt = 0; attempt < 500 && !observedRejection; attempt++) {
+            windows.clear();
+            long seed = System.currentTimeMillis() - 60_000L;
+            ConcurrentLinkedDeque<Long> deque = new ConcurrentLinkedDeque<>();
+            deque.addLast(seed);
+            windows.put("203.0.113.9:/api/x", deque);
+
+            boolean allowed = interceptor.preHandle(
+                    request("/api/x"), new MockHttpServletResponse(), new Object());
+            if (!allowed) {
+                observedRejection = true;
+            }
+        }
+        assertTrue(observedRejection,
+                "恰等于 cutoff 的旧时间戳应保留并占满配额（500 次尝试内应观察到拒绝）");
+    }
+
+    @Test
+    @DisplayName("定期清理触发边界：now - lastCleanupTime 恰等于 300000ms 时不清理（严格大于才清理）")
+    void preHandle_cleanupExactlyAtInterval_shouldNotTriggerCleanup() throws Exception {
+        RateLimitInterceptor interceptor = new RateLimitInterceptor(10_000);
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        Object handler = new Object();
+
+        // 条件为单点边界：lastCleanupTime 需恰等于 preHandle 内读取到的 now - 300000。
+        // 单次调用内 now 与设值时刻同毫秒的概率极高，迭代直至观测到“调用期间未回写清理时间”
+        // （原实现：恰相等时严格大于为假，不清理，字段保持哨兵值）。
+        // 若条件被改为 >=，则任何一次调用都必然清理并回写 now（now >= 哨兵 + 300000），
+        // 该观测将不可能出现——以此锁死边界方向。
+        boolean observedNoCleanupAtBoundary = false;
+        for (int attempt = 0; attempt < 1000 && !observedNoCleanupAtBoundary; attempt++) {
+            long sentinel = System.currentTimeMillis() - 300_000L;
+            ReflectionTestUtils.setField(interceptor, "lastCleanupTime", sentinel);
+
+            interceptor.preHandle(request("/api/v1/projects/boundary"), response, handler);
+
+            Long afterCall = (Long) ReflectionTestUtils.getField(interceptor, "lastCleanupTime");
+            if (afterCall != null && afterCall == sentinel) {
+                observedNoCleanupAtBoundary = true;
+            }
+        }
+        assertTrue(observedNoCleanupAtBoundary,
+                "now - lastCleanupTime 恰等于 300000ms 时不应触发清理（1000 次尝试内应观察到未清理）");
+    }
 }

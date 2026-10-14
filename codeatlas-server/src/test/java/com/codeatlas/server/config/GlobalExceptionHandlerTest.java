@@ -28,6 +28,7 @@ import org.springframework.security.access.AccessDeniedException;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.validation.BeanPropertyBindingResult;
+import org.springframework.validation.FieldError;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.context.request.async.AsyncRequestNotUsableException;
@@ -339,5 +340,53 @@ class GlobalExceptionHandlerTest {
 
         assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
         assertEquals("参数校验失败", response.getBody().getMessage());
+    }
+
+    // ==================== 边界码与校验明细精确性补强 ====================
+
+    @Test
+    @DisplayName("参数校验多个字段错误：明细按『字段: 消息』以『; 』连接")
+    void direct_shouldJoinFieldErrorsInOrder() throws Exception {
+        MethodParameter methodParameter = new MethodParameter(
+                ClientErrorProbeController.class.getMethod("typeMismatch", Long.class), 0);
+        BeanPropertyBindingResult bindingResult =
+                new BeanPropertyBindingResult(new Object(), "probe");
+        bindingResult.addError(new FieldError("probe", "username", "不能为空"));
+        bindingResult.addError(new FieldError("probe", "password", "长度不足"));
+        MethodArgumentNotValidException exception =
+                new MethodArgumentNotValidException(methodParameter, bindingResult);
+
+        ResponseEntity<ApiResponse<Void>> response = handler.handleValidation(exception);
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+        assertEquals("username: 不能为空; password: 长度不足", response.getBody().getMessage());
+    }
+
+    @Test
+    @DisplayName("mapHttpStatus：恰 30000 码（30000 段下界）映射 HTTP 400")
+    void direct_shouldMapExactlyThirtyThousandTo400() {
+        ResponseEntity<ApiResponse<Void>> response =
+                handler.handleBusiness(new BusinessException(30000, "边界码"));
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+        assertEquals(30000, response.getBody().getCode());
+    }
+
+    @Test
+    @DisplayName("mapHttpStatus：恰 20000 码（20000 段下界）映射 HTTP 503")
+    void direct_shouldMapExactlyTwentyThousandTo503() {
+        ResponseEntity<ApiResponse<Void>> response =
+                handler.handleBusiness(new BusinessException(20000, "边界码"));
+
+        assertEquals(HttpStatus.SERVICE_UNAVAILABLE, response.getStatusCode());
+    }
+
+    @Test
+    @DisplayName("mapHttpStatus：恰 10000 码（10000 段下界）映射 HTTP 400")
+    void direct_shouldMapExactlyTenThousandTo400() {
+        ResponseEntity<ApiResponse<Void>> response =
+                handler.handleBusiness(new BusinessException(10000, "边界码"));
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
     }
 }

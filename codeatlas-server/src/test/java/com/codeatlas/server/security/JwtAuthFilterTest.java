@@ -3,6 +3,7 @@ package com.codeatlas.server.security;
 import com.codeatlas.server.entity.User;
 import com.codeatlas.server.mapper.UserMapper;
 import jakarta.servlet.FilterChain;
+import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -214,6 +215,24 @@ class JwtAuthFilterTest {
         verify(filterChain).doFilter(request, response);
         verifyNoInteractions(userMapper);
         verify(jwtTokenProvider, never()).getUserId(anyString());
+    }
+
+    @Test
+    @DisplayName("extractToken：缺失 Authorization 或非 Bearer 前缀返回 null（而非空串）")
+    void extractToken_absentOrNonBearer_shouldReturnNull() throws Exception {
+        java.lang.reflect.Method method =
+                JwtAuthFilter.class.getDeclaredMethod("extractToken", HttpServletRequest.class);
+        method.setAccessible(true);
+
+        assertNull(method.invoke(filter, new MockHttpServletRequest()));
+
+        MockHttpServletRequest nonBearer = new MockHttpServletRequest();
+        nonBearer.addHeader("Authorization", "Basic dXNlcjpwYXNz");
+        assertNull(method.invoke(filter, nonBearer));
+
+        MockHttpServletRequest bearer = new MockHttpServletRequest();
+        bearer.addHeader("Authorization", "Bearer a.b.c");
+        assertEquals("a.b.c", method.invoke(filter, bearer));
     }
 
     @Test

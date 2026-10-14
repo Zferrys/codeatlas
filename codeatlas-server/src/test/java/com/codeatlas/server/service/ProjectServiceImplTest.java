@@ -24,6 +24,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -786,5 +787,107 @@ class ProjectServiceImplTest {
         verify(projectMapper).deleteById(1L);
         assertTrue(Files.exists(locked), "占用中的文件不应被删除");
         Files.deleteIfExists(locked);
+    }
+
+    // ==================== 变异补强：创建字段逐项落库 / 分页偏移 / VO 全字段 / 更新描述 ====================
+
+    @Test
+    @DisplayName("创建项目：非法 Git URL 被 SourceUrlValidator 拦截抛 400 且不落库")
+    void createProject_invalidGitUrl_shouldThrow400BeforeInsert() {
+        CreateProjectRequest request = new CreateProjectRequest();
+        request.setName("P");
+        request.setSourceType("GIT_URL");
+        request.setSourceUrl("ftp://example.com/repo.git");
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> projectService.createProject(request, 1L));
+
+        assertEquals(400, ex.getCode());
+        assertEquals("Git URL 格式不正确，示例：https://github.com/user/repo.git", ex.getMessage());
+        verify(projectMapper, never()).insert(any(Project.class));
+    }
+
+    @Test
+    @DisplayName("创建项目：全部实体字段精确落库（含默认分支 main 与初始计数）")
+    void createProject_shouldPersistAllEntityFields() {
+        CreateProjectRequest request = new CreateProjectRequest();
+        request.setName("FullProject");
+        request.setDescription("完整描述");
+        request.setSourceType("GIT_URL");
+        request.setSourceUrl("https://example.com/full/repo.git");
+
+        doAnswer(invocation -> {
+            Project p = invocation.getArgument(0);
+            p.setId(50L);
+            return 1;
+        }).when(projectMapper).insert(any(Project.class));
+
+        projectService.createProject(request, 7L);
+
+        ArgumentCaptor<Project> captor = ArgumentCaptor.forClass(Project.class);
+        verify(projectMapper).insert(captor.capture());
+        Project saved = captor.getValue();
+        assertEquals("FullProject", saved.getName());
+        assertEquals("完整描述", saved.getDescription());
+        assertEquals("GIT_URL", saved.getSourceType());
+        assertEquals("https://example.com/full/repo.git", saved.getSourceUrl());
+        assertEquals("main", saved.getDefaultBranch());
+        assertEquals("Java", saved.getLanguage());
+        assertEquals(Integer.valueOf(0), saved.getTotalClasses());
+        assertEquals(Integer.valueOf(0), saved.getTotalModules());
+        assertEquals(BigDecimal.ZERO, saved.getHealthScore());
+        assertEquals(Long.valueOf(7L), saved.getCreatedBy());
+    }
+
+    @Test
+    @DisplayName("项目列表：第 2 页 offset=(2-1)*10=10 精确透传（乘法而非除法）")
+    void listProjects_pageTwo_shouldUseOffsetTen() {
+        when(projectMapper.findByUserIdPaged(1L, 10, 10)).thenReturn(List.of());
+
+        projectService.listProjects(1L, 2, 10);
+
+        verify(projectMapper).findByUserIdPaged(1L, 10, 10);
+    }
+
+    @Test
+    @DisplayName("项目列表：VO 全字段精确映射（id/描述/健康分/类数/模块数/最近扫描/创建时间）")
+    void listProjects_shouldMapAllVoFieldsExactly() {
+        Project p = createProject(7L, "Proj7");
+        p.setDescription("desc-7");
+        p.setHealthScore(new BigDecimal("88.50"));
+        p.setTotalClasses(12);
+        p.setTotalModules(3);
+        p.setLastScanId(500L);
+        p.setCreatedAt(LocalDateTime.of(2026, 1, 2, 3, 4, 5));
+
+        when(projectMapper.findByUserIdPaged(1L, 0, 10)).thenReturn(List.of(p));
+        when(scanMapper.findById(500L)).thenReturn(null);
+        when(classSummaryMapper.countLayerByScanId(500L)).thenReturn(List.of());
+
+        PageResult<ProjectVO> result = projectService.listProjects(1L, 1, 10);
+
+        ProjectVO vo = result.getRecords().get(0);
+        assertEquals(Long.valueOf(7L), vo.getId());
+        assertEquals("desc-7", vo.getDescription());
+        assertEquals(new BigDecimal("88.50"), vo.getHealthScore());
+        assertEquals(Integer.valueOf(12), vo.getTotalClasses());
+        assertEquals(Integer.valueOf(3), vo.getTotalModules());
+        assertEquals(Long.valueOf(500L), vo.getLastScanId());
+        assertEquals(LocalDateTime.of(2026, 1, 2, 3, 4, 5), vo.getCreatedAt());
+    }
+
+    @Test
+    @DisplayName("更新项目：描述在持久化前写入实体并体现在返回 VO")
+    void updateProject_shouldWriteDescriptionBeforeUpdate() {
+        Project p = createProject(1L, "OldName");
+        when(projectMapper.findById(1L)).thenReturn(p);
+
+        ProjectVO result = projectService.updateProject(1L, "NewName", "全新描述", 1L);
+
+        assertEquals("全新描述", result.getDescription());
+
+        ArgumentCaptor<Project> captor = ArgumentCaptor.forClass(Project.class);
+        verify(projectMapper).update(captor.capture());
+        assertEquals("全新描述", captor.getValue().getDescription());
     }
 }

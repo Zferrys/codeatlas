@@ -4,6 +4,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.nio.charset.StandardCharsets;
+
 import static org.junit.jupiter.api.Assertions.*;
 
 @DisplayName("JwtTokenProvider 单元测试")
@@ -67,6 +69,20 @@ class JwtTokenProviderTest {
     @DisplayName("短密钥抛异常（需至少 32 字节）")
     void shouldRejectShortKey() {
         assertThrows(IllegalStateException.class, () -> new JwtTokenProvider("short", EXPIRATION_HOURS));
+    }
+
+    @Test
+    @DisplayName("密钥恰为 32 字节：构造成功且可正常签发/解析（边界含等号）")
+    void shouldAcceptExactly32ByteKey() {
+        String exact32 = "0123456789abcdef0123456789abcdef"; // 32 个 ASCII 字符 = 32 字节
+        assertEquals(32, exact32.getBytes(StandardCharsets.UTF_8).length);
+
+        JwtTokenProvider provider = new JwtTokenProvider(exact32, EXPIRATION_HOURS);
+
+        String token = provider.generateToken(9L, "edge", "DEVELOPER");
+        assertEquals(9L, provider.getUserId(token));
+        assertEquals("edge", provider.getUsername(token));
+        assertEquals("DEVELOPER", provider.getRole(token));
     }
 
     @Test

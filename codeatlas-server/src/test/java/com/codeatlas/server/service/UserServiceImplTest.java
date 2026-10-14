@@ -9,6 +9,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -16,6 +17,7 @@ import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.lang.reflect.Method;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
@@ -100,6 +102,19 @@ class UserServiceImplTest {
 
         assertThrows(BusinessException.class,
                 () -> userService.register("test", "12345678", null));
+    }
+
+    @Test
+    @DisplayName("isPasswordStrong 私有 null 防御：直接传入 null 判定为弱密码")
+    void isPasswordStrong_nullPassword_shouldReturnFalse() throws Exception {
+        // register / changePassword 两个公开入口都会先判 password == null（短路）再调用本方法，
+        // null 输入永远到达不了方法体内的 null 防御分支；反射直达该分支，锁死其返回 false。
+        Method method = UserServiceImpl.class.getDeclaredMethod("isPasswordStrong", String.class);
+        method.setAccessible(true);
+
+        Object result = method.invoke(userService, new Object[] { null });
+
+        assertEquals(Boolean.FALSE, result, "null 密码必须判定为弱密码");
     }
 
     // ========== login ==========
@@ -385,5 +400,82 @@ class UserServiceImplTest {
         assertThrows(BusinessException.class,
                 () -> userService.changePassword(1L, "Old@1234", null));
         verify(userMapper, never()).updatePassword(anyLong(), anyString());
+    }
+
+    // ==================== 变异补强：密码强度边界与注册字段逐项落库 ====================
+
+    private static String repeatChar(char c, int n) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < n; i++) {
+            sb.append(c);
+        }
+        return sb.toString();
+    }
+
+    @Test
+    @DisplayName("注册：用户名为下限 3 字符通过校验，恰 3 类字符的 8 位密码通过强度校验并逐字段落库")
+    void register_minBoundariesAndExactlyThreeCategories_shouldPersistAllFields() {
+        when(passwordEncoder.encode("Abcdef12")).thenReturn("ENCODED_ABCDEF12");
+
+        Map<String, Object> result = userService.register("abc", "Abcdef12", "e@t.com");
+
+        assertEquals("abc", result.get("username"));
+        assertEquals("DEVELOPER", result.get("role"));
+
+        ArgumentCaptor<User> captor = ArgumentCaptor.forClass(User.class);
+        verify(userMapper).insert(captor.capture());
+        User saved = captor.getValue();
+        assertEquals("abc", saved.getUsername());
+        assertEquals("ENCODED_ABCDEF12", saved.getPasswordHash());
+        assertEquals("e@t.com", saved.getEmail());
+        assertEquals("DEVELOPER", saved.getRole());
+        assertEquals(Integer.valueOf(1), saved.getStatus());
+    }
+
+    @Test
+    @DisplayName("注册：小写+数字+特殊（无大写）三类字符的 8 位密码应为强密码")
+    void register_lowerDigitSpecial_shouldBeStrong() {
+        when(passwordEncoder.encode("abcdef1!")).thenReturn("ENCODED_LDS");
+
+        Map<String, Object> result = userService.register("abcdef", "abcdef1!", null);
+
+        assertEquals("abcdef", result.get("username"));
+        verify(userMapper).insert(any(User.class));
+    }
+
+    @Test
+    @DisplayName("注册：仅两类字符（小写+数字）判为弱密码，拒绝且不落库")
+    void register_twoCategories_shouldRejectAsWeakPassword() {
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> userService.register("weakuser", "abcdefg1", null));
+
+        assertEquals(40003, ex.getCode());
+        verify(userMapper, never()).insert(any(User.class));
+    }
+
+    @Test
+    @DisplayName("注册：用户名为上限 50 字符通过校验（边界含等号）")
+    void register_usernameAtMaxLength_shouldSucceed() {
+        String username50 = repeatChar('u', 50);
+        when(passwordEncoder.encode("Abcdef12")).thenReturn("ENC50");
+
+        Map<String, Object> result = userService.register(username50, "Abcdef12", null);
+
+        assertEquals(username50, result.get("username"));
+        verify(userMapper).insert(any(User.class));
+    }
+
+    @Test
+    @DisplayName("登录密码错误且接入 Redis：写入失败计数 login:attempts 键")
+    void login_wrongPassword_withRedis_shouldRecordFailure() {
+        injectRedis();
+        when(valueOperations.get("login:lock:testuser")).thenReturn(null);
+        when(userMapper.findByUsername("testuser")).thenReturn(loginUser(1L, "testuser", "DEVELOPER"));
+        when(passwordEncoder.matches("wrong", "hashed_pw")).thenReturn(false);
+
+        assertThrows(BusinessException.class, () -> userService.login("testuser", "wrong"));
+
+        verify(valueOperations).increment("login:attempts:testuser", 1);
+        verify(userMapper, never()).updateLoginTime(anyLong());
     }
 }

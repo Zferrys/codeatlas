@@ -14,6 +14,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.util.Collections;
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.verify;
@@ -60,6 +61,14 @@ class ChatHistoryServiceImplTest {
         verify(chatHistoryMapper).insert(entity);
         verify(chatHistoryMapper).pruneBeyondLatest(USER_ID, PROJECT_ID, SCOPE,
                 ChatHistoryService.MAX_HISTORY_PER_SCOPE);
+    }
+
+    @Test
+    @DisplayName("record(null)：静默跳过不抛异常（跳过日志不触发 NPE）")
+    void record_nullEntity_shouldSkipWithoutException() {
+        assertDoesNotThrow(() -> service.record(null));
+
+        verifyNoInteractions(chatHistoryMapper);
     }
 
     @Test
