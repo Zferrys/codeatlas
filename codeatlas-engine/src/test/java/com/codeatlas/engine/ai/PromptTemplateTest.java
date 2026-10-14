@@ -42,4 +42,27 @@ class PromptTemplateTest {
 
         assertEquals("", template.render(new HashMap<>()));
     }
+
+    @Test
+    @DisplayName("getTemplatePath 返回构造时的原始路径（含未找到的模板）")
+    void getTemplatePath_shouldReturnOriginalPath() {
+        PromptTemplate existing = new PromptTemplate("prompts/test-escape.md");
+        PromptTemplate missing = new PromptTemplate("prompts/definitely-not-exists.md");
+
+        assertEquals("prompts/test-escape.md", existing.getTemplatePath());
+        assertEquals("prompts/definitely-not-exists.md", missing.getTemplatePath());
+    }
+
+    @Test
+    @DisplayName("同名模板重复实例化命中缓存：内容一致且不重复加载")
+    void render_cachedTemplate_shouldProduceSameResult() {
+        PromptTemplate first = new PromptTemplate("prompts/test-escape.md");
+        PromptTemplate second = new PromptTemplate("prompts/test-escape.md");
+        Map<String, String> vars = new HashMap<>();
+        vars.put("name", "N");
+        vars.put("path", "P");
+
+        assertEquals(first.render(vars), second.render(vars));
+        assertEquals("Name: N\nPath: P\n", second.render(vars));
+    }
 }
