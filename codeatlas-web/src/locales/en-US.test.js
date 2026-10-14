@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import enUS from './en-US'
 import zhCN from './zh-CN'
 
@@ -19,6 +19,17 @@ function collectLeafValues(node) {
   })
 }
 
+/**
+ * 在用例体内重置模块注册表后重新加载：模块求值期（import 时）创建的
+ * 对象字面量与字符串才会被归属到本用例。静态 import 发生在收集阶段，
+ * 其模块求值不属于任何用例的执行窗口，导致 locale 表变异无法被覆盖。
+ */
+async function loadFreshLocales() {
+  vi.resetModules()
+  const [enModule, zhModule] = await Promise.all([import('./en-US'), import('./zh-CN')])
+  return { enUS: enModule.default, zhCN: zhModule.default }
+}
+
 describe('en-US locale', () => {
   it('enUS_whenComparedWithZhCN_shouldHaveIdenticalKeyStructure', () => {
     const enKeys = collectKeyPaths(enUS).sort()
@@ -36,6 +47,30 @@ describe('en-US locale', () => {
       expect(typeof value).toBe('string')
       expect(value.trim().length).toBeGreaterThan(0)
     }
+  })
+
+  it('enUS_whenFreshlyImported_shouldHaveExactly156NonEmptyStringLeaves', async () => {
+    const { enUS: freshEn, zhCN: freshZh } = await loadFreshLocales()
+
+    const enLeaves = collectLeafValues(freshEn)
+    const zhLeaves = collectLeafValues(freshZh)
+
+    expect(enLeaves.length).toBe(156)
+    expect(zhLeaves.length).toBe(156)
+    for (const value of [...enLeaves, ...zhLeaves]) {
+      expect(typeof value).toBe('string')
+      expect(value.trim().length).toBeGreaterThan(0)
+    }
+  })
+
+  it('enUS_whenFreshlyImported_shouldHaveExactly156KeyPathsMatchingZhCN', async () => {
+    const { enUS: freshEn, zhCN: freshZh } = await loadFreshLocales()
+
+    const enKeys = collectKeyPaths(freshEn).sort()
+    const zhKeys = collectKeyPaths(freshZh).sort()
+
+    expect(enKeys.length).toBe(156)
+    expect(enKeys).toEqual(zhKeys)
   })
 
   it('enUS_whenKeyNodes_shouldRenderEnglishCopy', () => {

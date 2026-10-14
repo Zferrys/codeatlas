@@ -62,6 +62,7 @@ describe('useAiTask', () => {
     activeTask.value = null
     vi.useRealTimers()
     vi.unstubAllGlobals()
+    vi.restoreAllMocks()
   })
 
   it('AI_TASK_CANCELLED_whenInspected_shouldBeASymbolSentinel', () => {
@@ -415,5 +416,268 @@ describe('useAiTask', () => {
 
     // 格式满足服务端 [A-Za-z0-9_-]{8,64}
     expect(capturedTaskId).toMatch(/^aitask-[a-z0-9]+-[a-z0-9]+$/)
+  })
+
+  it('generateTaskId_whenCryptoRandomUUIDAvailable_shouldBuildExactUuidTaskId', async () => {
+    const randomUUID = vi.fn(() => '11111111-2222-3333-4444-555555555555')
+    vi.stubGlobal('crypto', { randomUUID })
+    fetchMock.mockResolvedValue(sseResponse([]))
+    let capturedTaskId
+    const execute = vi.fn(({ taskId }) => {
+      capturedTaskId = taskId
+      return 'R'
+    })
+
+    await expect(runAiTask({ projectId: 1, label: 'L', execute })).resolves.toBe('R')
+
+    expect(capturedTaskId).toBe('aitask-11111111-2222-3333-4444-555555555555')
+    expect(randomUUID).toHaveBeenCalledTimes(1)
+  })
+
+  it('generateTaskId_whenCryptoExistsButLacksRandomUUID_shouldFallbackToTimestampTaskId', async () => {
+    // crypto 存在但没有 randomUUID 方法：应走降级分支而非调用不存在的方法
+    vi.stubGlobal('crypto', {})
+    fetchMock.mockResolvedValue(sseResponse([]))
+    let capturedTaskId
+    const execute = vi.fn(({ taskId }) => {
+      capturedTaskId = taskId
+      return 'R'
+    })
+
+    await expect(runAiTask({ projectId: 1, label: 'L', execute })).resolves.toBe('R')
+
+    expect(capturedTaskId).toMatch(/^aitask-[a-z0-9]+-[a-z0-9]+$/)
+  })
+
+  it('cancelActiveAiTask_whenTaskShownButTransportsAbsent_shouldUpdateStageWithoutThrowing', () => {
+    // activeTask 有值但控制器为空（未真实启动传输）：守卫应跳过 abort 而非抛错
+    activeTask.value = { id: 'aitask-ghost', label: 'L', stage: '处理中', startedAt: 0, elapsedSec: 0 }
+
+    expect(() => cancelActiveAiTask()).not.toThrow()
+    expect(activeTask.value.stage).toBe('正在终止…')
+
+    activeTask.value = null
+  })
+
+  it('elapsedTick_whenActiveTaskCleared_shouldSkipUpdateWithoutThrowing', async () => {
+    // 定时回调在 activeTask 为 null 时须安全跳过，不得读取 null.id
+    let tick
+    const setIntervalSpy = vi.spyOn(globalThis, 'setInterval').mockImplementation((fn) => {
+      tick = fn
+      return 12345
+    })
+    vi.spyOn(globalThis, 'clearInterval').mockImplementation(() => {})
+    fetchMock.mockResolvedValue(sseResponse([]))
+    const execute = pendingExecute()
+
+    const runPromise = runAiTask({ projectId: 1, label: 'L', execute })
+    expect(typeof tick).toBe('function')
+
+    activeTask.value = null
+    expect(() => tick()).not.toThrow()
+
+    resolveExecute('R')
+    await expect(runPromise).resolves.toBe('R')
+
+    setIntervalSpy.mockRestore()
+  })
+
+  it('runAiTask_whenExecuteRejectsWithErrCanceledCodeAndNoCancelRequest_shouldReturnSentinel', async () => {
+    // 仅凭 code=ERR_CANCELED 判定终止：不经过 cancelActiveAiTask 也应返回哨兵
+    fetchMock.mockResolvedValue(sseResponse([]))
+    const execute = vi.fn(() =>
+      Promise.reject(Object.assign(new Error('canceled by code'), { code: 'ERR_CANCELED' }))
+    )
+
+    const result = await runAiTask({ projectId: 1, label: 'L', execute })
+
+    expect(result).toBe(AI_TASK_CANCELLED)
+    expect(infoMock).toHaveBeenCalledWith('已终止本次任务')
+    expect(activeTask.value).toBeNull()
+  })
+
+  it('runAiTask_whenExecuteRejectsWithNull_shouldRethrowNullWithoutTouchingFields', async () => {
+    // 拒绝值为 null：可选链须短路，原样抛出 null 而非在 error 上取字段抛 TypeError
+    fetchMock.mockResolvedValue(sseResponse([]))
+    const execute = vi.fn(() => Promise.reject(null))
+
+    const caught = await runAiTask({ projectId: 1, label: 'L', execute }).catch((err) => err)
+
+    expect(caught).toBeNull()
+    expect(activeTask.value).toBeNull()
+  })
+
+  it('cleanupAiTask_whenTaskCompletes_shouldClearElapsedInterval', async () => {
+    vi.useFakeTimers()
+    fetchMock.mockResolvedValue(sseResponse([]))
+    const execute = pendingExecute()
+
+    const runPromise = runAiTask({ projectId: 1, label: 'L', execute })
+    await vi.advanceTimersByTimeAsync(0)
+    resolveExecute('R')
+    await runPromise
+
+    // 任务收尾后周期计时器必须被清除，不允许遗留
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('cleanupAiTask_whenTaskCompletes_shouldAbortSseTransport', async () => {
+    let sseSignal
+    fetchMock.mockImplementation((url, options) => {
+      sseSignal = options.signal
+      return Promise.resolve(sseResponse([]))
+    })
+    const execute = pendingExecute()
+
+    const runPromise = runAiTask({ projectId: 1, label: 'L', execute })
+    await flush()
+
+    resolveExecute('R')
+    await expect(runPromise).resolves.toBe('R')
+
+    expect(sseSignal.aborted).toBe(true)
+  })
+
+  it('subscribeProgress_whenResponseNotOk_shouldSkipStreamProcessingEvenIfBodyPresent', async () => {
+    // ok=false 且 body 存在：直接返回，绝不消费流事件
+    const sse = controlledSseStream()
+    fetchMock.mockResolvedValue({ status: 503, ok: false, body: sse.stream })
+    const execute = pendingExecute()
+
+    const runPromise = runAiTask({ projectId: 1, label: 'L', execute })
+    await flush()
+
+    sse.push('data: {"message":"不应被处理"}\n\n')
+    await flush()
+    expect(activeTask.value.stage).toBe('正在连接 AI 服务…')
+
+    resolveExecute('R')
+    await expect(runPromise).resolves.toBe('R')
+  })
+
+  it('subscribeProgress_whenMultibyteCharSplitAcrossChunks_shouldDecodeWithStreaming', async () => {
+    // UTF-8 多字节字符跨 chunk 切断：须以 stream 模式解码，避免替换字符污染消息
+    let controller
+    const stream = new ReadableStream({ start(c) { controller = c } })
+    fetchMock.mockResolvedValue({ status: 200, ok: true, body: stream })
+    const execute = pendingExecute()
+
+    const runPromise = runAiTask({ projectId: 1, label: 'L', execute })
+    await flush()
+
+    // 'data: {"message":"' 恰 18 字节，1 个汉字 3 字节；在 20 字节处切在第 1 个汉字中间
+    const bytes = new TextEncoder().encode('data: {"message":"中文进度"}\n\n')
+    controller.enqueue(bytes.slice(0, 20))
+    await flush()
+    controller.enqueue(bytes.slice(20))
+    await flush()
+
+    expect(activeTask.value.stage).toBe('中文进度')
+
+    resolveExecute('R')
+    await expect(runPromise).resolves.toBe('R')
+  })
+
+  it('subscribeProgress_whenNonDataLineHappensToBeValidJson_shouldStillSkipIt', async () => {
+    // 无 data: 前缀的行必须跳过。字符串刻意设计为「剥掉前 5 字符后恰是合法 JSON」，
+    // 使跳过与否仅取决于前缀判定，而非顺带被 JSON.parse 失败掩盖
+    const sse = controlledSseStream()
+    fetchMock.mockResolvedValue({ status: 200, ok: true, body: sse.stream })
+    const execute = pendingExecute()
+
+    const runPromise = runAiTask({ projectId: 1, label: 'L', execute })
+    await flush()
+
+    sse.push('00000{"message":"无前缀不应生效"}\n\n')
+    await flush()
+    expect(activeTask.value.stage).toBe('正在连接 AI 服务…')
+
+    sse.push('data: {"message":"正常事件"}\n\n')
+    await flush()
+    expect(activeTask.value.stage).toBe('正常事件')
+
+    resolveExecute('R')
+    await expect(runPromise).resolves.toBe('R')
+  })
+
+  it('subscribeProgress_whenDataLineHasUnicodeWhitespace_shouldTrimBeforeParse', async () => {
+    // U+00A0 不属于 JSON 允许的空白：解析前必须 trim 才能成功
+    const sse = controlledSseStream()
+    fetchMock.mockResolvedValue({ status: 200, ok: true, body: sse.stream })
+    const execute = pendingExecute()
+
+    const runPromise = runAiTask({ projectId: 1, label: 'L', execute })
+    await flush()
+
+    sse.push('data: \u00A0{"message":"nbsp前缀"}\n\n')
+    await flush()
+    expect(activeTask.value.stage).toBe('nbsp前缀')
+
+    resolveExecute('R')
+    await expect(runPromise).resolves.toBe('R')
+  })
+
+  it('subscribeProgress_whenDoneEvent_shouldCancelReaderStream', async () => {
+    // DONE 后必须主动 reader.cancel()，让服务端感知订阅结束
+    let controller
+    const cancelSpy = vi.fn()
+    const stream = new ReadableStream({ start(c) { controller = c }, cancel: cancelSpy })
+    fetchMock.mockResolvedValue({ status: 200, ok: true, body: stream })
+    const execute = pendingExecute()
+
+    const runPromise = runAiTask({ projectId: 1, label: 'L', execute })
+    await flush()
+
+    controller.enqueue(new TextEncoder().encode('data: {"stage":"DONE"}\n\n'))
+    await flush()
+    await flush()
+    expect(cancelSpy).toHaveBeenCalledTimes(1)
+
+    resolveExecute('R')
+    await expect(runPromise).resolves.toBe('R')
+  })
+
+  it('subscribeProgress_whenActiveTaskVanishesMidStream_shouldKeepSubscriptionAlive', async () => {
+    // activeTask 为 null 的事件应被跳过而非中断订阅：后续事件仍要能生效
+    const sse = controlledSseStream()
+    fetchMock.mockResolvedValue({ status: 200, ok: true, body: sse.stream })
+    const execute = pendingExecute()
+
+    const runPromise = runAiTask({ projectId: 1, label: 'L', execute })
+    await flush()
+
+    const realTask = activeTask.value
+    activeTask.value = null
+    sse.push('data: {"message":"任务不在时的事件"}\n\n')
+    await flush()
+    activeTask.value = realTask
+
+    sse.push('data: {"message":"恢复后的事件"}\n\n')
+    await flush()
+    expect(activeTask.value.stage).toBe('恢复后的事件')
+
+    resolveExecute('R')
+    await expect(runPromise).resolves.toBe('R')
+  })
+
+  it('subscribeProgress_whenEventHasNeitherMessageNorTaskId_shouldKeepCurrentStage', async () => {
+    // 仅有 stage 字段的事件不满足任何展示分支：保持当前阶段不被覆写
+    const sse = controlledSseStream()
+    fetchMock.mockResolvedValue({ status: 200, ok: true, body: sse.stream })
+    const execute = pendingExecute()
+
+    const runPromise = runAiTask({ projectId: 1, label: 'L', execute })
+    await flush()
+
+    sse.push('data: {"message":"阶段X"}\n\n')
+    await flush()
+    expect(activeTask.value.stage).toBe('阶段X')
+
+    sse.push('data: {"stage":"SCANNING"}\n\n')
+    await flush()
+    expect(activeTask.value.stage).toBe('阶段X')
+
+    resolveExecute('R')
+    await expect(runPromise).resolves.toBe('R')
   })
 })

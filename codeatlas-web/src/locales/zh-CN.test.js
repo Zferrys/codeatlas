@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import zhCN from './zh-CN'
 import enUS from './en-US'
 
@@ -17,6 +17,17 @@ function collectLeafValues(node) {
     const isPlainObject = value !== null && typeof value === 'object' && !Array.isArray(value)
     return isPlainObject ? collectLeafValues(value) : [value]
   })
+}
+
+/**
+ * 在用例体内重置模块注册表后重新加载：模块求值期（import 时）创建的
+ * 对象字面量与字符串才会被归属到本用例。静态 import 发生在收集阶段，
+ * 其模块求值不属于任何用例的执行窗口，导致 locale 表变异无法被覆盖。
+ */
+async function loadFreshLocales() {
+  vi.resetModules()
+  const [enModule, zhModule] = await Promise.all([import('./en-US'), import('./zh-CN')])
+  return { enUS: enModule.default, zhCN: zhModule.default }
 }
 
 describe('zh-CN locale', () => {
@@ -42,6 +53,30 @@ describe('zh-CN locale', () => {
     expect(Object.keys(zhCN).sort()).toEqual([
       'auth', 'brand', 'common', 'dashboard', 'nav', 'profile', 'project', 'search'
     ])
+  })
+
+  it('zhCN_whenFreshlyImported_shouldHaveExactly156NonEmptyStringLeaves', async () => {
+    const { zhCN: freshZh, enUS: freshEn } = await loadFreshLocales()
+
+    const zhLeaves = collectLeafValues(freshZh)
+    const enLeaves = collectLeafValues(freshEn)
+
+    expect(zhLeaves.length).toBe(156)
+    expect(enLeaves.length).toBe(156)
+    for (const value of [...zhLeaves, ...enLeaves]) {
+      expect(typeof value).toBe('string')
+      expect(value.trim().length).toBeGreaterThan(0)
+    }
+  })
+
+  it('zhCN_whenFreshlyImported_shouldHaveExactly156KeyPathsMatchingEnUS', async () => {
+    const { zhCN: freshZh, enUS: freshEn } = await loadFreshLocales()
+
+    const zhKeys = collectKeyPaths(freshZh).sort()
+    const enKeys = collectKeyPaths(freshEn).sort()
+
+    expect(zhKeys.length).toBe(156)
+    expect(zhKeys).toEqual(enKeys)
   })
 
   it('zhCN_whenKeyNodes_shouldRenderChineseCopy', () => {

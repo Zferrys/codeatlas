@@ -58,4 +58,15 @@ describe('renderMarkdown', () => {
     expect(highlightSpy).not.toHaveBeenCalled()
     expect(out).toContain('hljs')
   })
+
+  it('renderMarkdown_whenFreshlyImported_shouldApplyLangPrefixAndHighlightExtension', async () => {
+    // marked.use 配置在模块求值期执行：须在用例体内重载模块，拦截式变异体才能被归属并杀灭
+    vi.resetModules()
+    const fresh = await import('./markdown')
+
+    const out = fresh.renderMarkdown('```js\nconst x = 1\n```')
+
+    expect(out).toContain('class="hljs language-js"')
+    expect(out).toContain('hljs-keyword')
+  })
 })

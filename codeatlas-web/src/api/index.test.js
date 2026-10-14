@@ -232,6 +232,101 @@ describe('response interceptor', () => {
       expect.objectContaining({ type: 'api_error', url: undefined, status: 502 })
     )
   })
+
+  it('response_whenStatusExactly400_shouldStillReportWithStatusCode', async () => {
+    const error = { config: { url: '/edge' }, response: { status: 400, data: {}, headers: {} } }
+
+    await expect(onResponseError(error)).rejects.toBe(error)
+
+    expect(reportMock).toHaveBeenCalledTimes(1)
+    expect(reportMock).toHaveBeenCalledWith(expect.objectContaining({ status: 400 }))
+    expect(messageError).toHaveBeenCalledWith('请求失败 (400)')
+  })
+
+  it('response_whenStatusBelow400WithResponse_shouldNotReportAsApiError', async () => {
+    // 错误回调收到 <400 响应（如被拦截的 3xx）：报告守卫应放行而非一律上报
+    const error = { config: { url: '/odd' }, response: { status: 302, data: {}, headers: {} } }
+
+    await expect(onResponseError(error)).rejects.toBe(error)
+
+    expect(reportMock).not.toHaveBeenCalled()
+    expect(messageError).toHaveBeenCalledWith('请求失败 (302)')
+  })
+
+  it('response_whenHeadersMissing_shouldStillReportWithUndefinedTraceId', async () => {
+    const error = { config: { url: '/no-headers' }, response: { status: 502, data: {} } }
+
+    await expect(onResponseError(error)).rejects.toBe(error)
+
+    expect(reportMock).toHaveBeenCalledWith(expect.objectContaining({ status: 502, traceId: undefined }))
+  })
+
+  it('response_when500AndDataMissing_shouldFallbackToGenericText', async () => {
+    const error = { config: { url: '/x' }, response: { status: 500, headers: {} } }
+
+    await expect(onResponseError(error)).rejects.toBe(error)
+
+    expect(messageError).toHaveBeenCalledWith('服务器内部错误')
+  })
+
+  it('response_whenOtherStatusAndDataMissing_shouldFallbackToStatusText', async () => {
+    const error = { config: { url: '/x' }, response: { status: 418, headers: {} } }
+
+    await expect(onResponseError(error)).rejects.toBe(error)
+
+    expect(messageError).toHaveBeenCalledWith('请求失败 (418)')
+  })
+
+  it('response_whenErrorIsNullish_shouldRejectWithDestructureFailureBeforeTouchingFields', () => {
+    // null 错误的取消判定不应先于解构读取字段：缺少可选链会改在错误行崩溃
+    let rejection
+    try {
+      onResponseError(null)
+    } catch (e) {
+      rejection = e
+    }
+
+    expect(rejection).toBeInstanceOf(TypeError)
+    expect(rejection.message).toMatch(/destructure/i)
+  })
+})
+
+// 模块求值期（axios.create 配置对象、拦截器箭头函数）创建的静态变异体
+// 只有在用例体内重新加载模块，执行才会被归属到本用例并被变异测试执行
+describe('api fresh module load', () => {
+  beforeEach(resetBehaviorMocks)
+
+  async function loadFreshApi() {
+    vi.resetModules()
+    const freshModule = await import('./index')
+    return {
+      api: freshModule.default,
+      freshCreateArgs: createMock.mock.calls.at(-1)[0],
+      freshOnRequestError: requestUse.mock.calls.at(-1)[1],
+      freshOnResponse: responseUse.mock.calls.at(-1)[0]
+    }
+  }
+
+  it('api_whenFreshlyImported_shouldCreateInstanceWithExactV1BaseURLConfig', async () => {
+    const { api: freshApi, freshCreateArgs } = await loadFreshApi()
+
+    expect(freshCreateArgs).toEqual({ baseURL: '/api/v1', timeout: 120000 })
+    expect(freshApi).toBe(instance)
+  })
+
+  it('request_whenFreshlyImportedAndRejected_shouldPassThroughTheError', async () => {
+    const { freshOnRequestError } = await loadFreshApi()
+    const error = new Error('fresh interceptor down')
+
+    await expect(freshOnRequestError(error)).rejects.toBe(error)
+  })
+
+  it('response_whenFreshlyImportedAndSuccess_shouldPassThroughUntouched', async () => {
+    const { freshOnResponse } = await loadFreshApi()
+    const response = { data: { ok: true }, status: 200 }
+
+    expect(freshOnResponse(response)).toBe(response)
+  })
 })
 
 describe('handleUnauthorized', () => {

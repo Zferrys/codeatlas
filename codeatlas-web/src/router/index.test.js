@@ -115,6 +115,62 @@ describe('route table', () => {
       expect(module.default).toBeTruthy()
     }
   })
+
+  // 模块在用例内动态加载（vi.resetModules + import）：模块求值期执行的静态变异体
+  // 才会被归属到本文件的用例，否则路由表结构变异只能由 main.test.js 覆盖
+  it('routes_whenFreshlyImported_shouldMatchExactRouteTableShape', async () => {
+    vi.resetModules()
+    const { default: freshRouter } = await import('./index')
+
+    const pickShape = list => list.map(route => ({
+      path: route.path,
+      name: route.name,
+      meta: route.meta,
+      redirect: route.redirect,
+      children: route.children ? pickShape(route.children) : undefined
+    }))
+
+    expect(pickShape(freshRouter.options.routes)).toEqual([
+      { path: '/', redirect: '/dashboard' },
+      { path: '/login', name: 'Login', meta: { guest: true } },
+      { path: '/register', name: 'Register', meta: { guest: true } },
+      { path: '/dashboard', name: 'Dashboard', meta: { requiresAuth: true } },
+      { path: '/profile', name: 'Profile', meta: { requiresAuth: true } },
+      { path: '/admin/dashboard', name: 'AdminDashboard', meta: { requiresAuth: true, requiresAdmin: true } },
+      { path: '/admin/users', name: 'AdminUsers', meta: { requiresAuth: true, requiresAdmin: true } },
+      { path: '/admin/audit-log', name: 'AdminAuditLog', meta: { requiresAuth: true, requiresAdmin: true } },
+      { path: '/admin/ai-models', name: 'AdminAiModels', meta: { requiresAuth: true, requiresAdmin: true } },
+      {
+        path: '/project/:id',
+        name: 'ProjectDetail',
+        meta: { requiresAuth: true },
+        redirect: { name: 'ProjectOverview' },
+        children: [
+          { path: 'overview', name: 'ProjectOverview' },
+          { path: 'map', name: 'ProjectMap' },
+          { path: 'story', name: 'ProjectStory' },
+          { path: 'rules', name: 'ProjectRules' },
+          { path: 'violations', name: 'ProjectViolations' },
+          { path: 'insights', name: 'ProjectInsights' },
+          { path: 'settings', name: 'ProjectSettings' }
+        ]
+      }
+    ])
+  })
+
+  it('routes_whenFreshlyImported_shouldResolveAllSixteenLazyComponentDefaults', async () => {
+    vi.resetModules()
+    const { default: freshRouter } = await import('./index')
+
+    const records = freshRouter.options.routes.flatMap(route => [route, ...(route.children || [])])
+    const lazyRecords = records.filter(record => typeof record.component === 'function')
+
+    expect(lazyRecords).toHaveLength(16)
+    for (const record of lazyRecords) {
+      const module = await record.component()
+      expect(module && module.default).toBeTruthy()
+    }
+  })
 })
 
 describe('navigation guard', () => {
@@ -188,7 +244,9 @@ describe('navigation guard', () => {
     expect(confirmMock).toHaveBeenCalledTimes(1)
     const options = confirmMock.mock.calls[0][0]
     expect(options.title).toBe('AI 任务正在进行中')
+    expect(options.content).toBe('离开当前页面将终止本次 AI 回答，确定要离开吗？')
     expect(options.okText).toBe('停止并离开')
+    expect(options.okType).toBe('danger')
     expect(options.cancelText).toBe('继续等待')
 
     options.onOk()
@@ -256,5 +314,58 @@ describe('navigation guard', () => {
     confirmMock.mock.calls[1][0].onOk()
     await secondNav
     expect(router.currentRoute.value.path).toBe('/profile')
+  })
+
+  it('guard_whenAnonymousOnRegisterPageHitsProtectedPage_shouldLandOnLoginInsteadOfStaying', async () => {
+    // 从非 Login 页出发：若重定向目标解析回“当前页”，最终会停留在 Register
+    await router.push('/register')
+
+    await router.push('/dashboard')
+
+    expect(router.currentRoute.value.name).toBe('Login')
+    expect(router.currentRoute.value.path).toBe('/login')
+    expect(router.currentRoute.value.query.redirect).toBe('/dashboard')
+  })
+
+  it('guard_whenNonAdminOnProfilePageHitsAdminPage_shouldLandOnDashboardInsteadOfStaying', async () => {
+    // 从非 guest 页出发：若重定向目标解析回“当前页”，最终会停留在 Profile
+    loginAs('DEVELOPER')
+    await router.push('/profile')
+
+    await router.push('/admin/users')
+
+    expect(router.currentRoute.value.name).toBe('Dashboard')
+    expect(router.currentRoute.value.path).toBe('/dashboard')
+  })
+
+  it('guard_whenLoggedInWithoutUserRecordHitsAdminPage_shouldRedirectToDashboardWithoutCrash', async () => {
+    // 只有 token、无 user 记录：缺少可选链时守卫读取 null.role 会抛错
+    useAuthStore().setAuth('tok-guard', null)
+
+    await router.push('/admin/users').catch(() => {})
+
+    expect(router.currentRoute.value.name).toBe('Dashboard')
+  })
+
+  it('guard_whenRouterFreshlyLoaded_shouldAllowFirstNavigationAndConfirmWhenTaskStarts', async () => {
+    vi.resetModules()
+    const { default: freshRouter } = await import('./index')
+    loginAs()
+
+    // 全新模块 leaveConfirmOpen 初始为 false：无 AI 任务时首次导航直接放行
+    await freshRouter.push('/dashboard')
+    expect(freshRouter.currentRoute.value.name).toBe('Dashboard')
+
+    hasActiveAiTaskMock.mockReturnValue(true)
+    const navigation = freshRouter.push('/profile')
+    await flushPromises()
+
+    // 初始值若被改写为 true，首个带 AI 任务的导航会被直接挂起、弹窗一次都不会出现
+    expect(confirmMock).toHaveBeenCalledTimes(1)
+    const options = confirmMock.mock.calls[0][0]
+    expect(options.content).toBe('离开当前页面将终止本次 AI 回答，确定要离开吗？')
+    options.onCancel()
+    await navigation
+    expect(freshRouter.currentRoute.value.name).toBe('Dashboard')
   })
 })

@@ -114,4 +114,13 @@ describe('useAuthStore', () => {
     expect(localStorage.getItem('codeatlas_token')).toBeNull()
     expect(localStorage.getItem('codeatlas_user')).toBeNull()
   })
+
+  it('useAuthStore_whenFreshlyImported_shouldKeepAuthAsStoreId', async () => {
+    // defineStore('auth') 在模块求值期执行：须在用例体内重新加载模块
+    // 才能把该调用纳入本用例的执行窗口（静态 import 在收集阶段求值，无归属）
+    vi.resetModules()
+    const { useAuthStore: freshUseAuthStore } = await import('./auth')
+
+    expect(freshUseAuthStore.$id).toBe('auth')
+  })
 })
