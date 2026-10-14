@@ -84,4 +84,17 @@ class JwtTokenProviderTest {
         String tampered = token.substring(0, token.length() - 2) + "xx";
         assertFalse(jwtTokenProvider.validateToken(tampered));
     }
+
+    @Test
+    @DisplayName("getExpiresAtMillis 返回 token 过期时间戳（约 now + expiration）")
+    void shouldReturnExpiresAtMillis() {
+        long before = System.currentTimeMillis();
+
+        String token = jwtTokenProvider.generateToken(1L, "testuser", "DEVELOPER");
+        long expiresAt = jwtTokenProvider.getExpiresAtMillis(token);
+
+        assertTrue(expiresAt > before, "过期时间应晚于生成时刻");
+        long upperBound = System.currentTimeMillis() + EXPIRATION_HOURS * 3600 * 1000 + 5_000;
+        assertTrue(expiresAt <= upperBound, "过期时间不应超过 expiration 窗口（含 5s 容差）");
+    }
 }
