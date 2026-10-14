@@ -469,6 +469,19 @@ describe('CodeMap3D', () => {
     expect(depLine.geometry.setFromPoints.mock.calls[0][0]).toHaveLength(2)
   })
 
+  it('CodeMap3D_whenPayloadLacksEdges_shouldFallbackToEmptyEdgeList', async () => {
+    const data = makeGraphData()
+    delete data.edges
+    apiMock.get.mockResolvedValue({ data: { data } })
+    const wrapper = mountMap3D()
+    await settle()
+
+    // edges 缺省回退空数组：不构建连线，节点照常渲染
+    expect(state.lines).toHaveLength(0)
+    expect(state.meshes.filter((m) => m.userData.id)).toHaveLength(7)
+    expect(wrapper.find('.map3d-search').exists()).toBe(true)
+  })
+
   it('CodeMap3D_whenEmptyData_shouldShowEmptyStateWithoutScene', async () => {
     apiMock.get.mockResolvedValue({ data: { data: { nodes: [], edges: [] } } })
     const wrapper = mountMap3D()
