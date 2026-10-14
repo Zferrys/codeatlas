@@ -24,6 +24,7 @@ import java.math.BigDecimal;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -289,11 +290,76 @@ class ArchitecturePatternServiceTest {
 
         assertEquals("修正后的设计模式报告", insight.getContent());
         assertTrue(insight.getMetadata().contains("\"tokensUsed\":800"));
+        assertTrue(insight.getMetadata().contains("\"latencyMs\":240"));
 
         ArgumentCaptor<AiRequest> requestCaptor = ArgumentCaptor.forClass(AiRequest.class);
         verify(aiAnalysisService, times(2)).callAiWithResilience(requestCaptor.capture());
         AiRequest retryRequest = requestCaptor.getAllValues().get(1);
         assertEquals(0.1, retryRequest.getTemperature());
         assertTrue(retryRequest.getSystemPrompt().contains("重新输出设计模式报告"));
+
+        // 提交点审计行必须包含主调用 + 重试的累计 Token（重试采用与否都要记账）
+        verify(aiAnalysisService).saveAiAuditLog(eq("mock-model"), eq("PATTERN_ANALYSIS"),
+                eq(PROJECT_ID), eq(USER_ID), eq(400L), eq(400L), eq(800L), eq(240L),
+                isNull(), eq(true));
+    }
+
+    @Test
+    @DisplayName("幻觉重试仍不合格：降级采用首轮结果，重试 Token 仍进审计行")
+    void analyzePatterns_hallucinationRetryNotAdopted_shouldStillAccountRetryTokens() {
+        stubProjectScanClasses();
+        when(aiClient.getModelName()).thenReturn("mock-model");
+        when(tokenBudgetManager.tryConsume(anyLong())).thenReturn(true);
+        when(aiAnalysisService.callAiWithResilience(any(AiRequest.class)))
+                .thenReturn(aiResponse("引用了 com.fake.GhostA", 500),
+                        aiResponse("仍引用 com.fake.GhostB", 300));
+        when(hallucinationChecker.check(anyString(), anyList()))
+                .thenReturn(new HallucinationChecker.HallucinationResult(true, Arrays.asList("com.fake.GhostA")),
+                        new HallucinationChecker.HallucinationResult(true, Arrays.asList("com.fake.GhostB")));
+        when(hallucinationChecker.suggestAction(any(HallucinationChecker.HallucinationResult.class)))
+                .thenReturn(HallucinationChecker.Action.RETRY);
+        when(aiAnalysisService.calculateConfidenceSimple(anyString(), anyList()))
+                .thenReturn(BigDecimal.valueOf(0.7));
+
+        InsightEntity insight = service.analyzePatterns(PROJECT_ID, USER_ID);
+
+        assertEquals("引用了 com.fake.GhostA", insight.getContent());
+        verify(aiAnalysisService).saveAiAuditLog(eq("mock-model"), eq("PATTERN_ANALYSIS"),
+                eq(PROJECT_ID), eq(USER_ID), eq(400L), eq(400L), eq(800L), eq(240L),
+                isNull(), eq(true));
+    }
+
+    @Test
+    @DisplayName("重试调用期间被终止：主+重试 Token 落失败审计，不保存洞察")
+    void analyzePatterns_cancelledDuringRetry_shouldAuditBothCalls() {
+        stubProjectScanClasses();
+        when(aiClient.getModelName()).thenReturn("mock-model");
+        when(tokenBudgetManager.tryConsume(anyLong())).thenReturn(true);
+        AiTaskProgressRegistry registry = new AiTaskProgressRegistry(new ObjectMapper());
+        ArchitecturePatternService cancellableService = new ArchitecturePatternService(aiAnalysisService,
+                projectService, scanService, insightService, hallucinationChecker, tokenBudgetManager,
+                aiClient, registry);
+        registry.subscribe(TASK_ID, PROJECT_ID);
+        AtomicInteger calls = new AtomicInteger();
+        when(aiAnalysisService.callAiWithResilience(any(AiRequest.class))).thenAnswer(invocation -> {
+            if (calls.incrementAndGet() == 1) {
+                return aiResponse("引用了 com.fake.GhostA", 500);
+            }
+            registry.cancel(TASK_ID);
+            return aiResponse("修正后的设计模式报告", 300);
+        });
+        when(hallucinationChecker.check(anyString(), anyList()))
+                .thenReturn(new HallucinationChecker.HallucinationResult(true, Arrays.asList("com.fake.GhostA")),
+                        new HallucinationChecker.HallucinationResult(false, Collections.emptyList()));
+        when(hallucinationChecker.suggestAction(any(HallucinationChecker.HallucinationResult.class)))
+                .thenReturn(HallucinationChecker.Action.RETRY);
+
+        InsightEntity insight = cancellableService.analyzePatterns(PROJECT_ID, USER_ID, TASK_ID);
+
+        assertNull(insight);
+        verify(aiAnalysisService).saveAiAuditLog(eq("mock-model"), eq("PATTERN_ANALYSIS"),
+                eq(PROJECT_ID), eq(USER_ID), eq(400L), eq(400L), eq(800L), eq(240L),
+                eq("Cancelled by user"), eq(false));
+        verify(insightService, never()).saveInsight(any(InsightEntity.class));
     }
 }

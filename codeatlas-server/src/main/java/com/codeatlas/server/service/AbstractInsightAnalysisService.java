@@ -118,7 +118,7 @@ public abstract class AbstractInsightAnalysisService {
         request.setMaxTokens(maxTokens());
 
         AiResponse response = aiAnalysisService.callAiWithResilience(request);
-        if (response == null || response.getContent() == null || response.getContent().isEmpty()) {
+        if (response == null || response.getContent() == null || response.getContent().trim().isEmpty()) {
             // 空正文响应也带 response：已消耗 token 仍需记账
             saveAudit(projectId, userId, response, "All AI models exhausted or no content", false);
             log.warn("{} failed for projectId={}", logLabel(), projectId);
@@ -131,42 +131,72 @@ public abstract class AbstractInsightAnalysisService {
             saveAudit(projectId, userId, response, "Cancelled by user", false);
             return null;
         }
-        saveAudit(projectId, userId, response, null, true);
 
         String content = response.getContent();
+        long totalPromptTokens = response.getPromptTokens();
+        long totalCompletionTokens = response.getCompletionTokens();
         long totalTokens = response.getTokensUsed();
+        long totalLatency = response.getLatencyMs();
         progressRegistry.publish(taskId, "正在做类名防幻觉校验…");
 
-        HallucinationChecker.HallucinationResult hResult = hallucinationChecker.check(content, classes);
-        if (hResult.hasHallucination()) {
-            HallucinationChecker.Action action = hallucinationChecker.suggestAction(hResult);
-            log.warn("{}: fakeClasses={}, action={}",
-                    hallucinationCheckLabel(), hResult.getFakeClasses().size(), action);
-            if (action == HallucinationChecker.Action.RETRY && classes.size() <= MAX_CLASSES_PER_CHUNK
-                    && !progressRegistry.isCancelled(taskId)) {
-                progressRegistry.publish(taskId, "发现可疑类名，正在重新生成…");
-                AiRequest retryReq = new AiRequest();
-                retryReq.setPrompt(prompt);
-                retryReq.setSystemPrompt(retrySystemPrompt());
-                retryReq.setTemperature(0.1);
-                retryReq.setMaxTokens(maxTokens());
-                AiResponse retryResponse = aiAnalysisService.callAiWithResilience(retryReq);
-                if (retryResponse != null && retryResponse.getContent() != null
-                        && !hallucinationChecker.check(retryResponse.getContent(), classes).hasHallucination()) {
-                    content = retryResponse.getContent();
-                    totalTokens += retryResponse.getTokensUsed();
-                    log.info("{} hallucination retry successful for projectId={}", logLabel(), projectId);
-                } else {
-                    log.warn("{} hallucination retry failed for projectId={}, using degraded result",
-                            logLabel(), projectId);
+        boolean retryAttempted = false;
+        AiResponse retryResponse = null;
+        try {
+            HallucinationChecker.HallucinationResult hResult = hallucinationChecker.check(content, classes);
+            if (hResult.hasHallucination()) {
+                HallucinationChecker.Action action = hallucinationChecker.suggestAction(hResult);
+                log.warn("{}: fakeClasses={}, action={}",
+                        hallucinationCheckLabel(), hResult.getFakeClasses().size(), action);
+                if (action == HallucinationChecker.Action.RETRY && classes.size() <= MAX_CLASSES_PER_CHUNK
+                        && !progressRegistry.isCancelled(taskId)) {
+                    retryAttempted = true;
+                    progressRegistry.publish(taskId, "发现可疑类名，正在重新生成…");
+                    AiRequest retryReq = new AiRequest();
+                    retryReq.setPrompt(prompt);
+                    retryReq.setSystemPrompt(retrySystemPrompt());
+                    retryReq.setTemperature(0.1);
+                    retryReq.setMaxTokens(maxTokens());
+                    retryResponse = aiAnalysisService.callAiWithResilience(retryReq);
                 }
             }
+        } catch (Exception hc) {
+            // 校验自身异常不应阻塞交付；审计已后移至提交点，异常逃逸会导致已消耗 token 无法入账
+            log.warn("{} hallucination check failed for projectId={}: {}", logLabel(), projectId, hc.getMessage());
+        }
+        if (retryResponse != null) {
+            // 重试调用的消耗无论结果是否采纳都必须记账（token 累计进入提交点审计行）
+            totalPromptTokens += retryResponse.getPromptTokens();
+            totalCompletionTokens += retryResponse.getCompletionTokens();
+            totalTokens += retryResponse.getTokensUsed();
+            totalLatency += retryResponse.getLatencyMs();
+            boolean retryAdopted = false;
+            try {
+                retryAdopted = retryResponse.getContent() != null && !retryResponse.getContent().trim().isEmpty()
+                        && !hallucinationChecker.check(retryResponse.getContent(), classes).hasHallucination();
+            } catch (Exception hc) {
+                log.warn("{} hallucination recheck failed for projectId={}: {}", logLabel(), projectId, hc.getMessage());
+            }
+            if (retryAdopted) {
+                content = retryResponse.getContent();
+                log.info("{} hallucination retry successful for projectId={}", logLabel(), projectId);
+            } else {
+                log.warn("{} hallucination retry failed for projectId={}, using degraded result",
+                        logLabel(), projectId);
+            }
+        } else if (retryAttempted) {
+            log.warn("{} hallucination retry call failed for projectId={}, using degraded result",
+                    logLabel(), projectId);
         }
 
         if (progressRegistry.isCancelled(taskId)) {
-            log.info("{} cancelled before save for projectId={}", logLabel(), projectId);
+            log.info("{} cancelled after hallucination handling, discarding for projectId={}", logLabel(), projectId);
+            // 用户已终止：主调用与重试的 token 均已消耗，需一并记账；审计口径统一为失败
+            saveAudit(projectId, userId, totalPromptTokens, totalCompletionTokens, totalTokens, totalLatency,
+                    "Cancelled by user", false);
             return null;
         }
+        // 提交点：审计行与落库紧邻执行，此后的终止不再改写审计语义
+        saveAudit(projectId, userId, totalPromptTokens, totalCompletionTokens, totalTokens, totalLatency, null, true);
         progressRegistry.publish(taskId, "正在保存报告…");
 
         InsightEntity insight = new InsightEntity();
@@ -178,7 +208,7 @@ public abstract class AbstractInsightAnalysisService {
         insight.setConfidence(aiAnalysisService.calculateConfidenceSimple(content, classes));
         insight.setSources("[]");
         insight.setMetadata(String.format("{\"tokensUsed\":%d,\"latencyMs\":%d,\"classCount\":%d%s}",
-                totalTokens, response.getLatencyMs(), classes.size(), ctx.metadataExtra));
+                totalTokens, totalLatency, classes.size(), ctx.metadataExtra));
         insightService.saveInsight(insight);
 
         log.info("{} saved: id={}, projectId={}", insightLogLabel(), insight.getId(), projectId);
@@ -192,12 +222,19 @@ public abstract class AbstractInsightAnalysisService {
 
     protected void saveAudit(Long projectId, Long userId, AiResponse response,
                              String errorMessage, boolean success) {
-        aiAnalysisService.saveAiAuditLog(aiClient.getModelName(), stage(), projectId, userId,
+        saveAudit(projectId, userId,
                 response != null ? response.getPromptTokens() : 0,
                 response != null ? response.getCompletionTokens() : 0,
                 response != null ? response.getTokensUsed() : 0,
                 response != null ? response.getLatencyMs() : 0,
                 errorMessage, success);
+    }
+
+    protected void saveAudit(Long projectId, Long userId,
+                             long promptTokens, long completionTokens, long totalTokens, long latencyMs,
+                             String errorMessage, boolean success) {
+        aiAnalysisService.saveAiAuditLog(aiClient.getModelName(), stage(), projectId, userId,
+                promptTokens, completionTokens, totalTokens, latencyMs, errorMessage, success);
     }
 
     protected static class AnalysisContext {

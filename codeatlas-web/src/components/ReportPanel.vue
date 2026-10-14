@@ -87,7 +87,7 @@
 import { ref, watch, onMounted, onActivated, onBeforeUnmount } from 'vue'
 import { message } from 'ant-design-vue'
 import { ReloadOutlined, DownloadOutlined, FilePdfOutlined, FileTextOutlined } from '@ant-design/icons-vue'
-import api from '../api'
+import api, { handleUnauthorized } from '../api'
 import { renderMarkdown } from '../utils/markdown'
 import { runAiTask, AI_TASK_CANCELLED, cancelActiveAiTask, activeTask } from '../composables/useAiTask'
 
@@ -239,6 +239,10 @@ async function handleExport({ key }) {
       `/api/v1/projects/${props.projectId}/insights/${props.type}/export?format=${key}`,
       { headers: { Authorization: `Bearer ${token}` } }
     )
+    if (response.status === 401) {
+      handleUnauthorized()
+      return
+    }
     if (!response.ok) {
       message.error('导出失败')
       return

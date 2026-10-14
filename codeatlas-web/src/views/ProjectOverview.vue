@@ -228,7 +228,7 @@ import {
   SafetyOutlined, CodeOutlined, BugOutlined, ApartmentOutlined, ScanOutlined,
   DownloadOutlined, FilePdfOutlined, FileTextOutlined, SyncOutlined, InfoCircleOutlined
 } from '@ant-design/icons-vue'
-import api from '../api'
+import api, { handleUnauthorized } from '../api'
 
 const route = useRoute()
 
@@ -422,6 +422,14 @@ async function subscribeScanProgress(projectId, scanId) {
       signal: sseAbortController.signal
     })
 
+    if (response.status === 401) {
+      // 过期会话：走统一 401 处理（清理状态 + 跳登录），不再当作扫描失败弹错
+      handleUnauthorized()
+      scanning.value = false
+      sseAbortController = null
+      return
+    }
+
     const reader = response.body.getReader()
     const decoder = new TextDecoder()
     let buffer = ''
@@ -577,6 +585,10 @@ async function handleExportReport({ key }) {
     const response = await fetch(`/api/v1/projects/${projectId}/reports/download?format=${key}`, {
       headers: { Authorization: `Bearer ${token}` }
     })
+    if (response.status === 401) {
+      handleUnauthorized()
+      return
+    }
     if (!response.ok) {
       message.error('导出失败')
       return

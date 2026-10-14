@@ -110,7 +110,7 @@
 import { ref, reactive, computed, onMounted, onActivated, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
-import api from '../api'
+import api, { handleUnauthorized } from '../api'
 
 const route = useRoute()
 const router = useRouter()
@@ -268,6 +268,13 @@ async function subscribeScanProgress(scanId) {
       headers: { Authorization: `Bearer ${token}` },
       signal: sseAbortController.signal
     })
+    if (response.status === 401) {
+      // 过期会话：走统一 401 处理（清理状态 + 跳登录），不再当作扫描失败弹错
+      handleUnauthorized()
+      triggering.value = false
+      sseAbortController = null
+      return
+    }
     const reader = response.body.getReader()
     const decoder = new TextDecoder()
     let buffer = ''

@@ -146,14 +146,16 @@ public class AiAnalysisService {
         progressRegistry.publish(taskId, "正在渲染架构叙事提示词…");
 
         String finalContent;
-        int totalTokens = 0;
+        long totalPromptTokens = 0;
+        long totalCompletionTokens = 0;
+        long totalTokens = 0;
         long totalLatency = 0;
 
         if (classes.size() > MAX_CLASSES_PER_CHUNK) {
             log.info("Large project detected: {} classes > {}, triggering chunked analysis for projectId={}",
                     classes.size(), MAX_CLASSES_PER_CHUNK, projectId);
             ChunkedResult chunked = analyzeWithChunking(project, scan, classes, taskId);
-            if (chunked.content == null || chunked.content.isEmpty()) {
+            if (chunked.content == null || chunked.content.trim().isEmpty()) {
                 String reason = chunked.failureReason != null ? chunked.failureReason
                         : "Chunked analysis produced no content";
                 log.warn("Chunked AI analysis failed for projectId={}: {}", projectId, reason);
@@ -175,10 +177,9 @@ public class AiAnalysisService {
                         chunked.totalTokens, chunked.latencyMs, "Cancelled by user", false);
                 return null;
             }
-            self.saveAiAuditLog(aiClient.getModelName(), "ARCHITECTURE_STORY", projectId, null,
-                    chunked.promptTokens, chunked.completionTokens,
-                    chunked.totalTokens, chunked.latencyMs, null, true);
             finalContent = chunked.content;
+            totalPromptTokens = chunked.promptTokens;
+            totalCompletionTokens = chunked.completionTokens;
             totalTokens = chunked.totalTokens;
             totalLatency = chunked.latencyMs;
         } else {
@@ -213,7 +214,7 @@ public class AiAnalysisService {
             progressRegistry.publish(taskId, "AI 正在生成架构解读（通常需要 1–3 分钟）…");
 
             AiResponse response = self.callAiWithResilience(request);
-            if (response == null || response.getContent() == null || response.getContent().isEmpty()) {
+            if (response == null || response.getContent() == null || response.getContent().trim().isEmpty()) {
                 log.warn("AI analysis failed after retries for projectId={}, scanId={}", projectId, scanId);
                 // 空正文响应也带 response：已消耗 token 仍需记账
                 self.saveAiAuditLog(aiClient.getModelName(), "ARCHITECTURE_STORY", projectId, null,
@@ -234,45 +235,73 @@ public class AiAnalysisService {
                         response.getTokensUsed(), response.getLatencyMs(), "Cancelled by user", false);
                 return null;
             }
-            self.saveAiAuditLog(aiClient.getModelName(), "ARCHITECTURE_STORY", projectId, null,
-                    response.getPromptTokens(), response.getCompletionTokens(),
-                    response.getTokensUsed(), response.getLatencyMs(), null, true);
             finalContent = response.getContent();
+            totalPromptTokens = response.getPromptTokens();
+            totalCompletionTokens = response.getCompletionTokens();
             totalTokens = response.getTokensUsed();
             totalLatency = response.getLatencyMs();
         }
 
         progressRegistry.publish(taskId, "正在做类名防幻觉校验…");
-        HallucinationChecker.HallucinationResult hResult =
-                hallucinationChecker.check(finalContent, classes);
-        if (hResult.hasHallucination()) {
-            HallucinationChecker.Action action = hallucinationChecker.suggestAction(hResult);
-            log.warn("Hallucination check: result={}, fakeClasses={}, action={}",
-                    hResult.hasHallucination(), hResult.getFakeClasses().size(), action);
-            if (action == HallucinationChecker.Action.RETRY && classes.size() <= MAX_CLASSES_PER_CHUNK
-                    && !progressRegistry.isCancelled(taskId)) {
-                progressRegistry.publish(taskId, "发现可疑类名，正在重新生成…");
-                AiRequest retryReq = new AiRequest();
-                retryReq.setPrompt(finalContent);
-                retryReq.setSystemPrompt("你是一位资深软件架构师。请分析代码库并用中文生成深入、准确的架构叙事报告。");
-                retryReq.setTemperature(0.1);
-                retryReq.setMaxTokens(8192);
-                AiResponse retryResponse = self.callAiWithResilience(retryReq);
-                if (retryResponse != null && retryResponse.getContent() != null && !retryResponse.getContent().isEmpty()
-                        && !hallucinationChecker.check(retryResponse.getContent(), classes).hasHallucination()) {
-                    finalContent = retryResponse.getContent();
-                    totalTokens += retryResponse.getTokensUsed();
-                    log.info("Hallucination retry successful for projectId={}", projectId);
-                } else {
-                    log.warn("Hallucination retry failed for projectId={}, using degraded result", projectId);
+        boolean retryAttempted = false;
+        AiResponse retryResponse = null;
+        try {
+            HallucinationChecker.HallucinationResult hResult =
+                    hallucinationChecker.check(finalContent, classes);
+            if (hResult.hasHallucination()) {
+                HallucinationChecker.Action action = hallucinationChecker.suggestAction(hResult);
+                log.warn("Hallucination check: result={}, fakeClasses={}, action={}",
+                        hResult.hasHallucination(), hResult.getFakeClasses().size(), action);
+                if (action == HallucinationChecker.Action.RETRY && classes.size() <= MAX_CLASSES_PER_CHUNK
+                        && !progressRegistry.isCancelled(taskId)) {
+                    retryAttempted = true;
+                    progressRegistry.publish(taskId, "发现可疑类名，正在重新生成…");
+                    AiRequest retryReq = new AiRequest();
+                    retryReq.setPrompt(finalContent);
+                    retryReq.setSystemPrompt("你是一位资深软件架构师。请分析代码库并用中文生成深入、准确的架构叙事报告。");
+                    retryReq.setTemperature(0.1);
+                    retryReq.setMaxTokens(8192);
+                    retryResponse = self.callAiWithResilience(retryReq);
                 }
             }
+        } catch (Exception hc) {
+            // 校验自身异常不应阻塞交付；审计已后移至提交点，异常逃逸会导致已消耗 token 无法入账
+            log.warn("Hallucination check failed for projectId={}: {}", projectId, hc.getMessage());
+        }
+        if (retryResponse != null) {
+            // 重试调用的消耗无论结果是否采纳都必须记账（token 累计进入提交点审计行）
+            totalPromptTokens += retryResponse.getPromptTokens();
+            totalCompletionTokens += retryResponse.getCompletionTokens();
+            totalTokens += retryResponse.getTokensUsed();
+            totalLatency += retryResponse.getLatencyMs();
+            boolean retryAdopted = false;
+            try {
+                retryAdopted = retryResponse.getContent() != null && !retryResponse.getContent().trim().isEmpty()
+                        && !hallucinationChecker.check(retryResponse.getContent(), classes).hasHallucination();
+            } catch (Exception hc) {
+                log.warn("Hallucination recheck failed for projectId={}: {}", projectId, hc.getMessage());
+            }
+            if (retryAdopted) {
+                finalContent = retryResponse.getContent();
+                log.info("Hallucination retry successful for projectId={}", projectId);
+            } else {
+                log.warn("Hallucination retry failed for projectId={}, using degraded result", projectId);
+            }
+        } else if (retryAttempted) {
+            log.warn("Hallucination retry call failed for projectId={}, using degraded result", projectId);
         }
 
         if (progressRegistry.isCancelled(taskId)) {
-            log.info("Architecture story cancelled before save for projectId={}", projectId);
+            log.info("Architecture story cancelled after hallucination handling, discarding for projectId={}", projectId);
+            // 用户已终止：主调用与重试的 token 均已消耗，需一并记账；审计口径统一为失败
+            self.saveAiAuditLog(aiClient.getModelName(), "ARCHITECTURE_STORY", projectId, null,
+                    totalPromptTokens, totalCompletionTokens, totalTokens, totalLatency,
+                    "Cancelled by user", false);
             return null;
         }
+        // 提交点：审计行与落库紧邻执行，此后的终止不再改写审计语义
+        self.saveAiAuditLog(aiClient.getModelName(), "ARCHITECTURE_STORY", projectId, null,
+                totalPromptTokens, totalCompletionTokens, totalTokens, totalLatency, null, true);
         progressRegistry.publish(taskId, "正在保存报告…");
 
         InsightEntity insight = new InsightEntity();
@@ -297,6 +326,11 @@ public class AiAnalysisService {
     public AiResponse callAiWithResilience(AiRequest request) {
         long start = System.currentTimeMillis();
         AiResponse response = aiClient.chat(request);
+        if (response == null) {
+            // AiModelRouter 耗尽时抛异常；null 仅可能来自测试桩/自定义实现，按"无响应"处理而非 NPE
+            log.warn("AI client returned null response, treating as unavailable");
+            return null;
+        }
         if (response.getLatencyMs() <= 0) {
             response.setLatencyMs(System.currentTimeMillis() - start);
         }
@@ -462,7 +496,7 @@ public class AiAnalysisService {
                 totalLatency += resp.getLatencyMs();
             }
             // 空正文分片不得拼入合并文本（否则汇总提示词会混入 "null"/空段），token 已在上一分支记账
-            if (resp != null && resp.getContent() != null && !resp.getContent().isEmpty()) {
+            if (resp != null && resp.getContent() != null && !resp.getContent().trim().isEmpty()) {
                 chunkResults.add("## " + groupName + "\n\n" + resp.getContent());
                 log.info("Chunk analysis done: group={}, tokens={}", groupName, resp.getTokensUsed());
             } else {
@@ -511,11 +545,16 @@ public class AiAnalysisService {
             completionTokens += summaryResp.getCompletionTokens();
             totalTokens += summaryResp.getTokensUsed();
             totalLatency += summaryResp.getLatencyMs();
-            log.info("Chunking summary completed: groups={}, tokens={}", chunkResults.size(), summaryResp.getTokensUsed());
-            return ChunkedResult.success(summaryResp.getContent(), promptTokens, completionTokens,
-                    totalTokens, totalLatency);
+            if (summaryResp.getContent() != null && !summaryResp.getContent().trim().isEmpty()) {
+                log.info("Chunking summary completed: groups={}, tokens={}", chunkResults.size(), summaryResp.getTokensUsed());
+                return ChunkedResult.success(summaryResp.getContent(), promptTokens, completionTokens,
+                        totalTokens, totalLatency);
+            }
+            // 汇总空正文与调用失败同判：降级回原始拼接，用户仍有可用报告
+            log.warn("Chunking summary returned empty content, returning raw merged chunks");
+        } else {
+            log.warn("Chunking summary failed, returning raw merged chunks");
         }
-        log.warn("Chunking summary failed, returning raw merged chunks");
         return ChunkedResult.success(combinedChunks.toString(), promptTokens, completionTokens,
                 totalTokens, totalLatency);
     }

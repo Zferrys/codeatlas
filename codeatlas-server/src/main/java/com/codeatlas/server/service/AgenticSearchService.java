@@ -167,7 +167,7 @@ public class AgenticSearchService {
             if (response.hasToolCalls()) {
                 // add assistant message with tool calls
                 Message assistantMsg = Message.assistant(response.getToolCalls());
-                if (response.getContent() != null && !response.getContent().isEmpty()) {
+                if (response.getContent() != null && !response.getContent().trim().isEmpty()) {
                     assistantMsg.setContent(response.getContent());
                 }
                 messages.add(assistantMsg);
@@ -186,7 +186,9 @@ public class AgenticSearchService {
                         + response.getToolCalls().size() + " 项代码证据，继续分析…");
             } else {
                 // final answer — no more tool calls
-                result.put("answer", response.getContent() != null ? response.getContent() : NO_CONTENT_PLACEHOLDER);
+                String finalContent = response.getContent();
+                result.put("answer", finalContent != null && !finalContent.trim().isEmpty()
+                        ? finalContent : NO_CONTENT_PLACEHOLDER);
                 success = true;
                 break;
             }
@@ -211,7 +213,7 @@ public class AgenticSearchService {
                     totalTokenUsed += finalResponse.getTokensUsed();
                     totalPromptTokens += finalResponse.getPromptTokens();
                     totalCompletionTokens += finalResponse.getCompletionTokens();
-                    if (finalResponse.getContent() != null && !finalResponse.getContent().isEmpty()) {
+                    if (finalResponse.getContent() != null && !finalResponse.getContent().trim().isEmpty()) {
                         result.put("answer", finalResponse.getContent());
                         success = true;
                         log.info("Agentic search forced final synthesis succeeded after {} iterations", iterations);
@@ -255,7 +257,7 @@ public class AgenticSearchService {
                             correctionRequest.setMaxTokens(4096);
                             AiResponse correctionResponse = aiClient.chat(correctionRequest);
                             if (correctionResponse != null && correctionResponse.getContent() != null
-                                    && !correctionResponse.getContent().isEmpty()) {
+                                    && !correctionResponse.getContent().trim().isEmpty()) {
                                 totalTokenUsed += correctionResponse.getTokensUsed();
                                 totalPromptTokens += correctionResponse.getPromptTokens();
                                 totalCompletionTokens += correctionResponse.getCompletionTokens();
@@ -291,12 +293,18 @@ public class AgenticSearchService {
             }
         }
 
+        if (success && progressRegistry.isCancelled(taskId)) {
+            // 证据校验/修正期间被终止：回答丢弃，全部已消耗 token（含修正轮）记账
+            return finishCancelled(result, projectId, userId, startTime, iterations,
+                    toolsCalled, totalPromptTokens, totalCompletionTokens, totalTokenUsed);
+        }
+
         result.put("iterations", iterations);
         result.put("toolsCalled", toolsCalled);
         result.put("totalTokens", totalTokenUsed);
 
-        // 仅记录真实 AI 回答（降级/失败路径已提前 return，不落历史）；被终止的回答同样不落
-        if (success && !progressRegistry.isCancelled(taskId)) {
+        // 提交点：落历史与审计紧邻执行，此后的终止不再影响交付；仅记录真实 AI 回答（降级/失败路径不落历史）
+        if (success) {
             recordChatHistory(projectId, userId, question, result);
         }
 

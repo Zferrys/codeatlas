@@ -7,6 +7,7 @@
  */
 import { ref } from 'vue'
 import { message } from 'ant-design-vue'
+import { handleUnauthorized } from '../api/index'
 
 /** runAiTask 的哨兵返回值：任务被终止或与进行中任务冲突（调用方直接早退） */
 export const AI_TASK_CANCELLED = Symbol('AI_TASK_CANCELLED')
@@ -113,6 +114,10 @@ async function subscribeProgress(projectId, taskId, signal) {
       `/api/v1/projects/${projectId}/ai/ai-progress?taskId=${encodeURIComponent(taskId)}`,
       { headers: { Authorization: `Bearer ${token}` }, signal }
     )
+    if (response.status === 401) {
+      handleUnauthorized()
+      return
+    }
     if (!response.ok || !response.body) return
     const reader = response.body.getReader()
     const decoder = new TextDecoder()

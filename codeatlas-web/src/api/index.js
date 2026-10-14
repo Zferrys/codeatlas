@@ -19,6 +19,14 @@ function clearAuthState() {
   }
 }
 
+// 统一的 401 处理：axios 拦截器之外的直连 fetch（SSE 进度订阅、报告导出）也须走这里，
+// 否则过期 token 下 fetch 只报「网络异常」且会话状态残留
+export function handleUnauthorized() {
+  clearAuthState()
+  window.location.hash = '#/login'
+  message.error('登录已过期，请重新登录')
+}
+
 // Request interceptor — attach JWT token + set Content-Type for JSON
 api.interceptors.request.use(
   config => {
@@ -57,9 +65,7 @@ api.interceptors.response.use(
       const { status, data } = response
       switch (status) {
         case 401:
-          clearAuthState()
-          window.location.hash = '#/login'
-          message.error('登录已过期，请重新登录')
+          handleUnauthorized()
           break
         case 403:
           message.error('无权限访问')

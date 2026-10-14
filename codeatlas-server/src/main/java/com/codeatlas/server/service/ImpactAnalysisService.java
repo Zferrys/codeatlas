@@ -134,7 +134,7 @@ public class ImpactAnalysisService {
                             result.put("aiAnalysis", "本次分析已被用户终止");
                             result.put("cancelled", true);
                         } else if (response != null && response.getContent() != null
-                                && !response.getContent().isEmpty()) {
+                                && !response.getContent().trim().isEmpty()) {
                             result.put("aiAnalysis", response.getContent());
                             saveAudit("IMPACT_ANALYSIS", projectId, userId, response, null, true);
                             aiAnswered = true;
@@ -146,9 +146,9 @@ public class ImpactAnalysisService {
                         }
                     } catch (Exception e) {
                         log.warn("AI impact analysis failed for projectId={}", projectId, e);
-                        // 配额已扣，失败路径也必须落审计
+                        // 配额已扣，失败路径也必须落审计；审计表为管理端可见面，只写异常类型不写原始消息（完整堆栈在服务日志）
                         saveAudit("IMPACT_ANALYSIS", projectId, userId, null,
-                                "AI call exception: " + e.getMessage(), false);
+                                "AI call exception: " + e.getClass().getSimpleName(), false);
                         result.put("aiAnalysis", "AI 分析暂不可用，以下为静态依赖分析结果");
                     }
                 }
@@ -246,7 +246,7 @@ public class ImpactAnalysisService {
             progressRegistry.publish(taskId, "AI 正在组织回答…");
 
             AiResponse response = aiAnalysisService.callAiWithResilience(request);
-            if (response == null || response.getContent() == null || response.getContent().isEmpty()) {
+            if (response == null || response.getContent() == null || response.getContent().trim().isEmpty()) {
                 // 空正文响应也带 response：已消耗 token 仍需记账
                 saveAudit("CONTEXT_QA", projectId, userId, response, "All AI models exhausted or no content", false);
                 result.put("answer", "AI 服务暂不可用，请稍后重试");
@@ -259,9 +259,12 @@ public class ImpactAnalysisService {
                 result.put("cancelled", true);
                 return result;
             }
-            saveAudit("CONTEXT_QA", projectId, userId, response, null, true);
 
             String answer = response.getContent();
+            long totalPromptTokens = response.getPromptTokens();
+            long totalCompletionTokens = response.getCompletionTokens();
+            long totalTokens = response.getTokensUsed();
+            long totalLatency = response.getLatencyMs();
             // 输出侧证据验证：答案对照项目数据与本次注入的上下文
             if (!classes.isEmpty()) {
                 try {
@@ -273,15 +276,23 @@ public class ImpactAnalysisService {
                     if (report.needsCorrection() && !progressRegistry.isCancelled(taskId)) {
                         correctionRounds = 1;
                         progressRegistry.publish(taskId, "发现证据瑕疵，正在自动修正…");
-                        String correctedAnswer = runContextCorrection(prompt, answer, report);
-                        if (correctedAnswer != null && !correctedAnswer.isEmpty()) {
-                            EvidenceVerifier.VerificationReport recheck =
-                                    evidenceVerifier.verify(correctedAnswer, evidence, classes);
-                            if (recheck.anomalyCount() < report.anomalyCount()) {
-                                answer = correctedAnswer;
-                                report = recheck;
-                                corrected = true;
-                                log.info("Context QA evidence correction adopted for projectId={}", projectId);
+                        AiResponse correctionResponse = runContextCorrection(prompt, answer, report);
+                        if (correctionResponse != null) {
+                            // 修正轮消耗无论结果是否采纳都必须记账（累计进入提交点审计行）
+                            totalPromptTokens += correctionResponse.getPromptTokens();
+                            totalCompletionTokens += correctionResponse.getCompletionTokens();
+                            totalTokens += correctionResponse.getTokensUsed();
+                            totalLatency += correctionResponse.getLatencyMs();
+                            String correctedAnswer = correctionResponse.getContent();
+                            if (correctedAnswer != null && !correctedAnswer.trim().isEmpty()) {
+                                EvidenceVerifier.VerificationReport recheck =
+                                        evidenceVerifier.verify(correctedAnswer, evidence, classes);
+                                if (recheck.anomalyCount() < report.anomalyCount()) {
+                                    answer = correctedAnswer;
+                                    report = recheck;
+                                    corrected = true;
+                                    log.info("Context QA evidence correction adopted for projectId={}", projectId);
+                                }
                             }
                         }
                     }
@@ -293,25 +304,35 @@ public class ImpactAnalysisService {
                     log.warn("Context QA evidence verification failed (non-fatal): {}", ve.getMessage());
                 }
             }
-            result.put("answer", answer);
-            if (!progressRegistry.isCancelled(taskId)) {
-                recordChatHistory(projectId, userId, ChatHistoryService.SCOPE_CLASS, sanitizedClassFqn,
-                        question, answer, result.get("verification"));
+            if (progressRegistry.isCancelled(taskId)) {
+                // 用户已终止（含证据校验/修正期间）：主调用与修正轮 token 一并记账；审计口径统一为失败
+                saveAudit("CONTEXT_QA", projectId, userId, totalPromptTokens, totalCompletionTokens,
+                        totalTokens, totalLatency, "Cancelled by user", false);
+                result.put("answer", "本次回答已被用户终止");
+                result.put("cancelled", true);
+                return result;
             }
+            // 提交点：审计行与返回紧邻执行，此后的终止不再影响交付
+            saveAudit("CONTEXT_QA", projectId, userId, totalPromptTokens, totalCompletionTokens,
+                    totalTokens, totalLatency, null, true);
+            result.put("answer", answer);
+            recordChatHistory(projectId, userId, ChatHistoryService.SCOPE_CLASS, sanitizedClassFqn,
+                    question, answer, result.get("verification"));
             return result;
         } catch (Exception e) {
             log.error("Context QA failed for projectId={}", projectId, e);
-            // 配额已扣，失败路径也必须落审计
-            saveAudit("CONTEXT_QA", projectId, userId, null, "AI call exception: " + e.getMessage(), false);
+            // 配额已扣，失败路径也必须落审计；审计表为管理端可见面，只写异常类型不写原始消息（完整堆栈在服务日志）
+            saveAudit("CONTEXT_QA", projectId, userId, null, "AI call exception: " + e.getClass().getSimpleName(), false);
             throw new BusinessException(500, "AI 问答服务暂时不可用，请稍后重试");
         }
     }
 
     /**
      * 上下文问答修正轮：把证据校验异常清单回给模型，低温重写。
+     * 返回完整响应（含 token 记账信息），调用方负责累计消耗并记账。
      */
-    private String runContextCorrection(String originalPrompt, String answer,
-                                        EvidenceVerifier.VerificationReport report) {
+    private AiResponse runContextCorrection(String originalPrompt, String answer,
+                                            EvidenceVerifier.VerificationReport report) {
         try {
             AiRequest correctionRequest = new AiRequest();
             correctionRequest.setPrompt(originalPrompt + "\n\n## 你上一条回答\n" + answer
@@ -319,8 +340,7 @@ public class ImpactAnalysisService {
             correctionRequest.setSystemPrompt("你是一位资深软件架构师，正在帮助开发者理解代码库。基于提供的项目上下文准确回答问题。");
             correctionRequest.setTemperature(0.1);
             correctionRequest.setMaxTokens(4096);
-            AiResponse response = aiAnalysisService.callAiWithResilience(correctionRequest);
-            return response != null ? response.getContent() : null;
+            return aiAnalysisService.callAiWithResilience(correctionRequest);
         } catch (Exception e) {
             log.warn("Context QA correction round failed: {}", e.getMessage());
             return null;
@@ -440,12 +460,19 @@ public class ImpactAnalysisService {
 
     private void saveAudit(String stage, Long projectId, Long userId,
                            AiResponse response, String errorMessage, boolean success) {
-        aiAnalysisService.saveAiAuditLog(aiClient.getModelName(), stage, projectId, userId,
+        saveAudit(stage, projectId, userId,
                 response != null ? response.getPromptTokens() : 0,
                 response != null ? response.getCompletionTokens() : 0,
                 response != null ? response.getTokensUsed() : 0,
                 response != null ? response.getLatencyMs() : 0,
                 errorMessage, success);
+    }
+
+    private void saveAudit(String stage, Long projectId, Long userId,
+                           long promptTokens, long completionTokens, long totalTokens, long latencyMs,
+                           String errorMessage, boolean success) {
+        aiAnalysisService.saveAiAuditLog(aiClient.getModelName(), stage, projectId, userId,
+                promptTokens, completionTokens, totalTokens, latencyMs, errorMessage, success);
     }
 
     private void recordChatHistory(Long projectId, Long userId, String scope, String contextFqn,
