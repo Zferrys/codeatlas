@@ -22,6 +22,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.nio.charset.StandardCharsets;
@@ -38,6 +39,7 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
@@ -174,6 +176,78 @@ class ClaudeClientExtendedTest {
                     "实际消息: " + ex.getMessage());
             assertInstanceOf(IOException.class, ex.getCause());
         }
+    }
+
+    // ==================== chat 成功路径 ====================
+
+    @Test
+    @DisplayName("chat 成功：latencyMs 为真实耗时区间（≥0 且 < 60 秒，减法变异会得到 epoch 量级数值）")
+    void chat_success_shouldRecordRealisticLatency() {
+        stubResponse(200, "{\"content\":[{\"type\":\"text\",\"text\":\"ok\"}]}");
+
+        AiResponse response = client().chat(new AiRequest());
+
+        assertEquals("ok", response.getContent());
+        assertTrue(response.getLatencyMs() >= 0 && response.getLatencyMs() < 60_000,
+                "latencyMs 应为真实耗时区间，实际: " + response.getLatencyMs());
+    }
+
+    // ==================== parseResponse 全字段（反射驱动） ====================
+
+    @Test
+    @DisplayName("parseResponse：content/tool_use blocks/finish_reason/usage 五组字段与 latency/sources 逐一精确断言")
+    void parseResponse_shouldFillEveryFieldExactly() throws Exception {
+        String json = "{\"content\":["
+                + "{\"type\":\"text\",\"text\":\"你好\"},"
+                + "{\"type\":\"tool_use\",\"id\":\"call_9\",\"name\":\"search_classes\","
+                + "\"input\":{\"keyword\":\"x\"}}],"
+                + "\"stop_reason\":\"tool_use\","
+                + "\"usage\":{\"input_tokens\":11,\"output_tokens\":7}}";
+        Method method = ClaudeClient.class.getDeclaredMethod("parseResponse", String.class, long.class);
+        method.setAccessible(true);
+
+        AiResponse response = (AiResponse) method.invoke(clientAt(1), json, 1234L);
+
+        assertEquals("你好", response.getContent());
+        assertTrue(response.hasToolCalls());
+        assertEquals(1, response.getToolCalls().size());
+        assertEquals("call_9", response.getToolCalls().get(0).getId(), "tool_use block 的 id 必须写入 ToolCall");
+        assertEquals("search_classes", response.getToolCalls().get(0).getName(), "name 必须写入 ToolCall");
+        assertEquals("x", response.getToolCalls().get(0).getStringArg("keyword"), "input 必须写入 ToolCall.arguments");
+        assertEquals("tool_use", response.getFinishReason());
+        assertEquals(11, response.getPromptTokens());
+        assertEquals(7, response.getCompletionTokens());
+        assertEquals(18, response.getTokensUsed(), "tokensUsed 必须为 prompt + completion 之和");
+        assertEquals(1234L, response.getLatencyMs(), "latencyMs 必须原样填充，不能保持默认 0");
+        assertNotNull(response.getSources(), "sources 必须被填充为空列表而非默认 null");
+        assertTrue(response.getSources().isEmpty());
+        assertThrows(UnsupportedOperationException.class, () -> response.getSources().add(null),
+                "sources 必须来自显式 setSources(Collections.emptyList())（不可变）；"
+                        + "setSources 调用被删除时会退回构造器初始化的可变 ArrayList，add 将成功");
+    }
+
+    @Test
+    @DisplayName("多轮消息转 Anthropic 格式：工具参数完整透传（null 降级空对象）、普通消息 content 原样保留")
+    void chat_multiTurn_shouldSerializeToolArgumentsAndPlainContent() throws Exception {
+        stubResponse(200, "{\"content\":[{\"type\":\"text\",\"text\":\"ok\"}]}");
+        AiRequest request = new AiRequest();
+        request.setMessages(Arrays.asList(
+                Message.user("hello"),
+                Message.assistant(Arrays.asList(
+                        new ToolCall("call_7", "search", Collections.singletonMap("kw", "v")),
+                        new ToolCall("call_8", "no_args", null)))));
+
+        client().chat(request);
+
+        JsonNode messages = MAPPER.readTree(lastRequestBody.get()).path("messages");
+        assertEquals("hello", messages.get(0).path("content").asText(),
+                "普通消息（非空 content）必须原样透传，不能因取反变异被置为空串");
+        JsonNode blocks = messages.get(1).path("content");
+        assertEquals("v", blocks.get(0).path("input").path("kw").asText(),
+                "非空工具参数必须完整透传，不能因取反变异被置为空对象");
+        assertTrue(blocks.get(1).path("input").isObject(),
+                "arguments 为 null 时必须降级为空对象，不能透传 null");
+        assertEquals(0, blocks.get(1).path("input").size());
     }
 
     // ==================== chat 工具声明序列化 ====================

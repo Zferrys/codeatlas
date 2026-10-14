@@ -170,7 +170,8 @@ class DeepSeekClientTest {
             assertEquals(20, response.getCompletionTokens());
             assertEquals(7, response.getReasoningTokens());
             assertEquals("stop", response.getFinishReason());
-            assertTrue(response.getLatencyMs() >= 0, "latencyMs 应被填充");
+            assertTrue(response.getLatencyMs() >= 0 && response.getLatencyMs() < 60_000,
+                    "latencyMs 应为真实耗时区间（减法变异会得到 epoch 量级数值），实际: " + response.getLatencyMs());
             assertEquals(Collections.emptyList(), response.getSources());
             assertFalse(response.hasToolCalls());
 
@@ -729,6 +730,41 @@ class DeepSeekClientTest {
         Field field = DeepSeekClient.class.getDeclaredField("httpClient");
         field.setAccessible(true);
         field.set(client, fake);
+    }
+
+    // ==================== parseResponse 全字段（反射驱动，latency/sources 在 chat 路径不可观测） ====================
+
+    @Test
+    @DisplayName("parseResponse：latencyMs 与 sources 精确填充，工具调用/用量字段逐一断言")
+    void parseResponse_shouldFillEveryFieldExactly() throws Exception {
+        String json = "{\"choices\":[{\"message\":{\"content\":\"你好\",\"tool_calls\":["
+                + "{\"id\":\"call_5\",\"function\":{\"name\":\"search\","
+                + "\"arguments\":\"{\\\"keyword\\\":\\\"x\\\"}\"}}]},"
+                + "\"finish_reason\":\"tool_calls\"}],"
+                + "\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":4,\"total_tokens\":9,"
+                + "\"completion_tokens_details\":{\"reasoning_tokens\":2}}}";
+        java.lang.reflect.Method method = DeepSeekClient.class.getDeclaredMethod(
+                "parseResponse", String.class, long.class);
+        method.setAccessible(true);
+
+        AiResponse response = (AiResponse) method.invoke(clientAt(1), json, 4321L);
+
+        assertEquals("你好", response.getContent());
+        assertEquals("tool_calls", response.getFinishReason());
+        assertEquals(1, response.getToolCalls().size());
+        assertEquals("call_5", response.getToolCalls().get(0).getId());
+        assertEquals("search", response.getToolCalls().get(0).getName());
+        assertEquals("x", response.getToolCalls().get(0).getStringArg("keyword"));
+        assertEquals(9, response.getTokensUsed());
+        assertEquals(3, response.getPromptTokens());
+        assertEquals(4, response.getCompletionTokens());
+        assertEquals(2, response.getReasoningTokens());
+        assertEquals(4321L, response.getLatencyMs(), "latencyMs 必须原样填充，不能保持默认 0");
+        assertNotNull(response.getSources(), "sources 必须被填充为空列表而非默认 null");
+        assertTrue(response.getSources().isEmpty());
+        assertThrows(UnsupportedOperationException.class, () -> response.getSources().add(null),
+                "sources 必须来自显式 setSources(Collections.emptyList())（不可变）；"
+                        + "setSources 调用被删除时会退回构造器初始化的可变 ArrayList，add 将成功");
     }
 
     // ==================== 保障测试桩本身可用 ====================

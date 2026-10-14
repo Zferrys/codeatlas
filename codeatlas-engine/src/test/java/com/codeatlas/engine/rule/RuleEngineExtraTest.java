@@ -5,6 +5,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -246,6 +247,68 @@ class RuleEngineExtraTest {
         assertEquals(1, violations.size(), "异常规则被跳过，后续 max-public-methods 规则仍应生效");
         assertEquals("com.demo.service.Big", violations.get(0).getClassFqn());
         assertTrue(violations.get(0).getMessage().contains("5"));
+    }
+
+    // ==================== 早返回列表可变性 / 接口名单过滤 / 行数边界（变异补杀） ====================
+
+    @Test
+    @DisplayName("空规则或空类列表触发早返回：返回真实可变的 ArrayList，调用方可继续追加")
+    void check_earlyReturn_shouldReturnMutableList() {
+        ClassSummaryResult cls = cls("com.demo.Foo", "UTIL", "CLASS", 2, 30, null, null);
+
+        List<ViolationResult> fromEmptyRules = engine.check(rules, Collections.singletonList(cls));
+        fromEmptyRules.add(new ViolationResult(97L, "WARN", "com.demo.Manual1", "手工追加1", "验证可变性"));
+        assertEquals(1, fromEmptyRules.size(), "早返回必须是可变列表（Collections.emptyList 不可追加）");
+
+        rules.add(rule("no-star-import", "{}"));
+        List<ViolationResult> fromEmptyClasses = engine.check(rules, Collections.emptyList());
+        fromEmptyClasses.add(new ViolationResult(98L, "WARN", "com.demo.Manual2", "手工追加2", "验证可变性"));
+        assertEquals(1, fromEmptyClasses.size());
+        assertEquals("com.demo.Manual2", fromEmptyClasses.get(0).getClassFqn());
+    }
+
+    @Test
+    @DisplayName("接口名单只收真实 INTERFACE：同名普通类不能顶替接口契约，FooImpl 仍判缺接口")
+    void serviceImplWithSameNamedPlainClass_shouldStillBeFlagged() {
+        rules.add(rule("service-interface-required", "{}"));
+        ClassSummaryResult impl = cls("com.demo.service.FooImpl", "SERVICE", "CLASS", 3, 50, null, null);
+        ClassSummaryResult sameNamedPlainClass = cls("com.demo.service.Foo", "SERVICE", "CLASS", 3, 50, null, null);
+
+        List<ViolationResult> violations = engine.check(rules, Arrays.asList(impl, sameNamedPlainClass));
+
+        assertEquals(1, violations.size(), "普通类 Foo 不是接口，不能被计入 interfaceNames");
+        assertEquals("com.demo.service.FooImpl", violations.get(0).getClassFqn());
+        assertTrue(violations.get(0).getMessage().contains("缺少对应接口 Foo"));
+    }
+
+    @Test
+    @DisplayName("checkMaxLineCount 边界：行数恰好等于上限不违规，超出 1 行才违规")
+    void checkMaxLineCount_atExactLimit_shouldNotFlag() {
+        rules.add(rule("max-class-line-count", "{\"max\":10}"));
+        ClassSummaryResult atLimit = cls("com.demo.service.Exact", "SERVICE", "CLASS", 2, 10, null, null);
+        ClassSummaryResult overLimit = cls("com.demo.service.Over", "SERVICE", "CLASS", 2, 11, null, null);
+
+        List<ViolationResult> atLimitResult = engine.check(rules, Collections.singletonList(atLimit));
+        assertEquals(0, atLimitResult.size(), "lineCount == max 时 > 判定为 false，不应违规");
+
+        List<ViolationResult> overLimitResult = engine.check(rules, Collections.singletonList(overLimit));
+        assertEquals(1, overLimitResult.size());
+    }
+
+    private static Method shortenMethod() throws Exception {
+        Method method = RuleEngine.class.getDeclaredMethod("shorten", String.class);
+        method.setAccessible(true);
+        return method;
+    }
+
+    @Test
+    @DisplayName("shorten 边界：点位于下标 0 或不含点时原样返回，完整 FQN 只取末段（反射驱动）")
+    void shorten_boundaries_shouldKeepExactOutput() throws Exception {
+        assertEquals(".Foo", shortenMethod().invoke(engine, ".Foo"),
+                "lastIndexOf('.') == 0 时不截断");
+        assertEquals("SelfRef", shortenMethod().invoke(engine, "SelfRef"));
+        assertEquals("B", shortenMethod().invoke(engine, "com.a.B"),
+                "取末段必须从索引+1 处开始，不能吞掉首字符");
     }
 
     // ==================== parseMaxFromRule 分支 ====================

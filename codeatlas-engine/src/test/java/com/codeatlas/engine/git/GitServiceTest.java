@@ -1,11 +1,23 @@
 package com.codeatlas.engine.git;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.sun.net.httpserver.HttpServer;
+import org.eclipse.jgit.api.CloneCommand;
 import org.eclipse.jgit.api.Git;
+import org.eclipse.jgit.lib.ObjectId;
+import org.eclipse.jgit.lib.Ref;
+import org.eclipse.jgit.lib.RefDatabase;
+import org.eclipse.jgit.lib.Repository;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.mockito.ArgumentCaptor;
+import org.mockito.MockedConstruction;
 import org.mockito.MockedStatic;
+import org.slf4j.LoggerFactory;
 
 import javax.net.ssl.HostnameVerifier;
 import javax.net.ssl.HttpsURLConnection;
@@ -14,6 +26,7 @@ import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLSocket;
 import javax.net.ssl.SSLSocketFactory;
 import javax.net.ssl.TrustManager;
+import javax.net.ssl.TrustManagerFactory;
 import javax.net.ssl.X509TrustManager;
 import java.io.BufferedReader;
 import java.io.ByteArrayInputStream;
@@ -26,10 +39,12 @@ import java.io.RandomAccessFile;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.net.HttpURLConnection;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -39,19 +54,37 @@ import java.security.NoSuchAlgorithmException;
 import java.security.cert.CertificateException;
 import java.security.cert.X509Certificate;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Answers.RETURNS_SELF;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.CALLS_REAL_METHODS;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockConstruction;
 import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /**
  * GitService — 仓库大小预估、本地克隆、目录清理与 CombinedTrustManager 信任链。
@@ -61,6 +94,9 @@ import static org.mockito.Mockito.mockStatic;
 class GitServiceTest {
 
     private final GitService service = new GitService();
+
+    /** 匹配心跳消息中的「已耗时 N 秒」 */
+    private static final Pattern HEARTBEAT_ELAPSED = Pattern.compile("已耗时 (\\d+) 秒");
 
     /** 建一个含单个提交的本地真实仓库，返回 (仓库路径, 当前分支名) */
     private static Object[] createLocalRepo(Path repoDir) throws Exception {
@@ -153,6 +189,61 @@ class GitServiceTest {
         }
     }
 
+    private static String formattedLogs(ListAppender<ILoggingEvent> appender) {
+        StringBuilder logs = new StringBuilder();
+        for (ILoggingEvent event : appender.list) {
+            logs.append(event.getFormattedMessage()).append('\n');
+        }
+        return logs.toString();
+    }
+
+    @Test
+    @DisplayName("GitHub API 日志：200 换算值精确到 MB；403 记限流日志；404 提前返回不产生限流日志")
+    void estimateRepoSize_logging_shouldRecordExactMbAndRateLimit(@TempDir Path tempDir) throws Exception {
+        assertEquals(-1L, service.estimateRepoSize("D:/repos/local")); // 先置位 SSL 静态标记
+
+        Logger gitLogger = (Logger) LoggerFactory.getLogger(GitService.class);
+        Level previousLevel = gitLogger.getLevel();
+        gitLogger.setLevel(Level.DEBUG);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        gitLogger.addAppender(appender);
+
+        SSLSocketFactory savedFactory = HttpsURLConnection.getDefaultSSLSocketFactory();
+        HostnameVerifier savedVerifier = HttpsURLConnection.getDefaultHostnameVerifier();
+        try (MockGitHubHttpsProxy proxy = new MockGitHubHttpsProxy(tempDir)) {
+            HttpsURLConnection.setDefaultSSLSocketFactory(trustAllContext().getSocketFactory());
+            HttpsURLConnection.setDefaultHostnameVerifier((host, session) -> true);
+            System.setProperty("https.proxyHost", "127.0.0.1");
+            System.setProperty("https.proxyPort", String.valueOf(proxy.port()));
+            try {
+                assertEquals(2048L * 1024 * 4, service.estimateRepoSize("https://github.com/test200/sized"));
+                assertTrue(formattedLogs(appender).contains("size=2048KB, estimated working tree=8MB"),
+                        "8MB 必须按字节精确除 1024*1024（除法变异或 1024*1024 改写会得到天文数字），实际日志: "
+                                + formattedLogs(appender));
+
+                appender.list.clear();
+                assertEquals(-1L, service.estimateRepoSize("https://github.com/test404/gone"));
+                assertFalse(formattedLogs(appender).contains("rate limited"),
+                        "404 必须在其分支立即返回，不得落入 403 限流日志分支");
+
+                appender.list.clear();
+                assertEquals(-1L, service.estimateRepoSize("https://github.com/test403/limited"));
+                assertTrue(formattedLogs(appender).contains("GitHub API rate limited for test403/limited"),
+                        "403 必须且只能记限流日志（404/403 条件取反会提前返回或漏掉该日志），实际日志: "
+                                + formattedLogs(appender));
+            } finally {
+                System.clearProperty("https.proxyHost");
+                System.clearProperty("https.proxyPort");
+                HttpsURLConnection.setDefaultSSLSocketFactory(savedFactory);
+                HttpsURLConnection.setDefaultHostnameVerifier(savedVerifier);
+            }
+        } finally {
+            gitLogger.detachAppender(appender);
+            gitLogger.setLevel(previousLevel);
+        }
+    }
+
     // ==================== configureSslForWindows（私有静态，经 estimateRepoSize 触发） ====================
 
     @Test
@@ -193,7 +284,274 @@ class GitServiceTest {
         }
     }
 
+    @SuppressWarnings("unchecked")
+    private static List<X509TrustManager> combinedTrustManagerDelegates(TrustManager combined) throws Exception {
+        Field field = combined.getClass().getDeclaredField("delegates");
+        field.setAccessible(true);
+        return (List<X509TrustManager>) field.get(combined);
+    }
+
+    @Test
+    @DisplayName("configureSslForWindows 全链路：Windows-ROOT 加载/双 TMF init/过滤器/工厂安装逐调用断言")
+    void configureSslForWindows_fullPath_shouldWireWindowsStoreAndInstallFactory() throws Exception {
+        boolean savedFlag = sslConfiguredFlag();
+        SSLSocketFactory savedFactory = HttpsURLConnection.getDefaultSSLSocketFactory();
+        setSslConfiguredFlag(false);
+        try {
+            X509TrustManager defaultX509 = mock(X509TrustManager.class);
+            X509TrustManager windowsX509 = mock(X509TrustManager.class);
+            KeyStore windowsStore = mock(KeyStore.class);
+            TrustManagerFactory defaultTmf = mock(TrustManagerFactory.class);
+            TrustManagerFactory windowsTmf = mock(TrustManagerFactory.class);
+            SSLContext sslContext = mock(SSLContext.class);
+            SSLSocketFactory socketFactory = mock(SSLSocketFactory.class);
+            when(defaultTmf.getTrustManagers()).thenReturn(new TrustManager[]{defaultX509});
+            when(windowsTmf.getTrustManagers()).thenReturn(new TrustManager[]{windowsX509});
+            when(sslContext.getSocketFactory()).thenReturn(socketFactory);
+
+            try (MockedStatic<KeyStore> keyStoreMock = mockStatic(KeyStore.class, CALLS_REAL_METHODS);
+                 MockedStatic<TrustManagerFactory> tmfMock =
+                         mockStatic(TrustManagerFactory.class, CALLS_REAL_METHODS);
+                 MockedStatic<SSLContext> sslContextMock =
+                         mockStatic(SSLContext.class, CALLS_REAL_METHODS)) {
+                keyStoreMock.when(() -> KeyStore.getInstance("Windows-ROOT")).thenReturn(windowsStore);
+                tmfMock.when(() -> TrustManagerFactory.getInstance(nullable(String.class)))
+                        .thenReturn(defaultTmf, windowsTmf);
+                sslContextMock.when(() -> SSLContext.getInstance("TLS")).thenReturn(sslContext);
+
+                assertEquals(-1L, service.estimateRepoSize("D:/repos/local"));
+            }
+
+            verify(windowsStore).load(null, null);
+            verify(windowsTmf).init(windowsStore);
+            ArgumentCaptor<TrustManager[]> trustCaptor = ArgumentCaptor.forClass(TrustManager[].class);
+            verify(sslContext).init(isNull(), trustCaptor.capture(), isNull());
+            assertEquals(1, trustCaptor.getValue().length);
+            assertEquals(Arrays.asList(defaultX509, windowsX509),
+                    combinedTrustManagerDelegates(trustCaptor.getValue()[0]),
+                    "仅 X509TrustManager 进入组合链，JB 默认在前、Windows-ROOT 在后");
+            assertSame(socketFactory, HttpsURLConnection.getDefaultSSLSocketFactory(),
+                    "SSLContext 产出的工厂必须安装为 JVM 默认工厂");
+            assertTrue(sslConfiguredFlag());
+        } finally {
+            HttpsURLConnection.setDefaultSSLSocketFactory(savedFactory);
+            setSslConfiguredFlag(savedFlag);
+        }
+    }
+
     // ==================== cloneRepository ====================
+
+    @Test
+    @DisplayName("cloneRepository 入口先配置 SSL：重置标记后调用失败克隆，静态标记必须已被置位")
+    void cloneRepository_shouldConfigureSslFirst(@TempDir Path tempDir) throws Exception {
+        boolean savedFlag = sslConfiguredFlag();
+        setSslConfiguredFlag(false);
+        try {
+            GitResult result = service.cloneRepository(
+                    tempDir.resolve("no-such-repo").toUri().toString(), "master",
+                    tempDir.resolve("cloned"), message -> { });
+
+            assertFalse(result.isSuccess());
+            assertTrue(sslConfiguredFlag(),
+                    "cloneRepository 必须在克隆前调用 configureSslForWindows（入口第一步）");
+        } finally {
+            setSslConfiguredFlag(savedFlag);
+        }
+    }
+
+    /**
+     * 伪造 JGit 克隆瞬时成功。关键：Mockito 静态 mock 只在创建线程内生效，而生产代码的克隆体
+     * 跑在 CompletableFuture.supplyAsync 的 commonPool worker 上——因此必须同时把 supplyAsync
+     * （该静态调用发生在调用线程）替换为同步执行，让 supplier 回到测试线程运行，两个 mock 才能一起命中。
+     */
+    private static CloneMocks mockSynchronousClone(Git git) throws Exception {
+        MockedStatic<Git> gitMock = mockStatic(Git.class, CALLS_REAL_METHODS);
+        CloneCommand command = mock(CloneCommand.class, RETURNS_SELF);
+        when(command.call()).thenReturn(git);
+        gitMock.when(Git::cloneRepository).thenReturn(command);
+
+        MockedStatic<CompletableFuture> futureMock =
+                mockStatic(CompletableFuture.class, CALLS_REAL_METHODS);
+        futureMock.when(() -> CompletableFuture.supplyAsync(nullable(Supplier.class)))
+                .thenAnswer(invocation -> {
+                    Supplier<?> supplier = invocation.getArgument(0);
+                    return CompletableFuture.completedFuture(supplier.get());
+                });
+        return new CloneMocks(gitMock, futureMock);
+    }
+
+    /** 成对持有克隆相关静态 mock，按逆序关闭 */
+    private static final class CloneMocks implements AutoCloseable {
+
+        private final MockedStatic<Git> gitMock;
+        private final MockedStatic<CompletableFuture> futureMock;
+
+        CloneMocks(MockedStatic<Git> gitMock, MockedStatic<CompletableFuture> futureMock) {
+            this.gitMock = gitMock;
+            this.futureMock = futureMock;
+        }
+
+        @Override
+        public void close() {
+            futureMock.close();
+            gitMock.close();
+        }
+    }
+
+    private static Git gitWithHead(String branch, String commitHash) throws Exception {
+        Ref headRef = mock(Ref.class);
+        when(headRef.getObjectId()).thenReturn(ObjectId.fromString(commitHash));
+        RefDatabase refDb = mock(RefDatabase.class);
+        when(refDb.findRef("HEAD")).thenReturn(headRef);
+        Repository repository = mock(Repository.class);
+        when(repository.getRefDatabase()).thenReturn(refDb);
+        when(repository.getBranch()).thenReturn(branch);
+        Git git = mock(Git.class);
+        when(git.getRepository()).thenReturn(repository);
+        return git;
+    }
+
+    @Test
+    @DisplayName("克隆后目录大小恰好等于 500MB 上限：> 判定为 false 不拒绝，返回成功（边界精确驱动）")
+    void cloneRepository_exactSizeLimit_shouldSucceed(@TempDir Path tempDir) throws Exception {
+        Path target = tempDir.resolve("exact-target");
+        Files.createDirectories(target);
+        try (RandomAccessFile sparse = new RandomAccessFile(target.resolve("big.bin").toFile(), "rw")) {
+            sparse.setLength(500L * 1024 * 1024); // 恰好 MAX_REPO_SIZE_BYTES，毫秒级稀疏分配
+        }
+        assertEquals(524288000L, Files.size(target.resolve("big.bin")));
+
+        Git git = gitWithHead("main", "0123456789abcdef0123456789abcdef01234567");
+        GitResult result;
+        try (CloneMocks ignored = mockSynchronousClone(git)) {
+            result = service.cloneRepository("https://example.com/repo.git", "main", target, message -> { });
+        }
+
+        assertTrue(result.isSuccess(),
+                "sizeBytes == 上限时 > 判定必须为 false（>= 变异会误拒），实际消息: " + result.getMessage());
+        assertEquals("clone ok", result.getMessage());
+        assertEquals("main", result.getBranch());
+        assertEquals("0123456789abcdef0123456789abcdef01234567", result.getCommitHash());
+    }
+
+    @Test
+    @DisplayName("克隆后目录超限拒绝消息：按字节精确换算 550 MB / 上限 500 MB")
+    void cloneRepository_oversizeMessage_shouldContainExactMb(@TempDir Path tempDir) throws Exception {
+        Path target = tempDir.resolve("huge-target");
+        Files.createDirectories(target);
+        try (RandomAccessFile sparse = new RandomAccessFile(target.resolve("big.bin").toFile(), "rw")) {
+            sparse.setLength(550L * 1024 * 1024);
+        }
+
+        Git git = gitWithHead("main", "0123456789abcdef0123456789abcdef01234567");
+        GitResult result;
+        try (CloneMocks ignored = mockSynchronousClone(git)) {
+            result = service.cloneRepository("https://example.com/repo.git", "main", target, message -> { });
+        }
+
+        assertFalse(result.isSuccess());
+        assertEquals("仓库过大: 550 MB (上限 500 MB)，建议拆分项目或使用子模块", result.getMessage(),
+                "拒绝消息必须按字节精确换算 MB 数（除法变异会放大为天文数字）");
+    }
+
+    @Test
+    @DisplayName("克隆超时：future.get 抛 TimeoutException 时返回超时失败结果并记录分钟数日志（毫秒级驱动，不等 10 分钟）")
+    @SuppressWarnings("unchecked")
+    void cloneRepository_timeout_shouldReturnTimeoutResultWithLog(@TempDir Path tempDir) throws Exception {
+        Logger gitLogger = (Logger) LoggerFactory.getLogger(GitService.class);
+        Level previousLevel = gitLogger.getLevel();
+        gitLogger.setLevel(Level.DEBUG);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        gitLogger.addAppender(appender);
+
+        Path target = tempDir.resolve("timeout-target");
+        GitResult result;
+        try (MockedStatic<CompletableFuture> futureMock =
+                     mockStatic(CompletableFuture.class, CALLS_REAL_METHODS)) {
+            // supplyAsync 返回一个 get(timeout) 必定超时的 future：直接驱动外层 TimeoutException 分支
+            CompletableFuture<GitResult> timedOut = mock(CompletableFuture.class);
+            when(timedOut.get(anyLong(), any(TimeUnit.class))).thenThrow(new TimeoutException());
+            futureMock.when(() -> CompletableFuture.supplyAsync(nullable(Supplier.class)))
+                    .thenReturn((CompletableFuture) timedOut);
+
+            result = service.cloneRepository("https://example.com/slow.git", "main", target, message -> { });
+        } finally {
+            gitLogger.detachAppender(appender);
+            gitLogger.setLevel(previousLevel);
+        }
+
+        assertFalse(result.isSuccess(), "超时分支必须返回失败结果");
+        assertNull(result.getLocalPath());
+        assertNull(result.getCommitHash());
+        assertEquals("main", result.getBranch(), "超时失败结果原样保留请求的分支名");
+        assertTrue(result.getMessage().contains("仓库克隆超时 (超过 10 分钟)"),
+                "超时消息必须携带分钟数与建议，实际: " + result.getMessage());
+        assertTrue(formattedLogs(appender).contains("Clone timeout for https://example.com/slow.git after 10 minutes"),
+                "超时 catch 必须记录含 URL 与分钟数的错误日志，实际日志: " + formattedLogs(appender));
+    }
+
+    // ==================== estimateRepoSize 请求装配（mockConstruction 驱动） ====================
+
+    /** 按固定块大小返回数据的输入流：保证 InputStreamReader 每次 read(char[1024]) 得到确定长度的块 */
+    private static final class ChunkedInputStream extends InputStream {
+
+        private final byte[] data;
+        private final int chunk;
+        private int pos;
+
+        ChunkedInputStream(byte[] data, int chunk) {
+            this.data = data;
+            this.chunk = chunk;
+        }
+
+        @Override
+        public int read() {
+            return pos < data.length ? data[pos++] & 0xFF : -1;
+        }
+
+        @Override
+        public int read(byte[] b, int off, int len) {
+            if (pos >= data.length) {
+                return -1;
+            }
+            int n = Math.min(Math.min(chunk, len), data.length - pos);
+            System.arraycopy(data, pos, b, off, n);
+            pos += n;
+            return n;
+        }
+    }
+
+    @Test
+    @DisplayName("GitHub API 请求装配：连接/读取超时 8000ms 与双请求头逐调用断言；读取在 8192 边界精确截停")
+    void estimateRepoSize_shouldSetTimeoutsHeaders_andStopExactlyAt8192Boundary() throws Exception {
+        assertEquals(-1L, service.estimateRepoSize("D:/repos/local")); // 先完成 SSL 配置
+
+        HttpURLConnection conn = mock(HttpURLConnection.class);
+        when(conn.getResponseCode()).thenReturn(200);
+        // 8192 字节填充 + 尾部 size 字段：恰好 1024*8 处累计长度命中 > 8192 判定
+        byte[] padding = new byte[8192];
+        Arrays.fill(padding, (byte) 'a');
+        byte[] tail = "\"size\":2048}".getBytes(StandardCharsets.UTF_8);
+        byte[] payload = Arrays.copyOf(padding, padding.length + tail.length);
+        System.arraycopy(tail, 0, payload, padding.length, tail.length);
+        when(conn.getInputStream()).thenReturn(new ChunkedInputStream(payload, 1024));
+
+        long estimated;
+        try (MockedConstruction<URL> urlMock = mockConstruction(URL.class,
+                (url, context) -> when(url.openConnection()).thenReturn(conn))) {
+            estimated = service.estimateRepoSize("https://github.com/foo/bar");
+        }
+
+        assertEquals(2048L * 1024 * 4, estimated,
+                "8192 字节后仍有数据：必须继续读取到 > 8192 才截停，size 字段在尾部时必须能取到");
+        verify(conn).setConnectTimeout(8000);
+        verify(conn).setReadTimeout(8000);
+        verify(conn).setRequestProperty("Accept", "application/vnd.github.v3+json");
+        verify(conn).setRequestProperty("User-Agent", "CodeAtlas/1.0");
+    }
+
+    // ==================== cloneRepository（mock 前述） ====================
 
     @Test
     @DisplayName("本地仓库克隆成功：返回真实 commit hash/分支/路径，目标目录含检出文件")
@@ -264,15 +622,39 @@ class GitServiceTest {
         server.start();
         try {
             List<String> progress = new CopyOnWriteArrayList<>();
+            AtomicBoolean heartbeatOnDaemonThread = new AtomicBoolean(false);
+            AtomicReference<Long> heartbeatElapsedSeconds = new AtomicReference<>();
             Path target = tempDir.resolve("cloned-slow");
 
-            GitResult result = service.cloneRepository(
+            // 用显式非守护线程发起调用：心跳线程由线程工厂在调用线程上创建，
+            // 若 setDaemon(true) 被移除，守护属性将继承调用线程——固定为非守护才能确定性观测
+            GitResult[] resultHolder = new GitResult[1];
+            Thread caller = new Thread(() -> resultHolder[0] = service.cloneRepository(
                     "http://127.0.0.1:" + server.getAddress().getPort() + "/repo.git",
-                    "master", target, progress::add);
+                    "master", target, message -> {
+                        progress.add(message);
+                        if (message.contains("已耗时")) {
+                            heartbeatOnDaemonThread.set(Thread.currentThread().isDaemon());
+                            Matcher elapsedMatcher = HEARTBEAT_ELAPSED.matcher(message);
+                            if (elapsedMatcher.find()) {
+                                heartbeatElapsedSeconds.set(Long.parseLong(elapsedMatcher.group(1)));
+                            }
+                        }
+                    }), "non-daemon-clone-caller");
+            caller.setDaemon(false);
+            caller.start();
+            caller.join();
+            GitResult result = resultHolder[0];
 
             assertFalse(result.isSuccess());
             assertTrue(progress.stream().anyMatch(m -> m.contains("正在克隆仓库")),
                     "克隆阻塞超过 10 秒必须触发心跳进度回调，实际回调: " + progress);
+            assertTrue(heartbeatOnDaemonThread.get(),
+                    "心跳线程必须是守护线程（setDaemon(true) 被移除后默认继承主线程的非守护属性，会阻止 JVM 退出）");
+            Long elapsed = heartbeatElapsedSeconds.get();
+            assertNotNull(elapsed, "心跳消息必须携带可解析的「已耗时 N 秒」，实际回调: " + progress);
+            assertTrue(elapsed >= 10 && elapsed <= 60,
+                    "心跳耗时必须是真实经过的秒数 10~60（减法改加法会得到 epoch 量级绝对值，除法改乘法会放大千倍），实际: " + elapsed);
         } finally {
             server.stop(0);
         }
