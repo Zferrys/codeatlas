@@ -8,7 +8,9 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "test:mutation": "stryker run",
+    "postinstall": "node scripts/patch-stryker-vitest-runner.mjs"
   },
   "dependencies": {
     "@ant-design/icons-vue": "^7.0.1",
@@ -26,6 +28,8 @@
     "vue-router": "^4.6.4"
   },
   "devDependencies": {
+    "@stryker-mutator/core": "^10.0.0",
+    "@stryker-mutator/vitest-runner": "^10.0.0",
     "@vitejs/plugin-vue": "^6.0.7",
     "@vitest/coverage-v8": "^5.0.4",
     "@vue/test-utils": "^2.5.1",

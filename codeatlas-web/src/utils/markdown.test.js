@@ -1,7 +1,12 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
+import hljs from 'highlight.js'
 import { renderMarkdown } from './markdown'
 
 describe('renderMarkdown', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
   it('renderMarkdown_whenContentFalsy_shouldReturnEmptyString', () => {
     expect(renderMarkdown(null)).toBe('')
     expect(renderMarkdown(undefined)).toBe('')
@@ -30,12 +35,27 @@ describe('renderMarkdown', () => {
   })
 
   it('renderMarkdown_whenKnownLanguageCodeBlock_shouldHighlightWithHljs', () => {
+    const highlightSpy = vi.spyOn(hljs, 'highlight')
+    const autoSpy = vi.spyOn(hljs, 'highlightAuto')
+
     const out = renderMarkdown('```java\nint a = 1;\n```')
-    expect(out).toContain('hljs')
+
+    // 已知语言必须走 hljs.highlight 指定语言，而不是自动探测
+    expect(highlightSpy).toHaveBeenCalledTimes(1)
+    expect(highlightSpy).toHaveBeenCalledWith(expect.any(String), { language: 'java' })
+    expect(autoSpy).not.toHaveBeenCalled()
+    expect(out).toContain('hljs-number')
   })
 
   it('renderMarkdown_whenUnknownLanguageCodeBlock_shouldFallbackToAutoHighlight', () => {
+    const highlightSpy = vi.spyOn(hljs, 'highlight')
+    const autoSpy = vi.spyOn(hljs, 'highlightAuto')
+
     const out = renderMarkdown('```notalang\nfoo bar\n```')
+
+    // 未知语言回退到自动探测，且不指定语言调用 highlight
+    expect(autoSpy).toHaveBeenCalled()
+    expect(highlightSpy).not.toHaveBeenCalled()
     expect(out).toContain('hljs')
   })
 })
