@@ -48,6 +48,8 @@
         <!-- 插件版本 -->
         <maven-compiler.version>3.11.0</maven-compiler.version>
         <jacoco.version>0.8.12</jacoco.version>
+        <pitest.version>1.16.1</pitest.version>
+        <pitest-junit5.version>1.2.2</pitest-junit5.version>
         <checkstyle.version>3.3.1</checkstyle.version>
         <pmd.version>3.22.0</pmd.version>
         <owasp-dependency-check.version>9.2.0</owasp-dependency-check.version>
@@ -193,6 +195,30 @@
                             <goals><goal>check</goal></goals>
                         </execution>
                     </executions>
+                </plugin>
+                <plugin>
+                    <groupId>org.pitest</groupId>
+                    <artifactId>pitest-maven</artifactId>
+                    <version>${pitest.version}</version>
+                    <configuration>
+                        <!-- 报告固定路径（覆盖率/变异报告供审查存档，不按时间戳散落） -->
+                        <timestampedReports>false</timestampedReports>
+                        <outputFormats>
+                            <param>XML</param>
+                            <param>HTML</param>
+                        </outputFormats>
+                        <threads>4</threads>
+                        <failWhenNoMutations>false</failWhenNoMutations>
+                        <!-- 变异门槛按模块在各自 pom 中声明；全局先关闭防误伤 -->
+                        <mutationThreshold>0</mutationThreshold>
+                    </configuration>
+                    <dependencies>
+                        <dependency>
+                            <groupId>org.pitest</groupId>
+                            <artifactId>pitest-junit5-plugin</artifactId>
+                            <version>${pitest-junit5.version}</version>
+                        </dependency>
+                    </dependencies>
                 </plugin>
                 <plugin>
                     <groupId>org.apache.maven.plugins</groupId>

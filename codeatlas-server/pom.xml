@@ -267,6 +267,19 @@
                     <failOnViolation>true</failOnViolation>
                 </configuration>
             </plugin>
+            <!-- 变异测试：mvn -pl codeatlas-server pitest:mutationCoverage（目标类/测试可经 -D 覆盖） -->
+            <plugin>
+                <groupId>org.pitest</groupId>
+                <artifactId>pitest-maven</artifactId>
+                <configuration>
+                    <targetClasses>
+                        <param>com.codeatlas.server.*</param>
+                    </targetClasses>
+                    <targetTests>
+                        <param>com.codeatlas.server.*</param>
+                    </targetTests>
+                </configuration>
+            </plugin>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-pmd-plugin</artifactId>
