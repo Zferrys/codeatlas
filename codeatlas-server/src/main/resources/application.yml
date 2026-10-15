@@ -46,17 +46,17 @@ spring:
     neo4j:
       transaction-manager-name: neo4jTransactionManager
 
-  # ---- Redis ----
-  redis:
-    host: "${REDIS_HOST:127.0.0.1}"
-    port: "${REDIS_PORT:6379}"
-    password: "${REDIS_PASSWORD:}"
-    timeout: 3000ms
-    lettuce:
-      pool:
-        max-active: 8
-        max-idle: 8
-        min-idle: 0
+    # ---- Redis（Spring Boot 3 绑定前缀为 spring.data.redis，勿改回 spring.redis） ----
+    redis:
+      host: "${REDIS_HOST:127.0.0.1}"
+      port: "${REDIS_PORT:6379}"
+      password: "${REDIS_PASSWORD:}"
+      timeout: 3000ms
+      lettuce:
+        pool:
+          max-active: 8
+          max-idle: 8
+          min-idle: 0
 
   # ---- File Upload ----
   servlet:

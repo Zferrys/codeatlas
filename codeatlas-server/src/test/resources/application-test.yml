@@ -22,13 +22,14 @@ spring:
       password: neo4j
 
   # 测试不需要 Redis
-  redis:
-    host: 127.0.0.1
-    port: 6379
-    timeout: 3000ms
-    lettuce:
-      pool:
-        max-active: 2
+  data:
+    redis:
+      host: 127.0.0.1
+      port: 6379
+      timeout: 3000ms
+      lettuce:
+        pool:
+          max-active: 2
 
   sql:
     init:
