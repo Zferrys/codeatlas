@@ -211,7 +211,8 @@
                             <param>XML</param>
                             <param>HTML</param>
                         </outputFormats>
-                        <threads>4</threads>
+                        <!-- 变异分析并行线程数：4 曾致 pitest minion 批量异常退出（一次全量 868 条 RUN_ERROR 污染报告），2 为实测稳定值 -->
+                        <threads>2</threads>
                         <failWhenNoMutations>false</failWhenNoMutations>
                         <!-- 变异门槛按模块在各自 pom 中声明；全局先关闭防误伤 -->
                         <mutationThreshold>0</mutationThreshold>
