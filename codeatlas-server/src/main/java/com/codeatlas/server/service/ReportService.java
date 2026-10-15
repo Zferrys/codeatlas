@@ -14,6 +14,8 @@ import com.itextpdf.kernel.font.PdfFontFactory;
 import com.itextpdf.kernel.pdf.PdfDocument;
 import com.itextpdf.kernel.pdf.PdfWriter;
 import com.itextpdf.io.font.PdfEncodings;
+import com.itextpdf.io.font.TrueTypeFont;
+import com.itextpdf.io.font.otf.Glyph;
 import com.itextpdf.layout.Document;
 import com.itextpdf.layout.element.Cell;
 import com.itextpdf.layout.element.Paragraph;
@@ -142,7 +144,7 @@ public class ReportService {
         }
     }
 
-    private PdfFont loadChineseFont() {
+    private synchronized PdfFont loadChineseFont() {
         // .ttc 是字体集合，iText 必须用 "路径,索引" 语法加载（裸路径报 Type of font not recognized）；
         // Noto CJK 集合的索引 2 = SC 简体中文（索引 0 是日文字形）
         String[] fontPaths = {
@@ -159,8 +161,10 @@ public class ReportService {
         };
         for (String path : fontPaths) {
             try {
-                return PdfFontFactory.createFont(path, PdfEncodings.IDENTITY_H,
+                PdfFont font = PdfFontFactory.createFont(path, PdfEncodings.IDENTITY_H,
                         PdfFontFactory.EmbeddingStrategy.PREFER_EMBEDDED);
+                fixSharedGlyphUnicode(font);
+                return font;
             } catch (Exception ignored) {
                 // try next
             }
@@ -172,6 +176,49 @@ public class ReportService {
         } catch (Exception e) {
             throw new RuntimeException("无法创建 PDF 字体", e);
         }
+    }
+
+    /**
+     * 共享字形 unicode 复位。Noto Sans CJK 中康熙部首块（U+2E80–U+2FDF）与常用汉字共享同一字形，
+     * 而 iText 生成“码点→字形”反向映射（TrueTypeFont.codeToGlyph）时有意保留 unicode 更小的
+     * 字形对象，导致 PDF 文本提取把「行」输出为部首码点「⾏」（视觉一致但复制粘贴/检索错误）。
+     * 这里按 cmap 遍历表意区码点，凡其字形被保留为部首码点的，复位为对应汉字码点；列表符号
+     * 「•」(U+2022) 与间隔号「·」(U+00B7) 共享字形时统一按「•」输出。修正幂等（重复调用无副作用）。
+     */
+    private void fixSharedGlyphUnicode(PdfFont font) {
+        if (!(font.getFontProgram() instanceof TrueTypeFont)) {
+            return;
+        }
+        TrueTypeFont ttf = (TrueTypeFont) font.getFontProgram();
+        for (Map.Entry<Integer, int[]> entry : ttf.getActiveCmap().entrySet()) {
+            int unicode = entry.getKey();
+            if (!isCjkIdeograph(unicode)) {
+                continue;
+            }
+            Glyph glyph = ttf.getGlyphByCode(entry.getValue()[0]);
+            if (glyph != null && isRadicalLike(glyph.getUnicode())) {
+                glyph.setUnicode(unicode);
+            }
+        }
+        int[] bullet = ttf.getActiveCmap().get(0x2022);
+        int[] middleDot = ttf.getActiveCmap().get(0x00B7);
+        if (bullet != null && middleDot != null && bullet[0] == middleDot[0]) {
+            Glyph glyph = ttf.getGlyphByCode(bullet[0]);
+            if (glyph != null && glyph.getUnicode() == 0x00B7) {
+                glyph.setUnicode(0x2022);
+            }
+        }
+    }
+
+    private static boolean isCjkIdeograph(int unicode) {
+        return (unicode >= 0x4E00 && unicode <= 0x9FFF)
+                || (unicode >= 0x3400 && unicode <= 0x4DBF)
+                || (unicode >= 0xFA0E && unicode <= 0xFA29);
+    }
+
+    private static boolean isRadicalLike(int unicode) {
+        return (unicode >= 0x2E80 && unicode <= 0x2EFF)
+                || (unicode >= 0x2F00 && unicode <= 0x2FDF);
     }
 
     /** iText 无 HTML 渲染能力，叙事按行做轻量格式化：标题加粗、列表加符号、去掉 Markdown 标记 */

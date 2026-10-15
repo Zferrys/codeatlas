@@ -453,6 +453,24 @@ class ReportServiceTest {
     }
 
     @Test
+    @DisplayName("PDF 报告：提取文本不含康熙部首码点（Noto CJK 共享字形修正回归）")
+    void generatePdf_shouldNotExtractKangxiRadicalCodepoints() {
+        when(projectMapper.findById(PROJECT_ID)).thenReturn(ownedProject("DemoProj", "85.5"));
+        when(scanMapper.findLatestByProjectId(PROJECT_ID)).thenReturn(scan());
+        when(insightService.getLatestArchStory(PROJECT_ID)).thenReturn(
+                insight("架构叙事", "# 标题马克\n- 列表马克\n行与马并用", "0.5"));
+
+        byte[] pdf = service.generatePdf(PROJECT_ID, USER_ID);
+
+        String text = extractPdfText(pdf);
+        boolean hasRadicalCodepoint = text.codePoints()
+                .anyMatch(cp -> cp >= 0x2E80 && cp <= 0x2FDF);
+        assertFalse(hasRadicalCodepoint,
+                "提取文本不应包含康熙部首（U+2E80–U+2FDF）码点：Noto CJK 与常用汉字共享字形，"
+                        + "若 iText 反向映射保留部首码点会破坏复制粘贴与关键词检索");
+    }
+
+    @Test
     @DisplayName("PDF 生成内部异常：包装为 PDF 生成失败运行时异常")
     void generatePdf_internalFailure_shouldWrapRuntimeException() {
         when(projectMapper.findById(PROJECT_ID)).thenReturn(ownedProject("DemoProj", "85.5"));
