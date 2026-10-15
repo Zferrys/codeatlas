@@ -184,6 +184,10 @@
                         <execution>
                             <id>prepare-agent</id>
                             <goals><goal>prepare-agent</goal></goals>
+                            <configuration>
+                                <!-- 每次运行重写 jacoco.exec：append=true 会跨次累积导致覆盖率假性虚高 -->
+                                <append>false</append>
+                            </configuration>
                         </execution>
                         <execution>
                             <id>report</id>

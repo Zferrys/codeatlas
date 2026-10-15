@@ -209,7 +209,6 @@ public class AiAnalysisService {
             AiRequest request = new AiRequest();
             request.setPrompt(sanitizedPrompt);
             request.setSystemPrompt("你是一位资深软件架构师。请分析代码库并用中文生成深入、准确的架构叙事报告。所有结论必须引用具体的类和包。专业术语保留英文，类名/包名保留原文。");
-            request.setTemperature(0.3);
             request.setMaxTokens(8192);
             progressRegistry.publish(taskId, "AI 正在生成架构解读（通常需要 1–3 分钟）…");
 
@@ -485,8 +484,6 @@ public class AiAnalysisService {
             AiRequest req = new AiRequest();
             req.setPrompt(prompt);
             req.setSystemPrompt(systemPrompt);
-            req.setTemperature(0.3);
-            req.setMaxTokens(4096);
 
             AiResponse resp = self.callAiWithResilience(req);
             if (resp != null) {
@@ -536,7 +533,6 @@ public class AiAnalysisService {
         AiRequest summaryReq = new AiRequest();
         summaryReq.setPrompt(summaryPrompt);
         summaryReq.setSystemPrompt("你是一位资深软件架构师。请整合以下模块分析结果，生成一份专业的架构叙事报告。使用中文。");
-        summaryReq.setTemperature(0.3);
         summaryReq.setMaxTokens(8192);
 
         AiResponse summaryResp = self.callAiWithResilience(summaryReq);

@@ -110,7 +110,6 @@ public class AgenticSearchService {
         int totalTokenUsed = 0;
         int totalPromptTokens = 0;
         int totalCompletionTokens = 0;
-        long totalLatency = 0;
         boolean success = false;
         List<String> toolsCalled = new ArrayList<>();
         List<String> evidence = new ArrayList<>();
@@ -129,8 +128,6 @@ public class AgenticSearchService {
             AiRequest request = new AiRequest();
             request.setMessages(messages);
             request.setTools(toolRegistry.getToolDefs());
-            request.setTemperature(0.3);
-            request.setMaxTokens(4096);
 
             AiResponse response;
             try {
@@ -161,7 +158,6 @@ public class AgenticSearchService {
             totalTokenUsed += response.getTokensUsed();
             totalPromptTokens += response.getPromptTokens();
             totalCompletionTokens += response.getCompletionTokens();
-            totalLatency += response.getLatencyMs();
 
             // check for tool calls
             if (response.hasToolCalls()) {
@@ -205,8 +201,6 @@ public class AgenticSearchService {
                     "已达到工具调用轮次上限，请立即基于以上已获取的信息直接给出最终回答，不要再请求调用工具。"));
             AiRequest finalRequest = new AiRequest();
             finalRequest.setMessages(messages);
-            finalRequest.setTemperature(0.3);
-            finalRequest.setMaxTokens(4096);
             try {
                 AiResponse finalResponse = aiClient.chat(finalRequest);
                 if (finalResponse != null) {
@@ -254,14 +248,12 @@ public class AgenticSearchService {
                             AiRequest correctionRequest = new AiRequest();
                             correctionRequest.setMessages(correctionMessages);
                             correctionRequest.setTemperature(0.1);
-                            correctionRequest.setMaxTokens(4096);
                             AiResponse correctionResponse = aiClient.chat(correctionRequest);
                             if (correctionResponse != null && correctionResponse.getContent() != null
                                     && !correctionResponse.getContent().trim().isEmpty()) {
                                 totalTokenUsed += correctionResponse.getTokensUsed();
                                 totalPromptTokens += correctionResponse.getPromptTokens();
                                 totalCompletionTokens += correctionResponse.getCompletionTokens();
-                                totalLatency += correctionResponse.getLatencyMs();
                                 EvidenceVerifier.VerificationReport recheck = evidenceVerifier.verify(
                                         correctionResponse.getContent(), evidence, classSummaries);
                                 if (recheck.anomalyCount() < anomalyBefore) {

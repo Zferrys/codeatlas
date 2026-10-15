@@ -68,7 +68,6 @@ public class ReportService {
             Document document = new Document(pdf);
 
             PdfFont cnFont = loadChineseFont();
-            float docWidth = pdf.getDefaultPageSize().getWidth() - 72; // A4 减去左右margin
 
             // 标题
             document.add(new Paragraph("CodeAtlas — 架构分析报告")

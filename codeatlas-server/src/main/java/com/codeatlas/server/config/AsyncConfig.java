@@ -39,7 +39,6 @@ public class AsyncConfig {
     @Bean(name = "scanExecutor")
     public Executor scanExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        executor.setCorePoolSize(1);
         executor.setMaxPoolSize(3);
         executor.setQueueCapacity(10);
         executor.setThreadNamePrefix("scan-worker-");
@@ -59,7 +58,6 @@ public class AsyncConfig {
     @Bean(name = "auditExecutor")
     public Executor auditExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        executor.setCorePoolSize(1);
         executor.setMaxPoolSize(2);
         executor.setQueueCapacity(500);
         executor.setThreadNamePrefix("audit-");

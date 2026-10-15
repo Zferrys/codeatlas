@@ -122,7 +122,6 @@ public class ImpactAnalysisService {
                         request.setPrompt(prompt);
                         request.setSystemPrompt(
                                 "你是一位资深软件架构师。分析代码变更的影响范围，评估风险，给出建议。用中文回答，保留类名/方法名原文。");
-                        request.setTemperature(0.3);
                         // 推理模型 reasoning 与正文共享 max_tokens：4096 档实测被推理 100% 耗尽（双模型空正文），对齐架构模式识别的成功档位
                         request.setMaxTokens(8192);
                         progressRegistry.publish(taskId, "AI 正在评估变更风险…");
@@ -241,8 +240,6 @@ public class ImpactAnalysisService {
             AiRequest request = new AiRequest();
             request.setPrompt(prompt);
             request.setSystemPrompt("你是一位资深软件架构师，正在帮助开发者理解代码库。基于提供的项目上下文准确回答问题。");
-            request.setTemperature(0.3);
-            request.setMaxTokens(4096);
             progressRegistry.publish(taskId, "AI 正在组织回答…");
 
             AiResponse response = aiAnalysisService.callAiWithResilience(request);
@@ -339,7 +336,6 @@ public class ImpactAnalysisService {
                     + "\n\n## 修正请求\n" + evidenceVerifier.buildCorrectionPrompt(report));
             correctionRequest.setSystemPrompt("你是一位资深软件架构师，正在帮助开发者理解代码库。基于提供的项目上下文准确回答问题。");
             correctionRequest.setTemperature(0.1);
-            correctionRequest.setMaxTokens(4096);
             return aiAnalysisService.callAiWithResilience(correctionRequest);
         } catch (Exception e) {
             log.warn("Context QA correction round failed: {}", e.getMessage());

@@ -405,7 +405,6 @@ public class Neo4jGraphService {
                 PackageInfo pi = new PackageInfo();
                 pi.packageName = record.get("packageName").asString();
                 pi.layer = record.get("layer").asString();
-                pi.classCount = record.get("classCount").asInt();
                 pi.totalMethods = record.get("totalMethods").asInt(0);
                 pi.totalLineCount = record.get("totalLineCount").asInt(0);
                 rawPackages.add(pi);
@@ -420,12 +419,10 @@ public class Neo4jGraphService {
                     PackageInfo mergedPi = new PackageInfo();
                     mergedPi.packageName = key;
                     mergedPi.layer = pi.layer;
-                    mergedPi.classCount = pi.classCount;
                     mergedPi.totalMethods = pi.totalMethods;
                     mergedPi.totalLineCount = pi.totalLineCount;
                     merged.put(key, mergedPi);
                 } else {
-                    existing.classCount += pi.classCount;
                     existing.totalMethods += pi.totalMethods;
                     existing.totalLineCount += pi.totalLineCount;
                     if (existing.layer == null && pi.layer != null) {
@@ -620,7 +617,6 @@ public class Neo4jGraphService {
     private static class PackageInfo {
         String packageName;
         String layer;
-        int classCount;
         int totalMethods;
         int totalLineCount;
     }

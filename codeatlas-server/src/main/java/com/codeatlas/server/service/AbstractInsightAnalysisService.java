@@ -114,7 +114,6 @@ public abstract class AbstractInsightAnalysisService {
         AiRequest request = new AiRequest();
         request.setPrompt(prompt);
         request.setSystemPrompt(systemPrompt());
-        request.setTemperature(0.3);
         request.setMaxTokens(maxTokens());
 
         AiResponse response = aiAnalysisService.callAiWithResilience(request);
