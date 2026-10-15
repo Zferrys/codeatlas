@@ -1,6 +1,7 @@
 package com.codeatlas.engine.ai;
 
 import com.sun.net.httpserver.HttpServer;
+import okhttp3.OkHttpClient;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -10,10 +11,12 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.lang.reflect.Field;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.atomic.AtomicReference;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -105,5 +108,16 @@ class ClaudeClientGuardTest {
         String body = lastRequestBody.get();
         assertTrue(body.contains("Reply with the single word: OK"), "探针必须要求可见正文回复");
         assertTrue(body.contains("\"max_tokens\":256"), "探针必须留足推理预算，防止空正文误判");
+    }
+
+    @Test
+    @DisplayName("构造配置：callTimeout 180s 兜底网关挂起（readTimeout 管不住 keep-alive 喂字节）")
+    void constructor_shouldConfigureCallTimeoutGuard() throws Exception {
+        ClaudeClient client = new ClaudeClient("test-key");
+        Field field = ClaudeClient.class.getDeclaredField("httpClient");
+        field.setAccessible(true);
+        OkHttpClient http = (OkHttpClient) field.get(client);
+
+        assertEquals(180_000, http.callTimeoutMillis());
     }
 }

@@ -146,6 +146,17 @@ class DeepSeekClientTest {
         assertEquals("custom-model", new DeepSeekClient("k", "custom-model").getModelName());
     }
 
+    @Test
+    @DisplayName("构造配置：callTimeout 180s 兜底网关挂起（readTimeout 管不住 keep-alive 喂字节）")
+    void constructor_shouldConfigureCallTimeoutGuard() throws Exception {
+        DeepSeekClient client = new DeepSeekClient("k");
+        Field field = DeepSeekClient.class.getDeclaredField("httpClient");
+        field.setAccessible(true);
+        OkHttpClient http = (OkHttpClient) field.get(client);
+
+        assertEquals(180_000, http.callTimeoutMillis());
+    }
+
     // ==================== chat：正常路径 ====================
 
     @Nested

@@ -70,7 +70,9 @@ public class ConstitutionRuleServiceImpl implements ConstitutionRuleService {
             log.warn("Rule not found: id={}", ruleId);
             return null;
         }
-        // 项目级规则必须归属路径中的项目；全局规则（project_id 为空）允许按既有语义切换
+        // 项目级规则必须归属路径中的项目；全局规则（project_id 为空）沿用本表全局启用语义，
+        // 由任意有权访问该项目的成员切换——这是产品要求（普通用户可自行调整规则），
+        // 代价是禁用会影响所有项目（内置规则共享一套启停状态，见 constitution_rule 种子数据）
         if (rule.getProjectId() != null && !rule.getProjectId().equals(projectId)) {
             throw new BusinessException(ErrorCode.NOT_FOUND, "规则不存在");
         }

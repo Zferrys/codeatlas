@@ -50,6 +50,10 @@ public class ClaudeClient implements AiClient {
         this.apiUrl = apiUrl;
         this.httpClient = new OkHttpClient.Builder()
                 .connectTimeout(30, TimeUnit.SECONDS)
+                // 与 DeepSeekClient 同款兜底：readTimeout 只管单次读操作的间隔，网关以 keep-alive
+                // 持续喂字节时永不触发，实测挂起请求能拖满 900s 才返回空响应。callTimeout 兜住
+                // 整次调用总时长，让挂起在确定时间内失败并走多模型降级
+                .callTimeout(180, TimeUnit.SECONDS)
                 .readTimeout(120, TimeUnit.SECONDS)
                 .writeTimeout(30, TimeUnit.SECONDS)
                 .build();
