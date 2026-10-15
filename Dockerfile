@@ -3,6 +3,8 @@ FROM node:20-alpine AS frontend-builder
 ENV NODE_OPTIONS="--max-old-space-size=384"
 WORKDIR /frontend
 COPY codeatlas-web/package.json codeatlas-web/package-lock.json ./
+# npm ci 会执行 package.json 的 postinstall（stryker runner 兼容补丁），脚本须先于 npm ci 在位
+COPY codeatlas-web/scripts/ ./scripts/
 RUN npm ci --silent
 COPY codeatlas-web/ .
 RUN npm run build
