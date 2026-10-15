@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount, flushPromises, enableAutoUnmount } from '@vue/test-utils'
-import { nextTick } from 'vue'
+import { nextTick, defineComponent, h, KeepAlive } from 'vue'
 import {
   Spin as ASpin, Result as AResult, Button as AButton, Empty as AEmpty,
   AutoComplete as AAutoComplete, Divider as ADivider, Switch as ASwitch, Tag as ATag
@@ -1033,6 +1033,92 @@ describe('CodeMap3D', () => {
     expect(apiMock.get).toHaveBeenLastCalledWith('/projects/2/map')
     expect(state.scenes).toHaveLength(2)
     expect(wrapper.vm.selectedNode).toBeNull()
+  })
+
+  it('CodeMap3D_whenDeactivatedInKeepAlive_shouldStopRenderLoopAndResumeOnActivate', async () => {
+    const host = defineComponent({
+      data() {
+        return { show: true }
+      },
+      render() {
+        return h(KeepAlive, null, [
+          this.show ? h(CodeMap3D, { projectId: 1 }) : h('div', { class: 'placeholder' }, 'hidden')
+        ])
+      }
+    })
+    const wrapper = mount(host, { global: { components: globalComponents } })
+    await settle()
+
+    const renderer = state.renderers[0]
+    const rafsAfterMount = state.rafs.length
+    const rendersAfterMount = renderer.render.mock.calls.length
+    expect(rafsAfterMount).toBeGreaterThanOrEqual(1)
+
+    // 失活：渲染循环取消，不再排帧、不再渲染（防止后台 60fps 空转拖慢整站）
+    wrapper.vm.show = false
+    await nextTick()
+    expect(state.cancelledFrames.length).toBeGreaterThanOrEqual(1)
+    expect(state.rafs.length).toBe(rafsAfterMount)
+    expect(renderer.render.mock.calls.length).toBe(rendersAfterMount)
+
+    // 激活：原地续跑——重排一帧并立即渲染
+    wrapper.vm.show = true
+    await nextTick()
+    expect(state.rafs.length).toBe(rafsAfterMount + 1)
+    expect(renderer.render.mock.calls.length).toBe(rendersAfterMount + 1)
+  })
+
+  it('CodeMap3D_whenGraphLoadsWhileDeactivated_shouldDeferRenderLoopUntilActivated', async () => {
+    const d = deferred()
+    apiMock.get.mockReturnValue(d.promise)
+    const host = defineComponent({
+      data() {
+        return { show: true }
+      },
+      render() {
+        return h(KeepAlive, null, [
+          this.show ? h(CodeMap3D, { projectId: 1 }) : h('div', { class: 'placeholder' }, 'hidden')
+        ])
+      }
+    })
+    const wrapper = mount(host, { global: { components: globalComponents } })
+    await nextTick()
+
+    // 加载中失活，随后数据才到：不得在后台启动循环
+    wrapper.vm.show = false
+    await nextTick()
+    d.resolve({ data: { data: makeGraphData() } })
+    await settle()
+
+    const renderer = state.renderers[0]
+    expect(renderer.render).not.toHaveBeenCalled()
+    expect(state.rafs).toHaveLength(0)
+
+    // 回到前台才启动循环
+    wrapper.vm.show = true
+    await nextTick()
+    expect(renderer.render).toHaveBeenCalledTimes(1)
+    expect(state.rafs).toHaveLength(1)
+  })
+
+  it('CodeMap3D_whenContainerCollapsed_shouldKeepLastValidCameraAspect', async () => {
+    const wrapper = mountMap3D()
+    await settle()
+
+    const canvas = wrapper.find('.map3d-canvas').element
+    const camera = state.cameras[0]
+
+    // 真实尺寸：aspect 正常更新
+    Object.defineProperty(canvas, 'clientWidth', { value: 800, configurable: true })
+    Object.defineProperty(canvas, 'clientHeight', { value: 400, configurable: true })
+    state.resizeObservers[0].cb()
+    expect(camera.aspect).toBe(2)
+
+    // 失活/隐藏使容器坍缩为 0：aspect 不得被 NaN 污染（否则投影矩阵报废、画面消失）
+    Object.defineProperty(canvas, 'clientWidth', { value: 0, configurable: true })
+    Object.defineProperty(canvas, 'clientHeight', { value: 0, configurable: true })
+    state.resizeObservers[0].cb()
+    expect(camera.aspect).toBe(2)
   })
 
   it('CodeMap3D_whenUnmounted_shouldDisposeResourcesAndDetachListeners', async () => {

@@ -106,11 +106,18 @@ jobs:
           cache: npm
           cache-dependency-path: codeatlas-web/package-lock.json
 
-      - name: Install & Build
+      - name: Install Dependencies
         working-directory: codeatlas-web
-        run: |
-          npm ci
-          npm run build
+        run: npm ci
+
+      # 前端 vitest 全量套件此前未接入 CI，回归只能靠本地；接线后与构建同 job 拦截
+      - name: Frontend Unit Tests
+        working-directory: codeatlas-web
+        run: npm test
+
+      - name: Build
+        working-directory: codeatlas-web
+        run: npm run build
 
   dependency-check:
     runs-on: ubuntu-latest

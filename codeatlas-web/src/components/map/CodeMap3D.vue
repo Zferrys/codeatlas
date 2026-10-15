@@ -81,7 +81,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount, onActivated, onDeactivated, nextTick } from 'vue'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { CSS2DRenderer, CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js'
@@ -112,6 +112,8 @@ const layoutProgress = ref(0)
 let scene, camera, renderer, labelRenderer, controls, raycaster
 let nodeMeshes = [], edgeLines = [], nodeLabels = [], nodeMeshMap = {}
 let animFrameId = null
+let animateFn = null
+let isDeactivated = false
 let resizeObserver = null
 
 const LAYER_COLORS = {
@@ -420,7 +422,9 @@ async function renderGraph(mapData) {
     renderer.render(scene, camera)
     labelRenderer.render(scene, camera)
   }
-  animate()
+  animateFn = animate
+  // 失活期间加载完成时不启动循环，等 onActivated 再续跑，避免后台空转
+  if (!isDeactivated) animate()
 
   // 先应用过滤，再处理暂存的跳转定位请求（顺序反了会把刚恢复的节点重新隐藏）
   applyLayerFilter3D()
@@ -434,6 +438,7 @@ async function renderGraph(mapData) {
 
 function clearScene() {
   if (animFrameId) { cancelAnimationFrame(animFrameId); animFrameId = null }
+  animateFn = null
   nodeMeshes.forEach(m => {
     m.children.forEach(c => { if (c.geometry) c.geometry.dispose(); if (c.material) c.material.dispose() })
     m.geometry && m.geometry.dispose(); m.material && m.material.dispose()
@@ -639,7 +644,8 @@ onMounted(() => {
     const w = canvasRef.value.clientWidth, h = canvasRef.value.clientHeight
     renderer.setSize(w, h)
     if (labelRenderer) labelRenderer.setSize(w, h)
-    camera.aspect = w / h
+    // 失活/隐藏时容器尺寸为 0，直接算 aspect 会得到 NaN 污染投影矩阵（画面消失直到下次真实 resize）
+    if (w > 0 && h > 0) camera.aspect = w / h
     camera.updateProjectionMatrix()
   })
   if (canvasRef.value) resizeObserver.observe(canvasRef.value)
@@ -657,6 +663,17 @@ watch(() => props.projectId, () => {
   clearScene()
   selectedNode.value = null
   fetchData()
+})
+
+// keep-alive：失活时停掉 60fps 渲染循环（场景保留在内存，激活时原地续跑），避免后台空转拖慢整站
+onDeactivated(() => {
+  isDeactivated = true
+  if (animFrameId) { cancelAnimationFrame(animFrameId); animFrameId = null }
+})
+
+onActivated(() => {
+  isDeactivated = false
+  if (animateFn && animFrameId == null) animateFn()
 })
 
 onBeforeUnmount(() => {
