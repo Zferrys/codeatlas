@@ -88,7 +88,10 @@ async function mountView(historyOptions, path = '/projects/1') {
   mockHistory(historyOptions)
   const router = createRouter({
     history: createMemoryHistory(),
-    routes: [{ path: '/projects/:id', component: { template: '<div/>' } }]
+    routes: [
+      { path: '/projects/:id', component: { template: '<div/>' } },
+      { path: '/outside', component: { template: '<div/>' } }
+    ]
   })
   router.push(path)
   await router.isReady()
@@ -826,5 +829,15 @@ describe('ProjectInsights', () => {
     expect(wrapper.findComponent(Modal).props('open')).toBe(false)
     expect(get).toHaveBeenCalledWith('/projects/2/chat-history', { params: { scope: 'GLOBAL' } })
     expect(wrapper.find('.history-item').text()).toContain('新项目历史')
+  })
+
+  it('watchProjectId_whenLeavingProjectRoute_shouldNotFetchWithUndefinedId', async () => {
+    const { router } = await mountView({ global: [historyItem({ id: 61 })] })
+    get.mockClear()
+
+    await router.push('/outside')
+    await flushPromises()
+
+    expect(get).not.toHaveBeenCalled()
   })
 })

@@ -201,6 +201,8 @@ public class AgenticSearchService {
                     "已达到工具调用轮次上限，请立即基于以上已获取的信息直接给出最终回答，不要再请求调用工具。"));
             AiRequest finalRequest = new AiRequest();
             finalRequest.setMessages(messages);
+            // 与 chunk 分析同理：累计的工具证据 + 推理共享预算，4096 易被推理耗尽致汇总空正文，统一 8192
+            finalRequest.setMaxTokens(8192);
             try {
                 AiResponse finalResponse = aiClient.chat(finalRequest);
                 if (finalResponse != null) {

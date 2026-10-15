@@ -268,6 +268,7 @@ function renderGraph(data) {
 
   // click canvas to reset
   graph.on('canvas:click', () => {
+    graph.setAutoPaint(false)
     graph.getNodes().forEach(n => {
       const model = n.getModel()
       const shape = nodeShape(model.classType)
@@ -283,6 +284,8 @@ function renderGraph(data) {
       const st = EDGE_STYLES[e.getModel().relation] || EDGE_STYLES.dependency
       graph.updateItem(e, { style: { opacity: st.opacity ?? 1 } })
     })
+    graph.paint()
+    graph.setAutoPaint(true)
     // 通知父组件清除选中节点，否则问答面板会一直沿用旧类上下文
     emit('node-click', null)
   })
@@ -330,6 +333,9 @@ function selectNode(item) {
     neighbors.add(edge.getSource().getID())
     neighbors.add(edge.getTarget().getID())
   })
+  // 全图节点+边逐个 updateItem：autoPaint 开着时每次更新都触发一次重绘，几百节点规模点击明显卡顿。
+  // 关自动重绘、更新完统一 paint 一次（N 次更新只产生 1 次渲染）
+  graph.setAutoPaint(false)
   graph.getNodes().forEach(n => {
     graph.updateItem(n, {
       style: { opacity: neighbors.has(n.getID()) ? 1 : 0.15 }
@@ -341,6 +347,8 @@ function selectNode(item) {
       style: { opacity: isNeighbor ? 1 : 0.05 }
     })
   })
+  graph.paint()
+  graph.setAutoPaint(true)
 }
 
 // 跳转定位：选中并聚焦到指定 FQN 的节点（被过滤隐藏时先恢复显示）

@@ -56,7 +56,8 @@ public class ConstitutionRuleController {
 
     @PutMapping("/{ruleId}/toggle")
     @Operation(summary = "启用/禁用规则")
-    @PreAuthorize("hasAnyRole('ADMIN','ARCHITECT')")
+    // 规则启停属于项目内可自行调整的配置项：登录即可操作，项目归属由 service 层 check 兜底
+    @PreAuthorize("isAuthenticated()")
     @AuditLog(action = "TOGGLE_RULE", targetType = "RULE", targetIdExpression = "#ruleId", detail = "启用/禁用规则")
     public ApiResponse<ConstitutionRuleVO> toggleRule(@PathVariable Long projectId,
                                                        @PathVariable Long ruleId,

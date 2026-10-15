@@ -83,7 +83,7 @@ async function toggleRule(ruleId, enabled) {
     if (rule) rule.isEnabled = enabled
     message.success(enabled ? '规则已启用' : '规则已禁用')
   } catch (e) {
-    message.error('操作失败')
+    message.error(e.response?.data?.message || '操作失败')
   }
 }
 

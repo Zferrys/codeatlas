@@ -240,6 +240,18 @@ describe('ProjectRules.vue', () => {
       expect(message.error).toHaveBeenCalledWith('操作失败')
       expect(wrapper.vm.rules.find(r => r.id === 1).isEnabled).toBe(true)
     })
+
+    it('toggleRule_whenApiFailsWithServerMessage_shouldShowServerMessage', async () => {
+      api.get.mockResolvedValueOnce({ data: { data: { records: buildRules() } } })
+      api.put.mockRejectedValueOnce({ response: { data: { message: '无权限操作' } } })
+
+      const { wrapper } = await mountRules()
+
+      await wrapper.vm.toggleRule(1, false)
+
+      expect(message.error).toHaveBeenCalledWith('无权限操作')
+      expect(wrapper.vm.rules.find(r => r.id === 1).isEnabled).toBe(true)
+    })
   })
 
   describe('映射函数', () => {

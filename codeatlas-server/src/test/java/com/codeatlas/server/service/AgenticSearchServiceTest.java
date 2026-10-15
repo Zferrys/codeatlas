@@ -107,6 +107,8 @@ class AgenticSearchServiceTest {
         verify(aiClient, times(6)).chat(requestCaptor.capture());
         AiRequest synthesisRequest = requestCaptor.getAllValues().get(5);
         assertNull(synthesisRequest.getTools(), "强制总结请求不应携带工具");
+        // 推理模型 reasoning 与正文共享 max_tokens：4096 易被推理耗尽致汇总空正文，强制总结统一 8192
+        assertEquals(8192, synthesisRequest.getMaxTokens(), "强制总结请求必须使用 8192 预算");
 
         List<Message> synthesisMessages = synthesisRequest.getMessages();
         long toolMessages = synthesisMessages.stream()

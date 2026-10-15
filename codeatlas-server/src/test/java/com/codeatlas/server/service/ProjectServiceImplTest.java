@@ -22,6 +22,8 @@ import com.codeatlas.server.service.impl.ProjectServiceImpl;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
 import org.mockito.ArgumentCaptor;
@@ -770,8 +772,11 @@ class ProjectServiceImplTest {
     }
 
     @Test
+    @EnabledOnOs(OS.WINDOWS)
     @DisplayName("删除项目：工作区文件被占用删除失败时记录告警并继续删除流程")
     void deleteProject_workspaceFileLocked_shouldLogAndContinue() throws IOException {
+        // 句柄占用阻止删除是 Windows 专有语义：Linux 打开中的文件照样能被 unlink，
+        // 该分支在类 Unix 上无从触发（CI 为 Ubuntu），仅在 Windows 侧保留对兜底分支的覆盖
         Project p = createProject(1L, "ToDelete");
         when(projectMapper.findById(1L)).thenReturn(p);
         Path uploads = Files.createDirectories(tempRoot.resolve("uploads"));

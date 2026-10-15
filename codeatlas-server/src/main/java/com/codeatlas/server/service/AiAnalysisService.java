@@ -484,6 +484,9 @@ public class AiAnalysisService {
             AiRequest req = new AiRequest();
             req.setPrompt(prompt);
             req.setSystemPrompt(systemPrompt);
+            // 推理模型的 reasoning 与正文共享 max_tokens：默认 4096 在「类列表 + 500 字输出」场景常被推理
+            // 耗尽（实测大提示词 200 但正文为空、reasoning_tokens 占满 4096），与汇总/报告路径统一 8192
+            req.setMaxTokens(8192);
 
             AiResponse resp = self.callAiWithResilience(req);
             if (resp != null) {

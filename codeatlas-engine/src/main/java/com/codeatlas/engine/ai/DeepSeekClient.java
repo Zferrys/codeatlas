@@ -46,6 +46,10 @@ public class DeepSeekClient implements AiClient {
         this.apiUrl = apiUrl;
         this.httpClient = new OkHttpClient.Builder()
                 .connectTimeout(30, TimeUnit.SECONDS)
+                // readTimeout 只管单次读操作的间隔：网关以 keep-alive 心跳持续喂字节时永不触发，
+                // 实测被挂起的请求能拖满 900s 网关上限才返回空响应。callTimeout 兜住整次调用总时长，
+                // 让挂起在确定时间内失败并走多模型降级（成功调用实测最大 71s，180s 留足余量）
+                .callTimeout(180, TimeUnit.SECONDS)
                 .readTimeout(120, TimeUnit.SECONDS)
                 .writeTimeout(30, TimeUnit.SECONDS)
                 .build();
@@ -75,9 +79,13 @@ public class DeepSeekClient implements AiClient {
                 // 推理模型的 reasoning 与正文共享 max_tokens，预算被推理耗尽时正文为空但仍返回 HTTP 200。
                 // 空正文（含纯空白）必须视为失败，否则调用链会把空结果当成功、静默吞掉多模型降级。
                 if ((parsed.getContent() == null || parsed.getContent().trim().isEmpty()) && !parsed.hasToolCalls()) {
-                    log.error("DeepSeek returned empty content: model={}, finishReason={}, maxTokens={}, completionTokens={}, reasoningTokens={}",
+                    // 空响应有两种形态：网关超时（choices/usage 全缺，finishReason=null、0 token）与
+                    // 推理预算耗尽（finishReason=length、reasoning_tokens 占满）。仅看字段无法区分，
+                    // 附截断后的原始响应片段（含 reasoning_content 特征）才能事后定位；响应体无敏感信息
+                    String bodySnippet = responseBody.length() > 300 ? responseBody.substring(0, 300) : responseBody;
+                    log.error("DeepSeek returned empty content: model={}, finishReason={}, maxTokens={}, completionTokens={}, reasoningTokens={}, bodySnippet={}",
                             model, parsed.getFinishReason(), request.getMaxTokens(),
-                            parsed.getCompletionTokens(), parsed.getReasoningTokens());
+                            parsed.getCompletionTokens(), parsed.getReasoningTokens(), bodySnippet);
                     throw new RuntimeException("DeepSeek returned empty content (finishReason="
                             + parsed.getFinishReason() + ", completionTokens=" + parsed.getCompletionTokens() + ")");
                 }

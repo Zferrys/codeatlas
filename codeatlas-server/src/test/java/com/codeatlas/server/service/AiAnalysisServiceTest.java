@@ -1254,7 +1254,8 @@ class AiAnalysisServiceTest {
         assertEquals(expectedSummaryPrompt("Demo", chunkResults), requests.get(4).getPrompt());
         for (int i = 0; i < 4; i++) {
             assertEquals(CHUNK_SYSTEM_PROMPT, requests.get(i).getSystemPrompt());
-            assertEquals(4096, requests.get(i).getMaxTokens());
+            // 推理模型 reasoning 与正文共享 max_tokens：4096 实测被推理耗尽致空正文，分片统一 8192
+            assertEquals(8192, requests.get(i).getMaxTokens());
         }
         assertEquals(SUMMARY_SYSTEM_PROMPT, requests.get(4).getSystemPrompt());
         assertEquals(8192, requests.get(4).getMaxTokens());

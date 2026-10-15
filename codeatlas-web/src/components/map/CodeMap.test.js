@@ -30,6 +30,8 @@ const { graphs, MockGraph, apiMock, arrowTriangle } = vi.hoisted(() => {
       })
       this.off = vi.fn()
       this.updateItem = vi.fn()
+      this.setAutoPaint = vi.fn()
+      this.paint = vi.fn()
       this.hideItem = vi.fn((item) => this.hidden.add(item.getID()))
       this.showItem = vi.fn((item) => this.hidden.delete(item.getID()))
       this.findById = vi.fn((id) => this.nodeItems.find((i) => i.getID() === id) || null)

@@ -147,6 +147,9 @@ const detailVisible = ref(false)
 const detailItem = ref(null)
 
 watch(projectId, () => {
+  // 离开项目路由时 route.params.id 变为 undefined 也会触发 watch，
+  // 不校验会以 projectId=undefined 请求历史接口（后端 400 并产生前端错误遥测）
+  if (!projectId.value) return
   answer.value = ''
   verification.value = null
   detailVisible.value = false
