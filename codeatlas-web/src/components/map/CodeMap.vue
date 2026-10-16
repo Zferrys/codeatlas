@@ -120,6 +120,10 @@ async function fetchMapData() {
       isEmpty.value = true
       return
     }
+    // 先撤 loading 再量尺寸：容器受 v-show 控制，loading=true 时是 display:none，
+    // 浏览器里 clientWidth/clientHeight 恒为 0，G6 会退回 900×550 兜底——
+    // 画布比面板窄，图内容拖到右边界就被 svg 裁掉（右移时"被挡住"的表现）
+    loading.value = false
     await nextTick()
     renderGraph(mapData)
   } catch (e) {

@@ -11,6 +11,8 @@ const { graphs, MockGraph, apiMock, arrowTriangle } = vi.hoisted(() => {
   class MockGraph {
     constructor(config) {
       this.config = config
+      // 记录 G6 初始化瞬间容器的可见性：真实浏览器里 display:none 的容器尺寸恒为 0
+      this.containerDisplayAtConstruct = config.container ? config.container.style.display : null
       this.destroyed = false
       this.eventHandlers = {}
       this.nodeModels = []
@@ -206,6 +208,30 @@ describe('CodeMap', () => {
 
     const graph = graphs[0]
     expect(graph.config.width).toBe(900)
+    expect(graph.config.height).toBe(550)
+  })
+
+  it('CodeMap_whenDataArrivesWhileCanvasHidden_shouldRestoreVisibilityBeforeGraphInit', async () => {
+    // 回归锁：加载完成时容器仍被 v-show 隐藏（display:none）。
+    // 真实浏览器里此时 clientWidth/clientHeight 恒为 0，若在这时初始化 G6，
+    // 会退回 900×550 兜底导致画布比面板窄，图内容拖到右边界被 svg 裁掉。
+    // 因此 G6 构造时容器必须已恢复可见。
+    const d = deferred()
+    apiMock.get.mockReturnValue(d.promise)
+    const wrapper = mountMap()
+    await nextTick()
+    expect(wrapper.find('.graph-container').attributes('style')).toContain('display: none')
+
+    const container = wrapper.find('.graph-container').element
+    Object.defineProperty(container, 'clientWidth', { configurable: true, value: 1200 })
+    Object.defineProperty(container, 'clientHeight', { configurable: true, value: 550 })
+
+    d.resolve({ data: { data: makeMapData() } })
+    await settle()
+
+    const graph = graphs[0]
+    expect(graph.containerDisplayAtConstruct).not.toBe('none')
+    expect(graph.config.width).toBe(1200)
     expect(graph.config.height).toBe(550)
   })
 
