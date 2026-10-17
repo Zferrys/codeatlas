@@ -2,8 +2,11 @@ package com.codeatlas.server.service;
 
 import com.codeatlas.common.dto.PageResult;
 import com.codeatlas.common.exception.BusinessException;
+import com.codeatlas.server.config.TokenBudgetManager;
+import com.codeatlas.server.dto.AiUsageQuery;
 import com.codeatlas.server.entity.AuditLogEntity;
 import com.codeatlas.server.entity.User;
+import com.codeatlas.server.mapper.AiAuditLogMapper;
 import com.codeatlas.server.mapper.AuditLogMapper;
 import com.codeatlas.server.mapper.UserMapper;
 import com.codeatlas.server.service.impl.AdminServiceImpl;
@@ -14,7 +17,9 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -31,7 +36,11 @@ class AdminServiceImplTest {
     @Mock
     private AuditLogMapper auditLogMapper;
     @Mock
+    private AiAuditLogMapper aiAuditLogMapper;
+    @Mock
     private CleanupService cleanupService;
+    @Mock
+    private TokenBudgetManager tokenBudgetManager;
 
     @InjectMocks
     private AdminServiceImpl adminService;
@@ -192,6 +201,89 @@ class AdminServiceImplTest {
 
         assertTrue(result.getRecords().isEmpty());
         assertEquals(0L, result.getTotal());
+    }
+
+    @Test
+    @DisplayName("Token 流水：分页参数归一化后按 offset 查询并返回总数")
+    void aiUsage_shouldNormalizePagingAndQueryMapper() {
+        AiUsageQuery query = new AiUsageQuery();
+        query.setPage(0);
+        query.setSize(500);
+        query.setModel("deepseek-v4-pro");
+        when(aiAuditLogMapper.countUsage(query)).thenReturn(42L);
+        when(aiAuditLogMapper.findUsagePaged(query, 0))
+                .thenReturn(List.of(Map.of("model", "deepseek-v4-pro")));
+
+        PageResult<Map<String, Object>> result = adminService.aiUsage(query);
+
+        assertEquals(42L, result.getTotal());
+        assertEquals(1, result.getPage());
+        assertEquals(100, result.getSize());
+        assertEquals(1, result.getRecords().size());
+        verify(aiAuditLogMapper).countUsage(query);
+        verify(aiAuditLogMapper).findUsagePaged(query, 0);
+    }
+
+    @Test
+    @DisplayName("Token 流水：第 2 页 offset=(page-1)*size")
+    void aiUsage_secondPageShouldOffset() {
+        AiUsageQuery query = new AiUsageQuery();
+        query.setPage(2);
+        query.setSize(20);
+        when(aiAuditLogMapper.countUsage(query)).thenReturn(21L);
+        when(aiAuditLogMapper.findUsagePaged(query, 20)).thenReturn(List.of());
+
+        PageResult<Map<String, Object>> result = adminService.aiUsage(query);
+
+        assertEquals(21L, result.getTotal());
+        assertEquals(2, result.getPage());
+        verify(aiAuditLogMapper).findUsagePaged(query, 20);
+    }
+
+    @Test
+    @DisplayName("Token 用量汇总：未传区间默认本自然月，预算按 Redis 状态换算百分比")
+    void aiUsageSummary_shouldDefaultCurrentMonthAndIncludeBudget() {
+        AiUsageQuery query = new AiUsageQuery();
+        when(aiAuditLogMapper.usageSummary(query)).thenReturn(Map.of("calls", 3L, "totalTokens", 1500L));
+        when(aiAuditLogMapper.usageByModel(query)).thenReturn(List.of(Map.of("model", "deepseek-v4-pro")));
+        when(aiAuditLogMapper.usageByStage(query)).thenReturn(List.of(Map.of("stage", "CONTEXT_QA")));
+        when(aiAuditLogMapper.usageByUser(query)).thenReturn(List.of(Map.of("username", "zferry")));
+        when(tokenBudgetManager.getBudgetStatus()).thenReturn(new long[]{1_000_000L, 10_000_000L});
+
+        Map<String, Object> result = adminService.aiUsageSummary(query);
+
+        LocalDate firstDay = LocalDate.now().withDayOfMonth(1);
+        assertEquals(firstDay.atStartOfDay().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")),
+                query.getStartTime());
+        assertEquals(firstDay.plusMonths(1).atStartOfDay()
+                        .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")),
+                query.getEndTime());
+        assertEquals(3L, ((Map<?, ?>) result.get("totals")).get("calls"));
+        assertEquals(1, ((List<?>) result.get("byModel")).size());
+        assertEquals(1, ((List<?>) result.get("byStage")).size());
+        assertEquals(1, ((List<?>) result.get("byUser")).size());
+        Map<?, ?> budget = (Map<?, ?>) result.get("budget");
+        assertEquals(1_000_000L, budget.get("usedTokens"));
+        assertEquals(10_000_000L, budget.get("monthlyLimit"));
+        assertEquals(10.0, budget.get("usagePercent"));
+    }
+
+    @Test
+    @DisplayName("Token 用量汇总：空区间结果 totals 回退为空 Map")
+    void aiUsageSummary_nullTotals_shouldFallbackToEmptyMap() {
+        AiUsageQuery query = new AiUsageQuery();
+        query.setStartTime("2026-10-01 00:00:00");
+        query.setEndTime("2026-11-01 00:00:00");
+        when(aiAuditLogMapper.usageSummary(query)).thenReturn(null);
+        when(aiAuditLogMapper.usageByModel(query)).thenReturn(List.of());
+        when(aiAuditLogMapper.usageByStage(query)).thenReturn(List.of());
+        when(aiAuditLogMapper.usageByUser(query)).thenReturn(List.of());
+        when(tokenBudgetManager.getBudgetStatus()).thenReturn(new long[]{0, 0});
+
+        Map<String, Object> result = adminService.aiUsageSummary(query);
+
+        assertTrue(((Map<?, ?>) result.get("totals")).isEmpty());
+        assertEquals(0.0, ((Map<?, ?>) result.get("budget")).get("usagePercent"));
     }
 
     @Test

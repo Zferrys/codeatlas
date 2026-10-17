@@ -2,6 +2,7 @@ package com.codeatlas.server.controller;
 
 import com.codeatlas.common.dto.ApiResponse;
 import com.codeatlas.common.dto.PageResult;
+import com.codeatlas.server.dto.AiUsageQuery;
 import com.codeatlas.server.service.AdminService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -52,6 +53,18 @@ public class AdminController {
             @RequestParam(defaultValue = "1") int page,
             @RequestParam(defaultValue = "20") int size) {
         return ApiResponse.success(adminService.auditLog(page, size));
+    }
+
+    @GetMapping("/ai-usage")
+    @Operation(summary = "AI Token 流水列表")
+    public ApiResponse<PageResult<Map<String, Object>>> aiUsage(AiUsageQuery query) {
+        return ApiResponse.success(adminService.aiUsage(query));
+    }
+
+    @GetMapping("/ai-usage/summary")
+    @Operation(summary = "AI Token 用量汇总与月预算")
+    public ApiResponse<Map<String, Object>> aiUsageSummary(AiUsageQuery query) {
+        return ApiResponse.success(adminService.aiUsageSummary(query));
     }
 
     @GetMapping("/system-status")

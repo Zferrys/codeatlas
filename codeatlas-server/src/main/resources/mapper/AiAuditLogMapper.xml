@@ -14,4 +14,111 @@
         ORDER BY month DESC, model
     </select>
 
+    <!-- 管理端 Token 流水的公共筛选条件；username 通过 LEFT JOIN user 过滤 -->
+    <sql id="usageWhere">
+        <where>
+            <if test="q.model != null and q.model != ''">
+                AND a.model = #{q.model}
+            </if>
+            <if test="q.stage != null and q.stage != ''">
+                AND a.stage = #{q.stage}
+            </if>
+            <if test="q.userId != null">
+                AND a.user_id = #{q.userId}
+            </if>
+            <if test="q.username != null and q.username != ''">
+                AND u.username LIKE CONCAT('%', #{q.username}, '%')
+            </if>
+            <if test="q.success != null">
+                AND a.success = #{q.success}
+            </if>
+            <if test="q.startTime != null and q.startTime != ''">
+                AND a.created_at &gt;= #{q.startTime}
+            </if>
+            <if test="q.endTime != null and q.endTime != ''">
+                AND a.created_at &lt; #{q.endTime}
+            </if>
+        </where>
+    </sql>
+
+    <select id="findUsagePaged" resultType="java.util.LinkedHashMap">
+        SELECT a.id,
+               a.created_at        AS createdAt,
+               a.user_id           AS userId,
+               u.username          AS username,
+               a.model             AS model,
+               a.stage             AS stage,
+               a.project_id        AS projectId,
+               a.prompt_tokens     AS promptTokens,
+               a.completion_tokens AS completionTokens,
+               a.total_tokens      AS totalTokens,
+               a.latency_ms        AS latencyMs,
+               a.cost              AS cost,
+               a.success           AS success,
+               a.error_message     AS errorMessage
+        FROM ai_audit_log a
+        LEFT JOIN `user` u ON u.id = a.user_id
+        <include refid="usageWhere"/>
+        ORDER BY a.created_at DESC, a.id DESC
+        LIMIT #{offset}, #{q.size}
+    </select>
+
+    <select id="countUsage" resultType="long">
+        SELECT COUNT(*)
+        FROM ai_audit_log a
+        LEFT JOIN `user` u ON u.id = a.user_id
+        <include refid="usageWhere"/>
+    </select>
+
+    <select id="usageSummary" resultType="java.util.LinkedHashMap">
+        SELECT COUNT(*)              AS calls,
+               COALESCE(SUM(CASE WHEN a.success = 1 THEN 1 ELSE 0 END), 0) AS successCalls,
+               COALESCE(SUM(a.prompt_tokens), 0)     AS promptTokens,
+               COALESCE(SUM(a.completion_tokens), 0) AS completionTokens,
+               COALESCE(SUM(a.total_tokens), 0)      AS totalTokens,
+               COALESCE(SUM(a.cost), 0)              AS totalCost,
+               COALESCE(AVG(a.latency_ms), 0)        AS avgLatency
+        FROM ai_audit_log a
+        LEFT JOIN `user` u ON u.id = a.user_id
+        <include refid="usageWhere"/>
+    </select>
+
+    <select id="usageByModel" resultType="java.util.LinkedHashMap">
+        SELECT a.model             AS model,
+               COUNT(*)            AS calls,
+               COALESCE(SUM(a.total_tokens), 0) AS totalTokens,
+               COALESCE(SUM(a.cost), 0)         AS totalCost
+        FROM ai_audit_log a
+        LEFT JOIN `user` u ON u.id = a.user_id
+        <include refid="usageWhere"/>
+        GROUP BY a.model
+        ORDER BY totalTokens DESC
+    </select>
+
+    <select id="usageByStage" resultType="java.util.LinkedHashMap">
+        SELECT a.stage             AS stage,
+               COUNT(*)            AS calls,
+               COALESCE(SUM(a.total_tokens), 0) AS totalTokens,
+               COALESCE(SUM(a.cost), 0)         AS totalCost
+        FROM ai_audit_log a
+        LEFT JOIN `user` u ON u.id = a.user_id
+        <include refid="usageWhere"/>
+        GROUP BY a.stage
+        ORDER BY totalTokens DESC
+    </select>
+
+    <select id="usageByUser" resultType="java.util.LinkedHashMap">
+        SELECT a.user_id           AS userId,
+               u.username          AS username,
+               COUNT(*)            AS calls,
+               COALESCE(SUM(a.total_tokens), 0) AS totalTokens,
+               COALESCE(SUM(a.cost), 0)         AS totalCost
+        FROM ai_audit_log a
+        LEFT JOIN `user` u ON u.id = a.user_id
+        <include refid="usageWhere"/>
+        GROUP BY a.user_id, u.username
+        ORDER BY totalTokens DESC
+        LIMIT 10
+    </select>
+
 </mapper>

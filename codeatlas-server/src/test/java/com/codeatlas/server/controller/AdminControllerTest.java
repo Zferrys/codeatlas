@@ -2,6 +2,7 @@ package com.codeatlas.server.controller;
 
 import com.codeatlas.common.dto.ApiResponse;
 import com.codeatlas.common.dto.PageResult;
+import com.codeatlas.server.dto.AiUsageQuery;
 import com.codeatlas.server.service.AdminService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -78,6 +79,35 @@ class AdminControllerTest {
 
         assertSame(page, response.getData());
         verify(adminService).auditLog(1, 20);
+    }
+
+    @Test
+    @DisplayName("aiUsage — 查询条件透传到服务层")
+    void aiUsagePassesQuery() {
+        AiUsageQuery query = new AiUsageQuery();
+        query.setModel("deepseek-v4-pro");
+        PageResult<Map<String, Object>> page = new PageResult<>(List.of(), 0L, 1, 20);
+        when(adminService.aiUsage(query)).thenReturn(page);
+
+        ApiResponse<PageResult<Map<String, Object>>> response = controller.aiUsage(query);
+
+        assertEquals(200, response.getCode());
+        assertSame(page, response.getData());
+        verify(adminService).aiUsage(query);
+    }
+
+    @Test
+    @DisplayName("aiUsageSummary — 汇总结果原样返回")
+    void aiUsageSummaryPassesThrough() {
+        AiUsageQuery query = new AiUsageQuery();
+        Map<String, Object> summary = Map.of("totals", Map.of("calls", 1L));
+        when(adminService.aiUsageSummary(query)).thenReturn(summary);
+
+        ApiResponse<Map<String, Object>> response = controller.aiUsageSummary(query);
+
+        assertEquals(200, response.getCode());
+        assertSame(summary, response.getData());
+        verify(adminService).aiUsageSummary(query);
     }
 
     @Test

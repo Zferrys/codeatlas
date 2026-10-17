@@ -1,9 +1,11 @@
 package com.codeatlas.server.mapper;
 
+import com.codeatlas.server.dto.AiUsageQuery;
 import com.codeatlas.server.entity.AiAuditLogEntity;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Options;
+import org.apache.ibatis.annotations.Param;
 
 import java.util.List;
 import java.util.Map;
@@ -21,4 +23,17 @@ public interface AiAuditLogMapper {
     int insert(AiAuditLogEntity log);
 
     List<Map<String, Object>> monthlySummary();
+
+    /** 管理端 Token 流水：分页明细（含使用者用户名） */
+    List<Map<String, Object>> findUsagePaged(@Param("q") AiUsageQuery query, @Param("offset") int offset);
+
+    long countUsage(@Param("q") AiUsageQuery query);
+
+    Map<String, Object> usageSummary(@Param("q") AiUsageQuery query);
+
+    List<Map<String, Object>> usageByModel(@Param("q") AiUsageQuery query);
+
+    List<Map<String, Object>> usageByStage(@Param("q") AiUsageQuery query);
+
+    List<Map<String, Object>> usageByUser(@Param("q") AiUsageQuery query);
 }

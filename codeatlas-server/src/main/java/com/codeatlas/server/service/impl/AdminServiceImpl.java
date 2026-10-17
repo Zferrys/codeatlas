@@ -2,26 +2,39 @@ package com.codeatlas.server.service.impl;
 
 import com.codeatlas.common.dto.PageResult;
 import com.codeatlas.common.exception.BusinessException;
+import com.codeatlas.server.config.TokenBudgetManager;
+import com.codeatlas.server.dto.AiUsageQuery;
+import com.codeatlas.server.mapper.AiAuditLogMapper;
 import com.codeatlas.server.mapper.AuditLogMapper;
 import com.codeatlas.server.mapper.UserMapper;
 import com.codeatlas.server.service.AdminService;
 import com.codeatlas.server.service.CleanupService;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 
 @Service
 public class AdminServiceImpl implements AdminService {
 
+    private static final DateTimeFormatter TIME_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+    private static final int MAX_PAGE_SIZE = 100;
+
     private final UserMapper userMapper;
     private final AuditLogMapper auditLogMapper;
+    private final AiAuditLogMapper aiAuditLogMapper;
     private final CleanupService cleanupService;
+    private final TokenBudgetManager tokenBudgetManager;
 
     public AdminServiceImpl(UserMapper userMapper, AuditLogMapper auditLogMapper,
-                            CleanupService cleanupService) {
+                            AiAuditLogMapper aiAuditLogMapper, CleanupService cleanupService,
+                            TokenBudgetManager tokenBudgetManager) {
         this.userMapper = userMapper;
         this.auditLogMapper = auditLogMapper;
+        this.aiAuditLogMapper = aiAuditLogMapper;
         this.cleanupService = cleanupService;
+        this.tokenBudgetManager = tokenBudgetManager;
     }
 
     @Override
@@ -79,6 +92,53 @@ public class AdminServiceImpl implements AdminService {
             records.add(item);
         });
         return new PageResult<>(records, total, page, size);
+    }
+
+    @Override
+    public PageResult<Map<String, Object>> aiUsage(AiUsageQuery query) {
+        normalize(query);
+        int offset = (query.getPage() - 1) * query.getSize();
+        long total = aiAuditLogMapper.countUsage(query);
+        List<Map<String, Object>> records = aiAuditLogMapper.findUsagePaged(query, offset);
+        return new PageResult<>(records, total, query.getPage(), query.getSize());
+    }
+
+    @Override
+    public Map<String, Object> aiUsageSummary(AiUsageQuery query) {
+        normalize(query);
+        // 未指定区间时默认统计本自然月（容器时区为北京时间，见 Dockerfile TZ）
+        if (query.getStartTime() == null || query.getStartTime().isEmpty()) {
+            query.setStartTime(LocalDate.now().withDayOfMonth(1).atStartOfDay().format(TIME_FMT));
+        }
+        if (query.getEndTime() == null || query.getEndTime().isEmpty()) {
+            query.setEndTime(LocalDate.now().withDayOfMonth(1).plusMonths(1).atStartOfDay().format(TIME_FMT));
+        }
+        Map<String, Object> summary = new LinkedHashMap<>();
+        Map<String, Object> totals = aiAuditLogMapper.usageSummary(query);
+        summary.put("totals", totals != null ? totals : Collections.emptyMap());
+        summary.put("byModel", aiAuditLogMapper.usageByModel(query));
+        summary.put("byStage", aiAuditLogMapper.usageByStage(query));
+        summary.put("byUser", aiAuditLogMapper.usageByUser(query));
+
+        long[] budget = tokenBudgetManager.getBudgetStatus();
+        Map<String, Object> budgetInfo = new LinkedHashMap<>();
+        budgetInfo.put("usedTokens", budget[0]);
+        budgetInfo.put("monthlyLimit", budget[1]);
+        budgetInfo.put("usagePercent", budget[1] > 0
+                ? Math.round(budget[0] * 10000.0 / budget[1]) / 100.0 : 0.0);
+        summary.put("budget", budgetInfo);
+        return summary;
+    }
+
+    private void normalize(AiUsageQuery query) {
+        if (query.getPage() < 1) {
+            query.setPage(1);
+        }
+        if (query.getSize() < 1) {
+            query.setSize(20);
+        } else if (query.getSize() > MAX_PAGE_SIZE) {
+            query.setSize(MAX_PAGE_SIZE);
+        }
     }
 
     @Override
