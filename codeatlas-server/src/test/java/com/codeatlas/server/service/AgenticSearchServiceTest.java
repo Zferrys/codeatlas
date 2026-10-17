@@ -220,6 +220,52 @@ class AgenticSearchServiceTest {
     }
 
     @Test
+    @DisplayName("修正轮由降级模型应答时，审计记录实际应答模型")
+    void search_correctionRound_shouldAuditActualModel() {
+        when(scanService.getClassSummaries(PROJECT_ID))
+                .thenReturn(Collections.singletonList(makeClass("com.demo.RealService", "RealService")));
+        when(toolRegistry.execute(any(ToolCall.class), anyLong()))
+                .thenReturn("找到 1 个匹配类:\n1. com.demo.RealService [SERVICE] 方法3 行40");
+        when(aiClient.getModelName()).thenReturn("configured-model");
+        AiResponse correctionResponse = textResponse("RealService 是核心服务类。");
+        correctionResponse.setModelUsed("fallback-model");
+        when(aiClient.chat(any(AiRequest.class)))
+                .thenReturn(toolCallResponse("call_1"))
+                .thenReturn(textResponse("GhostService 与 PhantomService 是核心类，RealService 也参与其中。"))
+                .thenReturn(correctionResponse);
+
+        agenticSearchService.search(PROJECT_ID, "核心类有哪些？", USER_ID);
+
+        ArgumentCaptor<AiAuditLogEntity> auditCaptor = ArgumentCaptor.forClass(AiAuditLogEntity.class);
+        verify(aiAuditLogMapper).insert(auditCaptor.capture());
+        assertEquals("fallback-model", auditCaptor.getValue().getModel());
+    }
+
+    @Test
+    @DisplayName("修正轮空正文：已消耗 Token 仍计入审计，并记录实际应答模型")
+    void search_correctionEmptyContent_shouldAccountTokensAndModel() {
+        when(scanService.getClassSummaries(PROJECT_ID))
+                .thenReturn(Collections.singletonList(makeClass("com.demo.RealService", "RealService")));
+        when(toolRegistry.execute(any(ToolCall.class), anyLong()))
+                .thenReturn("找到 1 个匹配类:\n1. com.demo.RealService [SERVICE] 方法3 行40");
+        when(aiClient.getModelName()).thenReturn("configured-model");
+        AiResponse correctionResponse = richTextResponse("   ", 30, 10, 20, 5);
+        correctionResponse.setModelUsed("fallback-model");
+        when(aiClient.chat(any(AiRequest.class)))
+                .thenReturn(toolCallResponse("call_1"))
+                .thenReturn(textResponse("GhostService 与 PhantomService 是核心类，RealService 也参与其中。"))
+                .thenReturn(correctionResponse);
+
+        Map<String, Object> result = agenticSearchService.search(PROJECT_ID, "核心类有哪些？", USER_ID);
+
+        assertEquals("GhostService 与 PhantomService 是核心类，RealService 也参与其中。", result.get("answer"));
+        ArgumentCaptor<AiAuditLogEntity> auditCaptor = ArgumentCaptor.forClass(AiAuditLogEntity.class);
+        verify(aiAuditLogMapper).insert(auditCaptor.capture());
+        assertEquals(180, auditCaptor.getValue().getTotalTokens(), "100 + 50 + 30");
+        assertEquals("fallback-model", auditCaptor.getValue().getModel());
+    }
+
+    @Test
     @DisplayName("答案类引用全部溯源时不做修正轮")
     void search_allRefsSourced_shouldNotTriggerCorrection() {
         when(scanService.getClassSummaries(PROJECT_ID))

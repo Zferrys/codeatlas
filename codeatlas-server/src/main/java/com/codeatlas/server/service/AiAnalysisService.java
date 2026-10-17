@@ -305,13 +305,13 @@ public class AiAnalysisService {
         if (progressRegistry.isCancelled(taskId)) {
             log.info("Architecture story cancelled after hallucination handling, discarding for projectId={}", projectId);
             // 用户已终止：主调用与重试的 token 均已消耗，需一并记账；审计口径统一为失败
-            self.saveAiAuditLog(aiClient.getModelName(), "ARCHITECTURE_STORY", projectId, null,
+            self.saveAiAuditLog(lastModelUsed, "ARCHITECTURE_STORY", projectId, userId,
                     totalPromptTokens, totalCompletionTokens, totalTokens, totalLatency,
                     "Cancelled by user", false);
             return null;
         }
         // 提交点：审计行与落库紧邻执行，此后的终止不再改写审计语义
-        self.saveAiAuditLog(aiClient.getModelName(), "ARCHITECTURE_STORY", projectId, null,
+        self.saveAiAuditLog(lastModelUsed, "ARCHITECTURE_STORY", projectId, userId,
                 totalPromptTokens, totalCompletionTokens, totalTokens, totalLatency, null, true);
         progressRegistry.publish(taskId, "正在保存报告…");
 

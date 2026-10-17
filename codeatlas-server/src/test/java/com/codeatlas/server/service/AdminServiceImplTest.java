@@ -241,6 +241,23 @@ class AdminServiceImplTest {
     }
 
     @Test
+    @DisplayName("Token 流水：超出末页直接返回空页，不下发深分页 SQL")
+    void aiUsage_pageBeyondTotal_shouldSkipQuery() {
+        AiUsageQuery query = new AiUsageQuery();
+        query.setPage(Integer.MAX_VALUE);
+        query.setSize(100);
+        when(aiAuditLogMapper.countUsage(query)).thenReturn(5L);
+
+        PageResult<Map<String, Object>> result = adminService.aiUsage(query);
+
+        assertTrue(result.getRecords().isEmpty());
+        assertEquals(5L, result.getTotal());
+        assertEquals(Integer.MAX_VALUE, result.getPage());
+        assertEquals(100, result.getSize());
+        verify(aiAuditLogMapper, never()).findUsagePaged(eq(query), anyInt());
+    }
+
+    @Test
     @DisplayName("Token 用量汇总：未传区间默认本自然月，预算按 Redis 状态换算百分比")
     void aiUsageSummary_shouldDefaultCurrentMonthAndIncludeBudget() {
         AiUsageQuery query = new AiUsageQuery();

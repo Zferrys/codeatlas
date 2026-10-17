@@ -255,11 +255,16 @@ public class AgenticSearchService {
                             correctionRequest.setMessages(correctionMessages);
                             correctionRequest.setTemperature(0.1);
                             AiResponse correctionResponse = aiClient.chat(correctionRequest);
-                            if (correctionResponse != null && correctionResponse.getContent() != null
-                                    && !correctionResponse.getContent().trim().isEmpty()) {
+                            if (correctionResponse != null) {
+                                // 修正轮可能由降级模型应答：审计须记录实际应答模型；
+                                // 空正文也已消耗 token，token 无条件入账，正文判空仅决定是否采用修正
+                                lastModelUsed = resolveModel(correctionResponse);
                                 totalTokenUsed += correctionResponse.getTokensUsed();
                                 totalPromptTokens += correctionResponse.getPromptTokens();
                                 totalCompletionTokens += correctionResponse.getCompletionTokens();
+                            }
+                            if (correctionResponse != null && correctionResponse.getContent() != null
+                                    && !correctionResponse.getContent().trim().isEmpty()) {
                                 EvidenceVerifier.VerificationReport recheck = evidenceVerifier.verify(
                                         correctionResponse.getContent(), evidence, classSummaries);
                                 if (recheck.anomalyCount() < anomalyBefore) {

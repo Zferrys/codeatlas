@@ -46,6 +46,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -284,6 +285,50 @@ class AiAnalysisServiceTest {
         assertEquals(PROJECT_ID, saved.getProjectId());
         assertEquals("[]", saved.getSources());
         assertEquals(0, BigDecimal.valueOf(0.68).compareTo(saved.getConfidence()));
+    }
+
+    @Test
+    @DisplayName("用户触发成功路径：审计归属触发者 userId 并记录实际应答模型")
+    void analyzeArchitecture_userTriggeredSuccess_shouldAuditUserAndActualModel() {
+        stubProjectData(smallClasses());
+        when(aiClient.getModelName()).thenReturn("configured-model");
+        when(tokenBudgetManager.tryConsume(anyLong())).thenReturn(true);
+        AiResponse response = aiResponse("架构叙事内容 AService", 800);
+        response.setModelUsed("fallback-model");
+        when(aiClient.chat(any(AiRequest.class))).thenReturn(response);
+        when(hallucinationChecker.check(anyString(), anyList())).thenReturn(HallucinationResultStub.none());
+
+        InsightEntity insight = service.analyzeArchitecture(PROJECT_ID, SCAN_ID, null, 42L);
+
+        assertNotNull(insight);
+        AiAuditLogEntity audit = captureAudit();
+        assertEquals("fallback-model", audit.getModel());
+        assertEquals(42L, audit.getUserId());
+        assertTrue(audit.getSuccess());
+    }
+
+    @Test
+    @DisplayName("用户触发且幻觉处理后被终止：失败审计归属 userId 并记录实际模型")
+    void analyzeArchitecture_userTriggeredCancelledAfterHallucination_shouldAuditContext() {
+        stubProjectData(smallClasses());
+        when(aiClient.getModelName()).thenReturn("configured-model");
+        when(tokenBudgetManager.tryConsume(anyLong())).thenReturn(true);
+        registry.subscribe(TASK_ID, PROJECT_ID);
+        AiResponse response = aiResponse("架构叙事内容", 500);
+        response.setModelUsed("fallback-model");
+        when(aiClient.chat(any(AiRequest.class))).thenReturn(response);
+        when(hallucinationChecker.check(anyString(), anyList())).thenAnswer(invocation -> {
+            registry.cancel(TASK_ID);
+            return HallucinationResultStub.none();
+        });
+
+        assertNull(service.analyzeArchitecture(PROJECT_ID, SCAN_ID, TASK_ID, 42L));
+
+        AiAuditLogEntity audit = captureAudit();
+        assertEquals("fallback-model", audit.getModel());
+        assertEquals(42L, audit.getUserId());
+        assertFalse(audit.getSuccess());
+        assertEquals("Cancelled by user", audit.getErrorMessage());
     }
 
     @Test

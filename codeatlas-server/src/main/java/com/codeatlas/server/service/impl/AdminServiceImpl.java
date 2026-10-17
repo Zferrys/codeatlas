@@ -97,9 +97,13 @@ public class AdminServiceImpl implements AdminService {
     @Override
     public PageResult<Map<String, Object>> aiUsage(AiUsageQuery query) {
         normalize(query);
-        int offset = (query.getPage() - 1) * query.getSize();
         long total = aiAuditLogMapper.countUsage(query);
-        List<Map<String, Object>> records = aiAuditLogMapper.findUsagePaged(query, offset);
+        long offsetLong = (long) (query.getPage() - 1) * query.getSize();
+        if (offsetLong >= total) {
+            // 超出末页直接返回空页，避免深分页把大 offset 的 LIMIT 下发给数据库
+            return new PageResult<>(Collections.emptyList(), total, query.getPage(), query.getSize());
+        }
+        List<Map<String, Object>> records = aiAuditLogMapper.findUsagePaged(query, (int) offsetLong);
         return new PageResult<>(records, total, query.getPage(), query.getSize());
     }
 
