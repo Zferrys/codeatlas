@@ -111,7 +111,7 @@ import api from '../../api'
 const STAGE_LABELS = {
   ARCHITECTURE_STORY: '架构叙事',
   PATTERN_ANALYSIS: '架构模式',
-  ANTI_PATTERN: '反模式检测',
+  ANTI_PATTERN_DETECT: '反模式检测',
   CONSTITUTION_CHECK: '规约检查',
   IMPACT_ANALYSIS: '影响分析',
   CONTEXT_QA: '上下文问答',
@@ -121,7 +121,7 @@ const STAGE_LABELS = {
 const STAGE_COLORS = {
   ARCHITECTURE_STORY: 'blue',
   PATTERN_ANALYSIS: 'purple',
-  ANTI_PATTERN: 'orange',
+  ANTI_PATTERN_DETECT: 'orange',
   CONSTITUTION_CHECK: 'geekblue',
   IMPACT_ANALYSIS: 'cyan',
   CONTEXT_QA: 'green',

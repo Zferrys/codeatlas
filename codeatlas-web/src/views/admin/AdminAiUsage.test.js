@@ -130,6 +130,9 @@ describe('AdminAiUsage', () => {
     await flushPromises()
 
     expect(wrapper.vm.stageLabel('ARCHITECTURE_STORY')).toBe('架构叙事')
+    // 后端审计阶段常量是 ANTI_PATTERN_DETECT（insight 类型才是 ANTI_PATTERN）
+    expect(wrapper.vm.stageLabel('ANTI_PATTERN_DETECT')).toBe('反模式检测')
+    expect(wrapper.vm.stageColor('ANTI_PATTERN_DETECT')).toBe('orange')
     expect(wrapper.vm.stageLabel('UNKNOWN_STAGE')).toBe('UNKNOWN_STAGE')
     expect(wrapper.vm.stageLabel(null)).toBe('-')
     expect(wrapper.vm.stageColor('CONTEXT_QA')).toBe('green')
