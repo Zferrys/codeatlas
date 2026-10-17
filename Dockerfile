@@ -26,7 +26,9 @@ RUN mvn package -DskipTests -B -q
 # ---- 运行镜像 ----
 FROM eclipse-temurin:17-jre-alpine
 # font-noto-cjk：PDF 报告渲染中文字体（ReportService 按 /usr/share/fonts/noto/NotoSansCJK-Regular.ttc,2 加载）
-RUN apk add --no-cache tini curl font-noto-cjk
+# tzdata：容器与 JVM 统一使用北京时间，数据库 DATETIME 为北京墙钟时间
+RUN apk add --no-cache tini curl font-noto-cjk tzdata
+ENV TZ=Asia/Shanghai
 WORKDIR /app
 RUN addgroup --system codeatlas && adduser --system --ingroup codeatlas codeatlas
 COPY --from=backend-builder /app/codeatlas-server/target/*.jar app.jar

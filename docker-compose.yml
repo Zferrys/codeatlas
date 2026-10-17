@@ -11,6 +11,7 @@ services:
       MYSQL_DATABASE: codeatlas
       MYSQL_CHARSET: utf8mb4
       MYSQL_COLLATION: utf8mb4_unicode_ci
+      TZ: Asia/Shanghai
     volumes:
       - mysql_data:/var/lib/mysql
       - ./codeatlas-server/src/main/resources/db/migration/V1__init_schema.sql:/docker-entrypoint-initdb.d/01-init.sql
@@ -68,6 +69,7 @@ services:
     entrypoint: ['/bin/sh', '-c', 'mkdir -p /app/logs && exec /sbin/tini -- java -Xms256m -Xmx512m -XX:MaxMetaspaceSize=256m -XX:+UseG1GC -XX:MaxGCPauseMillis=200 -Dspring.profiles.active=prod -jar /app/app.jar']
     environment:
       SPRING_PROFILES_ACTIVE: prod
+      TZ: Asia/Shanghai
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/codeatlas?useUnicode=true&characterEncoding=UTF-8&useSSL=false&serverTimezone=Asia/Shanghai
       DB_USERNAME: root
       MYSQL_PASSWORD: ${MYSQL_ROOT_PASSWORD}
