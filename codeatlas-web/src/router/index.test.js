@@ -27,6 +27,7 @@ vi.mock('../views/admin/AdminDashboard.vue', () => viewStub('AdminDashboardView'
 vi.mock('../views/admin/AdminUsers.vue', () => viewStub('AdminUsersView'))
 vi.mock('../views/admin/AdminAuditLog.vue', () => viewStub('AdminAuditLogView'))
 vi.mock('../views/admin/AdminAiModels.vue', () => viewStub('AdminAiModelsView'))
+vi.mock('../views/admin/AdminAiUsage.vue', () => viewStub('AdminAiUsageView'))
 vi.mock('../views/ProjectDetail.vue', () => viewStub('ProjectDetailView'))
 vi.mock('../views/ProjectOverview.vue', () => viewStub('ProjectOverviewView'))
 vi.mock('../views/ProjectMap.vue', () => viewStub('ProjectMapView'))
@@ -74,7 +75,8 @@ describe('route table', () => {
       '/admin/dashboard': 'AdminDashboard',
       '/admin/users': 'AdminUsers',
       '/admin/audit-log': 'AdminAuditLog',
-      '/admin/ai-models': 'AdminAiModels'
+      '/admin/ai-models': 'AdminAiModels',
+      '/admin/token-usage': 'AdminTokenUsage'
     }
     for (const [path, name] of Object.entries(expected)) {
       const route = findRoute(path)
@@ -109,7 +111,7 @@ describe('route table', () => {
     const records = routes.flatMap(route => [route, ...(route.children || [])])
     const lazyRecords = records.filter(route => typeof route.component === 'function')
 
-    expect(lazyRecords).toHaveLength(16)
+    expect(lazyRecords).toHaveLength(17)
     for (const record of lazyRecords) {
       const module = await record.component()
       expect(module.default).toBeTruthy()
@@ -140,6 +142,7 @@ describe('route table', () => {
       { path: '/admin/users', name: 'AdminUsers', meta: { requiresAuth: true, requiresAdmin: true } },
       { path: '/admin/audit-log', name: 'AdminAuditLog', meta: { requiresAuth: true, requiresAdmin: true } },
       { path: '/admin/ai-models', name: 'AdminAiModels', meta: { requiresAuth: true, requiresAdmin: true } },
+      { path: '/admin/token-usage', name: 'AdminTokenUsage', meta: { requiresAuth: true, requiresAdmin: true } },
       {
         path: '/project/:id',
         name: 'ProjectDetail',
@@ -158,14 +161,14 @@ describe('route table', () => {
     ])
   })
 
-  it('routes_whenFreshlyImported_shouldResolveAllSixteenLazyComponentDefaults', async () => {
+  it('routes_whenFreshlyImported_shouldResolveAllSeventeenLazyComponentDefaults', async () => {
     vi.resetModules()
     const { default: freshRouter } = await import('./index')
 
     const records = freshRouter.options.routes.flatMap(route => [route, ...(route.children || [])])
     const lazyRecords = records.filter(record => typeof record.component === 'function')
 
-    expect(lazyRecords).toHaveLength(16)
+    expect(lazyRecords).toHaveLength(17)
     for (const record of lazyRecords) {
       const module = await record.component()
       expect(module && module.default).toBeTruthy()

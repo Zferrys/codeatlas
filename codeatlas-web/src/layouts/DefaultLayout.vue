@@ -47,6 +47,10 @@
             <template #icon><AuditOutlined /></template>
             <span>{{ $t('nav.auditLog') }}</span>
           </a-menu-item>
+          <a-menu-item key="admin-token-usage">
+            <template #icon><LineChartOutlined /></template>
+            <span>{{ $t('nav.tokenUsage') }}</span>
+          </a-menu-item>
           <a-menu-item key="admin-ai-models">
             <template #icon><RobotOutlined /></template>
             <span>{{ $t('nav.aiModels') }}</span>
@@ -256,7 +260,7 @@ import {
   SafetyOutlined, WarningOutlined, BulbOutlined, SettingOutlined,
   MenuFoldOutlined, MenuUnfoldOutlined, BellOutlined, SearchOutlined,
   UserOutlined, LogoutOutlined, GithubOutlined, ProjectOutlined, FileTextOutlined,
-  TeamOutlined, AuditOutlined, RobotOutlined
+  TeamOutlined, AuditOutlined, RobotOutlined, LineChartOutlined
 } from '@ant-design/icons-vue'
 import api from '../api'
 
@@ -298,7 +302,7 @@ const breadcrumbs = computed(() => {
   } else if (pathParts[0] === 'admin') {
     items.push({ label: t('nav.workspace'), path: '/dashboard' })
     items.push({ label: t('nav.admin') })
-    const adminTabMap = { dashboard: '系统概览', users: t('nav.userManagement'), 'audit-log': t('nav.auditLog'), 'ai-models': t('nav.aiModels') }
+    const adminTabMap = { dashboard: '系统概览', users: t('nav.userManagement'), 'audit-log': t('nav.auditLog'), 'ai-models': t('nav.aiModels'), 'token-usage': t('nav.tokenUsage') }
     if (pathParts.length >= 2) {
       items.push({ label: adminTabMap[pathParts[1]] || pathParts[1] })
     }
@@ -332,6 +336,8 @@ watch(() => route.name, (name) => {
     selectedKeys.value = ['admin-audit-log']
   } else if (name === 'AdminAiModels') {
     selectedKeys.value = ['admin-ai-models']
+  } else if (name === 'AdminTokenUsage') {
+    selectedKeys.value = ['admin-token-usage']
   } else {
     const key = name.replace('Project', '').toLowerCase()
     selectedKeys.value = [key]
@@ -356,6 +362,8 @@ function onMenuClick({ key }) {
     router.push('/admin/audit-log')
   } else if (key === 'admin-ai-models') {
     router.push('/admin/ai-models')
+  } else if (key === 'admin-token-usage') {
+    router.push('/admin/token-usage')
   } else if (currentProjectId.value) {
     router.push(`/project/${currentProjectId.value}/${key}`)
   }

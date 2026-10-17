@@ -49,27 +49,27 @@ describe('en-US locale', () => {
     }
   })
 
-  it('enUS_whenFreshlyImported_shouldHaveExactly156NonEmptyStringLeaves', async () => {
+  it('enUS_whenFreshlyImported_shouldHaveExactly157NonEmptyStringLeaves', async () => {
     const { enUS: freshEn, zhCN: freshZh } = await loadFreshLocales()
 
     const enLeaves = collectLeafValues(freshEn)
     const zhLeaves = collectLeafValues(freshZh)
 
-    expect(enLeaves.length).toBe(156)
-    expect(zhLeaves.length).toBe(156)
+    expect(enLeaves.length).toBe(157)
+    expect(zhLeaves.length).toBe(157)
     for (const value of [...enLeaves, ...zhLeaves]) {
       expect(typeof value).toBe('string')
       expect(value.trim().length).toBeGreaterThan(0)
     }
   })
 
-  it('enUS_whenFreshlyImported_shouldHaveExactly156KeyPathsMatchingZhCN', async () => {
+  it('enUS_whenFreshlyImported_shouldHaveExactly157KeyPathsMatchingZhCN', async () => {
     const { enUS: freshEn, zhCN: freshZh } = await loadFreshLocales()
 
     const enKeys = collectKeyPaths(freshEn).sort()
     const zhKeys = collectKeyPaths(freshZh).sort()
 
-    expect(enKeys.length).toBe(156)
+    expect(enKeys.length).toBe(157)
     expect(enKeys).toEqual(zhKeys)
   })
 

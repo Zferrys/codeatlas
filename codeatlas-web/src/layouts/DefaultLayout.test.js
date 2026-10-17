@@ -17,7 +17,8 @@ const { iconNames } = vi.hoisted(() => ({
     'SafetyOutlined', 'WarningOutlined', 'BulbOutlined', 'SettingOutlined',
     'MenuFoldOutlined', 'MenuUnfoldOutlined', 'BellOutlined', 'SearchOutlined',
     'UserOutlined', 'LogoutOutlined', 'GithubOutlined', 'ProjectOutlined',
-    'FileTextOutlined', 'TeamOutlined', 'AuditOutlined', 'RobotOutlined'
+    'FileTextOutlined', 'TeamOutlined', 'AuditOutlined', 'RobotOutlined',
+    'LineChartOutlined'
   ]
 }))
 vi.mock('@ant-design/icons-vue', () => Object.fromEntries(
@@ -41,6 +42,7 @@ function createTestRouter() {
       { path: '/admin/users', name: 'AdminUsers', component: routeStub },
       { path: '/admin/audit-log', name: 'AdminAuditLog', component: routeStub },
       { path: '/admin/ai-models', name: 'AdminAiModels', component: routeStub },
+      { path: '/admin/token-usage', name: 'AdminTokenUsage', component: routeStub },
       { path: '/admin/:tab', name: 'AdminFallback', component: routeStub },
       { path: '/project', name: 'ProjectRoot', component: routeStub },
       { path: '/project/:id', name: 'ProjectDetail', component: routeStub },
@@ -206,7 +208,7 @@ describe('DefaultLayout.vue', () => {
     expect(groups).toHaveLength(1)
     expect(groups[0].attributes('data-title')).toBe(zhCN.nav.admin)
     expect(groups[0].findAll('.a-menu-item').map(item => item.text())).toEqual([
-      '系统概览', zhCN.nav.userManagement, zhCN.nav.auditLog, zhCN.nav.aiModels
+      '系统概览', zhCN.nav.userManagement, zhCN.nav.auditLog, zhCN.nav.tokenUsage, zhCN.nav.aiModels
     ])
 
     expect(siderMenu(wrapper).props('selectedKeys')).toEqual(['admin-users'])
@@ -313,6 +315,11 @@ describe('DefaultLayout.vue', () => {
     expect(pushSpy).toHaveBeenLastCalledWith('/admin/ai-models')
     await flushPromises()
 
+    now += 1000
+    menu.vm.$emit('click', { key: 'admin-token-usage' })
+    expect(pushSpy).toHaveBeenLastCalledWith('/admin/token-usage')
+    await flushPromises()
+
     // 不在项目上下文中点击项目 tab：不产生导航
     now += 1000
     const callsAfterAdmin = pushSpy.mock.calls.length
@@ -391,7 +398,8 @@ describe('DefaultLayout.vue', () => {
       ['/admin/dashboard', 'admin-dashboard'],
       ['/admin/audit-log', 'admin-audit-log'],
       ['/admin/users', 'admin-users'],
-      ['/admin/ai-models', 'admin-ai-models']
+      ['/admin/ai-models', 'admin-ai-models'],
+      ['/admin/token-usage', 'admin-token-usage']
     ]
     for (const [path, key] of adminTabs) {
       await router.push(path)

@@ -55,27 +55,27 @@ describe('zh-CN locale', () => {
     ])
   })
 
-  it('zhCN_whenFreshlyImported_shouldHaveExactly156NonEmptyStringLeaves', async () => {
+  it('zhCN_whenFreshlyImported_shouldHaveExactly157NonEmptyStringLeaves', async () => {
     const { zhCN: freshZh, enUS: freshEn } = await loadFreshLocales()
 
     const zhLeaves = collectLeafValues(freshZh)
     const enLeaves = collectLeafValues(freshEn)
 
-    expect(zhLeaves.length).toBe(156)
-    expect(enLeaves.length).toBe(156)
+    expect(zhLeaves.length).toBe(157)
+    expect(enLeaves.length).toBe(157)
     for (const value of [...zhLeaves, ...enLeaves]) {
       expect(typeof value).toBe('string')
       expect(value.trim().length).toBeGreaterThan(0)
     }
   })
 
-  it('zhCN_whenFreshlyImported_shouldHaveExactly156KeyPathsMatchingEnUS', async () => {
+  it('zhCN_whenFreshlyImported_shouldHaveExactly157KeyPathsMatchingEnUS', async () => {
     const { zhCN: freshZh, enUS: freshEn } = await loadFreshLocales()
 
     const zhKeys = collectKeyPaths(freshZh).sort()
     const enKeys = collectKeyPaths(freshEn).sort()
 
-    expect(zhKeys.length).toBe(156)
+    expect(zhKeys.length).toBe(157)
     expect(zhKeys).toEqual(enKeys)
   })
 

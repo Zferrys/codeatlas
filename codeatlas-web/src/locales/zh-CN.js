@@ -16,6 +16,7 @@ export default {
     admin: '管理后台',
     userManagement: '用户管理',
     auditLog: '审计日志',
+    tokenUsage: 'Token 流水',
     aiModels: 'AI 模型',
     currentProject: '当前项目',
     overview: '项目概览',
