@@ -136,6 +136,7 @@ public abstract class AbstractInsightAnalysisService {
         long totalCompletionTokens = response.getCompletionTokens();
         long totalTokens = response.getTokensUsed();
         long totalLatency = response.getLatencyMs();
+        String lastModelUsed = resolveModel(response);
         progressRegistry.publish(taskId, "正在做类名防幻觉校验…");
 
         boolean retryAttempted = false;
@@ -164,6 +165,7 @@ public abstract class AbstractInsightAnalysisService {
         }
         if (retryResponse != null) {
             // 重试调用的消耗无论结果是否采纳都必须记账（token 累计进入提交点审计行）
+            lastModelUsed = resolveModel(retryResponse);
             totalPromptTokens += retryResponse.getPromptTokens();
             totalCompletionTokens += retryResponse.getCompletionTokens();
             totalTokens += retryResponse.getTokensUsed();
@@ -190,12 +192,14 @@ public abstract class AbstractInsightAnalysisService {
         if (progressRegistry.isCancelled(taskId)) {
             log.info("{} cancelled after hallucination handling, discarding for projectId={}", logLabel(), projectId);
             // 用户已终止：主调用与重试的 token 均已消耗，需一并记账；审计口径统一为失败
-            saveAudit(projectId, userId, totalPromptTokens, totalCompletionTokens, totalTokens, totalLatency,
+            saveAudit(projectId, userId, lastModelUsed,
+                    totalPromptTokens, totalCompletionTokens, totalTokens, totalLatency,
                     "Cancelled by user", false);
             return null;
         }
         // 提交点：审计行与落库紧邻执行，此后的终止不再改写审计语义
-        saveAudit(projectId, userId, totalPromptTokens, totalCompletionTokens, totalTokens, totalLatency, null, true);
+        saveAudit(projectId, userId, lastModelUsed,
+                totalPromptTokens, totalCompletionTokens, totalTokens, totalLatency, null, true);
         progressRegistry.publish(taskId, "正在保存报告…");
 
         InsightEntity insight = new InsightEntity();
@@ -221,7 +225,7 @@ public abstract class AbstractInsightAnalysisService {
 
     protected void saveAudit(Long projectId, Long userId, AiResponse response,
                              String errorMessage, boolean success) {
-        saveAudit(projectId, userId,
+        saveAudit(projectId, userId, resolveModel(response),
                 response != null ? response.getPromptTokens() : 0,
                 response != null ? response.getCompletionTokens() : 0,
                 response != null ? response.getTokensUsed() : 0,
@@ -229,11 +233,20 @@ public abstract class AbstractInsightAnalysisService {
                 errorMessage, success);
     }
 
-    protected void saveAudit(Long projectId, Long userId,
+    /** 提交点审计：token 为多次调用累计值，model 取最后一次实际应答模型 */
+    protected void saveAudit(Long projectId, Long userId, String model,
                              long promptTokens, long completionTokens, long totalTokens, long latencyMs,
                              String errorMessage, boolean success) {
-        aiAnalysisService.saveAiAuditLog(aiClient.getModelName(), stage(), projectId, userId,
+        aiAnalysisService.saveAiAuditLog(model, stage(), projectId, userId,
                 promptTokens, completionTokens, totalTokens, latencyMs, errorMessage, success);
+    }
+
+    /** 审计模型归属：优先实际应答模型，响应缺失/未标注时回退配置模型 */
+    protected String resolveModel(AiResponse response) {
+        if (response != null && response.getModelUsed() != null && !response.getModelUsed().trim().isEmpty()) {
+            return response.getModelUsed();
+        }
+        return aiClient.getModelName();
     }
 
     protected static class AnalysisContext {

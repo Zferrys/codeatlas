@@ -154,7 +154,7 @@ class AiControllerTest {
         scan.setId(SCAN_ID);
         when(projectService.getProjectEntity(PROJECT_ID)).thenReturn(project);
         when(scanService.getLatestScanEntity(PROJECT_ID)).thenReturn(scan);
-        when(aiAnalysisService.analyzeArchitecture(PROJECT_ID, SCAN_ID, TASK_ID))
+        when(aiAnalysisService.analyzeArchitecture(PROJECT_ID, SCAN_ID, TASK_ID, USER_ID))
                 .thenReturn(insight(21L, "新叙事", new BigDecimal("0.8")));
 
         ApiResponse<Map<String, Object>> response = controller.generateStory(PROJECT_ID, TASK_ID, principal);
@@ -178,7 +178,7 @@ class AiControllerTest {
         assertEquals(400, response.getCode());
         assertEquals("请先触发一次扫描", response.getMessage());
         assertNull(response.getData());
-        verify(aiAnalysisService, never()).analyzeArchitecture(any(), any(), any());
+        verify(aiAnalysisService, never()).analyzeArchitecture(any(), any(), any(), any());
         verify(progressRegistry).complete(TASK_ID);
     }
 
@@ -189,7 +189,7 @@ class AiControllerTest {
         ScanRecord scan = new ScanRecord();
         scan.setId(SCAN_ID);
         when(scanService.getLatestScanEntity(PROJECT_ID)).thenReturn(scan);
-        when(aiAnalysisService.analyzeArchitecture(PROJECT_ID, SCAN_ID, null)).thenReturn(null);
+        when(aiAnalysisService.analyzeArchitecture(PROJECT_ID, SCAN_ID, null, USER_ID)).thenReturn(null);
 
         ApiResponse<Map<String, Object>> response = controller.generateStory(PROJECT_ID, null, principal);
 

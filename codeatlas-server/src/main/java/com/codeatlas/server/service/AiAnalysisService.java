@@ -123,13 +123,18 @@ public class AiAnalysisService {
 
     @Timed(value = "ai.analysis.duration", description = "AI architecture analysis duration")
     public InsightEntity analyzeArchitecture(Long projectId, Long scanId) {
-        return analyzeArchitecture(projectId, scanId, null);
+        return analyzeArchitecture(projectId, scanId, null, null);
+    }
+
+    public InsightEntity analyzeArchitecture(Long projectId, Long scanId, String taskId) {
+        return analyzeArchitecture(projectId, scanId, taskId, null);
     }
 
     /**
      * @param taskId 前端进度任务 ID；非 null 时推送阶段事件并支持断开即取消（取消返回 null 不落库）
+     * @param userId 触发者 ID，写入 AI 审计流水用于归属；系统自动触发时为 null
      */
-    public InsightEntity analyzeArchitecture(Long projectId, Long scanId, String taskId) {
+    public InsightEntity analyzeArchitecture(Long projectId, Long scanId, String taskId, Long userId) {
         if (aiClient == null) {
             log.info("AI analysis skipped: no AI client available for projectId={}", projectId);
             return null;
@@ -150,11 +155,16 @@ public class AiAnalysisService {
         long totalCompletionTokens = 0;
         long totalTokens = 0;
         long totalLatency = 0;
+        // 审计记录实际应答模型（降级时与配置模型不同）；未发生调用时回退到配置模型
+        String lastModelUsed = aiClient.getModelName();
 
         if (classes.size() > MAX_CLASSES_PER_CHUNK) {
             log.info("Large project detected: {} classes > {}, triggering chunked analysis for projectId={}",
                     classes.size(), MAX_CLASSES_PER_CHUNK, projectId);
             ChunkedResult chunked = analyzeWithChunking(project, scan, classes, taskId);
+            if (chunked.modelUsed != null) {
+                lastModelUsed = chunked.modelUsed;
+            }
             if (chunked.content == null || chunked.content.trim().isEmpty()) {
                 String reason = chunked.failureReason != null ? chunked.failureReason
                         : "Chunked analysis produced no content";
@@ -163,7 +173,7 @@ public class AiAnalysisService {
                 boolean zeroCostCancel = "Cancelled by user".equals(reason) && chunked.totalTokens == 0;
                 if (!zeroCostCancel) {
                     // 分片路径失败/被终止：已消耗 token 仍需记账
-                    self.saveAiAuditLog(aiClient.getModelName(), "ARCHITECTURE_STORY", projectId, null,
+                    self.saveAiAuditLog(lastModelUsed, "ARCHITECTURE_STORY", projectId, userId,
                             chunked.promptTokens, chunked.completionTokens,
                             chunked.totalTokens, chunked.latencyMs, reason, false);
                 }
@@ -172,7 +182,7 @@ public class AiAnalysisService {
             if (progressRegistry.isCancelled(taskId)) {
                 log.info("Architecture story cancelled after chunked AI call, discarding for projectId={}", projectId);
                 // 用户已终止：token 已消耗仍需记账，结果丢弃；审计口径统一为失败
-                self.saveAiAuditLog(aiClient.getModelName(), "ARCHITECTURE_STORY", projectId, null,
+                self.saveAiAuditLog(lastModelUsed, "ARCHITECTURE_STORY", projectId, userId,
                         chunked.promptTokens, chunked.completionTokens,
                         chunked.totalTokens, chunked.latencyMs, "Cancelled by user", false);
                 return null;
@@ -199,7 +209,7 @@ public class AiAnalysisService {
             int estimatedTokens = prompt.length() * 2 / 3 + 4096;
             if (!tokenBudgetManager.tryConsume(estimatedTokens)) {
                 log.warn("AI token monthly budget exceeded, rejecting analysis for projectId={}", projectId);
-                self.saveAiAuditLog(aiClient.getModelName(), "ARCHITECTURE_STORY", projectId, null,
+                self.saveAiAuditLog(lastModelUsed, "ARCHITECTURE_STORY", projectId, userId,
                         0, 0, 0, 0, "Monthly token budget exceeded", false);
                 return null;
             }
@@ -213,10 +223,11 @@ public class AiAnalysisService {
             progressRegistry.publish(taskId, "AI 正在生成架构解读（通常需要 1–3 分钟）…");
 
             AiResponse response = self.callAiWithResilience(request);
+            lastModelUsed = resolveModel(response);
             if (response == null || response.getContent() == null || response.getContent().trim().isEmpty()) {
                 log.warn("AI analysis failed after retries for projectId={}, scanId={}", projectId, scanId);
                 // 空正文响应也带 response：已消耗 token 仍需记账
-                self.saveAiAuditLog(aiClient.getModelName(), "ARCHITECTURE_STORY", projectId, null,
+                self.saveAiAuditLog(lastModelUsed, "ARCHITECTURE_STORY", projectId, userId,
                         response != null ? response.getPromptTokens() : 0,
                         response != null ? response.getCompletionTokens() : 0,
                         response != null ? response.getTokensUsed() : 0,
@@ -229,7 +240,7 @@ public class AiAnalysisService {
             if (progressRegistry.isCancelled(taskId)) {
                 log.info("Architecture story cancelled after AI call, discarding for projectId={}", projectId);
                 // 用户已终止：token 已消耗仍需记账，结果丢弃；审计口径统一为失败
-                self.saveAiAuditLog(aiClient.getModelName(), "ARCHITECTURE_STORY", projectId, null,
+                self.saveAiAuditLog(lastModelUsed, "ARCHITECTURE_STORY", projectId, userId,
                         response.getPromptTokens(), response.getCompletionTokens(),
                         response.getTokensUsed(), response.getLatencyMs(), "Cancelled by user", false);
                 return null;
@@ -269,6 +280,7 @@ public class AiAnalysisService {
         }
         if (retryResponse != null) {
             // 重试调用的消耗无论结果是否采纳都必须记账（token 累计进入提交点审计行）
+            lastModelUsed = resolveModel(retryResponse);
             totalPromptTokens += retryResponse.getPromptTokens();
             totalCompletionTokens += retryResponse.getCompletionTokens();
             totalTokens += retryResponse.getTokensUsed();
@@ -447,6 +459,7 @@ public class AiAnalysisService {
         int completionTokens = 0;
         int totalTokens = 0;
         long totalLatency = 0;
+        String lastModelUsed = null;
         for (Map.Entry<String, List<ClassSummaryEntity>> entry : groups.entrySet()) {
             if (chunkResults.size() >= MAX_CHUNK_CONCURRENCY * 3) {
                 log.warn("Too many chunks, stopping at {} for projectId={}", chunkResults.size(), project.getId());
@@ -455,7 +468,7 @@ public class AiAnalysisService {
             if (progressRegistry.isCancelled(taskId)) {
                 log.info("Chunked story cancelled mid-way for projectId={}", project.getId());
                 return ChunkedResult.failed(promptTokens, completionTokens, totalTokens, totalLatency,
-                        "Cancelled by user");
+                        "Cancelled by user", lastModelUsed);
             }
             chunkIndex++;
             progressRegistry.publish(taskId, "项目较大，正在分片分析：第 " + chunkIndex + " 批（" + entry.getKey() + "）…");
@@ -476,7 +489,7 @@ public class AiAnalysisService {
                 log.warn("AI token monthly budget exceeded during chunking for projectId={}", project.getId());
                 if (chunkResults.isEmpty()) {
                     return ChunkedResult.failed(promptTokens, completionTokens, totalTokens, totalLatency,
-                            "Monthly token budget exceeded");
+                            "Monthly token budget exceeded", lastModelUsed);
                 }
                 break;
             }
@@ -490,6 +503,7 @@ public class AiAnalysisService {
 
             AiResponse resp = self.callAiWithResilience(req);
             if (resp != null) {
+                lastModelUsed = resolveModel(resp);
                 promptTokens += resp.getPromptTokens();
                 completionTokens += resp.getCompletionTokens();
                 totalTokens += resp.getTokensUsed();
@@ -506,7 +520,7 @@ public class AiAnalysisService {
 
         if (chunkResults.isEmpty()) {
             return ChunkedResult.failed(promptTokens, completionTokens, totalTokens, totalLatency,
-                    "Chunked analysis produced no content");
+                    "Chunked analysis produced no content", lastModelUsed);
         }
 
         StringBuilder combinedChunks = new StringBuilder();
@@ -522,14 +536,14 @@ public class AiAnalysisService {
         if (progressRegistry.isCancelled(taskId)) {
             log.info("Chunked story cancelled before summary for projectId={}", project.getId());
             return ChunkedResult.failed(promptTokens, completionTokens, totalTokens, totalLatency,
-                    "Cancelled by user");
+                    "Cancelled by user", lastModelUsed);
         }
         int summaryEstimate = summaryPrompt.length() * 2 / 3 + 4096;
         if (!tokenBudgetManager.tryConsume(summaryEstimate)) {
             log.warn("AI token monthly budget exceeded before chunk summary, using raw merged chunks for projectId={}",
                     project.getId());
             return ChunkedResult.success(combinedChunks.toString(), promptTokens, completionTokens,
-                    totalTokens, totalLatency);
+                    totalTokens, totalLatency, lastModelUsed);
         }
         progressRegistry.publish(taskId, "正在合并 " + chunkResults.size() + " 个分片为完整报告…");
 
@@ -540,6 +554,7 @@ public class AiAnalysisService {
 
         AiResponse summaryResp = self.callAiWithResilience(summaryReq);
         if (summaryResp != null) {
+            lastModelUsed = resolveModel(summaryResp);
             promptTokens += summaryResp.getPromptTokens();
             completionTokens += summaryResp.getCompletionTokens();
             totalTokens += summaryResp.getTokensUsed();
@@ -547,7 +562,7 @@ public class AiAnalysisService {
             if (summaryResp.getContent() != null && !summaryResp.getContent().trim().isEmpty()) {
                 log.info("Chunking summary completed: groups={}, tokens={}", chunkResults.size(), summaryResp.getTokensUsed());
                 return ChunkedResult.success(summaryResp.getContent(), promptTokens, completionTokens,
-                        totalTokens, totalLatency);
+                        totalTokens, totalLatency, lastModelUsed);
             }
             // 汇总空正文与调用失败同判：降级回原始拼接，用户仍有可用报告
             log.warn("Chunking summary returned empty content, returning raw merged chunks");
@@ -555,10 +570,10 @@ public class AiAnalysisService {
             log.warn("Chunking summary failed, returning raw merged chunks");
         }
         return ChunkedResult.success(combinedChunks.toString(), promptTokens, completionTokens,
-                totalTokens, totalLatency);
+                totalTokens, totalLatency, lastModelUsed);
     }
 
-    /** 分片分析结果：内容 + 已消耗 token 记账 + 失败原因（失败/被终止时 content 为 null） */
+    /** 分片分析结果：内容 + 已消耗 token 记账 + 失败原因（失败/被终止时 content 为 null）+ 实际应答模型 */
     private static final class ChunkedResult {
         final String content;
         final int promptTokens;
@@ -566,26 +581,37 @@ public class AiAnalysisService {
         final int totalTokens;
         final long latencyMs;
         final String failureReason;
+        final String modelUsed;
 
         private ChunkedResult(String content, int promptTokens, int completionTokens, int totalTokens,
-                              long latencyMs, String failureReason) {
+                              long latencyMs, String failureReason, String modelUsed) {
             this.content = content;
             this.promptTokens = promptTokens;
             this.completionTokens = completionTokens;
             this.totalTokens = totalTokens;
             this.latencyMs = latencyMs;
             this.failureReason = failureReason;
+            this.modelUsed = modelUsed;
         }
 
         static ChunkedResult success(String content, int promptTokens, int completionTokens,
-                                     int totalTokens, long latencyMs) {
-            return new ChunkedResult(content, promptTokens, completionTokens, totalTokens, latencyMs, null);
+                                     int totalTokens, long latencyMs, String modelUsed) {
+            return new ChunkedResult(content, promptTokens, completionTokens, totalTokens, latencyMs, null, modelUsed);
         }
 
         static ChunkedResult failed(int promptTokens, int completionTokens, int totalTokens,
-                                    long latencyMs, String failureReason) {
-            return new ChunkedResult(null, promptTokens, completionTokens, totalTokens, latencyMs, failureReason);
+                                    long latencyMs, String failureReason, String modelUsed) {
+            return new ChunkedResult(null, promptTokens, completionTokens, totalTokens, latencyMs, failureReason,
+                    modelUsed);
         }
+    }
+
+    /** 审计模型归属：优先实际应答模型，响应缺失/未标注时回退配置模型 */
+    private String resolveModel(AiResponse response) {
+        if (response != null && response.getModelUsed() != null && !response.getModelUsed().trim().isEmpty()) {
+            return response.getModelUsed();
+        }
+        return aiClient.getModelName();
     }
 
     private String buildMetadataSimple(Project project, ScanRecord scan, List<ClassSummaryEntity> classes,

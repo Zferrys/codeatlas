@@ -113,6 +113,8 @@ public class AgenticSearchService {
         boolean success = false;
         List<String> toolsCalled = new ArrayList<>();
         List<String> evidence = new ArrayList<>();
+        // 审计记录实际应答模型（降级时与配置模型不同）；未发生调用时回退到配置模型
+        String lastModelUsed = aiClient.getModelName();
 
         long startTime = System.currentTimeMillis();
 
@@ -121,7 +123,7 @@ public class AgenticSearchService {
 
             if (progressRegistry.isCancelled(taskId)) {
                 return finishCancelled(result, projectId, userId, startTime, iterations,
-                        toolsCalled, totalPromptTokens, totalCompletionTokens, totalTokenUsed);
+                        toolsCalled, totalPromptTokens, totalCompletionTokens, totalTokenUsed, lastModelUsed);
             }
             progressRegistry.publish(taskId, "第 " + iterations + " 轮：AI 正在分析并选择检索动作…");
 
@@ -137,7 +139,7 @@ public class AgenticSearchService {
                 // 异常细节只进日志不回传前端；配额已扣，失败路径也必须落审计
                 result.put("answer", "AI 调用失败，请稍后重试。");
                 result.put("iterations", iterations);
-                saveAuditLog(aiClient.getModelName(), projectId, userId,
+                saveAuditLog(lastModelUsed, projectId, userId,
                         totalPromptTokens, totalCompletionTokens, totalTokenUsed,
                         System.currentTimeMillis() - startTime, iterations, toolsCalled,
                         "AI call failed at iteration " + iterations, false);
@@ -148,13 +150,14 @@ public class AgenticSearchService {
                 // 配额已扣，失败路径也必须落审计
                 result.put("answer", "AI 服务暂不可用（所有模型已熔断），请稍后重试。");
                 result.put("iterations", iterations);
-                saveAuditLog(aiClient.getModelName(), projectId, userId,
+                saveAuditLog(lastModelUsed, projectId, userId,
                         totalPromptTokens, totalCompletionTokens, totalTokenUsed,
                         System.currentTimeMillis() - startTime, iterations, toolsCalled,
                         "All AI models exhausted or unavailable", false);
                 return result;
             }
 
+            lastModelUsed = resolveModel(response);
             totalTokenUsed += response.getTokensUsed();
             totalPromptTokens += response.getPromptTokens();
             totalCompletionTokens += response.getCompletionTokens();
@@ -193,7 +196,7 @@ public class AgenticSearchService {
         if (!success) {
             if (progressRegistry.isCancelled(taskId)) {
                 return finishCancelled(result, projectId, userId, startTime, iterations,
-                        toolsCalled, totalPromptTokens, totalCompletionTokens, totalTokenUsed);
+                        toolsCalled, totalPromptTokens, totalCompletionTokens, totalTokenUsed, lastModelUsed);
             }
             // 工具轮次用尽模型仍在请求工具：去掉工具再追加一轮强制总结，保证用户拿到答案
             progressRegistry.publish(taskId, "已达检索轮次上限，正在汇总已获取的信息…");
@@ -206,6 +209,7 @@ public class AgenticSearchService {
             try {
                 AiResponse finalResponse = aiClient.chat(finalRequest);
                 if (finalResponse != null) {
+                    lastModelUsed = resolveModel(finalResponse);
                     totalTokenUsed += finalResponse.getTokensUsed();
                     totalPromptTokens += finalResponse.getPromptTokens();
                     totalCompletionTokens += finalResponse.getCompletionTokens();
@@ -226,7 +230,7 @@ public class AgenticSearchService {
 
         if (success && progressRegistry.isCancelled(taskId)) {
             return finishCancelled(result, projectId, userId, startTime, iterations,
-                    toolsCalled, totalPromptTokens, totalCompletionTokens, totalTokenUsed);
+                    toolsCalled, totalPromptTokens, totalCompletionTokens, totalTokenUsed, lastModelUsed);
         }
 
         // 输出侧多源交叉验证 + 自动修正轮
@@ -290,7 +294,7 @@ public class AgenticSearchService {
         if (success && progressRegistry.isCancelled(taskId)) {
             // 证据校验/修正期间被终止：回答丢弃，全部已消耗 token（含修正轮）记账
             return finishCancelled(result, projectId, userId, startTime, iterations,
-                    toolsCalled, totalPromptTokens, totalCompletionTokens, totalTokenUsed);
+                    toolsCalled, totalPromptTokens, totalCompletionTokens, totalTokenUsed, lastModelUsed);
         }
 
         result.put("iterations", iterations);
@@ -304,7 +308,7 @@ public class AgenticSearchService {
 
         // audit log
         long elapsed = System.currentTimeMillis() - startTime;
-        saveAuditLog(aiClient.getModelName(), projectId, userId,
+        saveAuditLog(lastModelUsed, projectId, userId,
                 totalPromptTokens, totalCompletionTokens, totalTokenUsed, elapsed,
                 iterations, toolsCalled,
                 success ? null : "Truncated after " + iterations + " iterations, tools="
@@ -320,15 +324,24 @@ public class AgenticSearchService {
     /** 用户取消后的统一收尾：丢弃回答、落失败审计（已消耗 token 仍需记账），不落历史 */
     private Map<String, Object> finishCancelled(Map<String, Object> result, Long projectId, Long userId,
                                                 long startTime, int iterations, List<String> toolsCalled,
-                                                int totalPromptTokens, int totalCompletionTokens, int totalTokenUsed) {
+                                                int totalPromptTokens, int totalCompletionTokens, int totalTokenUsed,
+                                                String modelUsed) {
         result.put("answer", "本次回答已被用户终止");
         result.put("cancelled", true);
         result.put("iterations", iterations);
-        saveAuditLog(aiClient.getModelName(), projectId, userId,
+        saveAuditLog(modelUsed, projectId, userId,
                 totalPromptTokens, totalCompletionTokens, totalTokenUsed,
                 System.currentTimeMillis() - startTime, iterations, toolsCalled,
                 "Cancelled by user", false);
         return result;
+    }
+
+    /** 审计模型归属：优先实际应答模型，响应缺失/未标注时回退配置模型 */
+    private String resolveModel(AiResponse response) {
+        if (response != null && response.getModelUsed() != null && !response.getModelUsed().trim().isEmpty()) {
+            return response.getModelUsed();
+        }
+        return aiClient.getModelName();
     }
 
     private void recordChatHistory(Long projectId, Long userId, String question, Map<String, Object> result) {

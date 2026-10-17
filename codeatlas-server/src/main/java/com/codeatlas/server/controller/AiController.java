@@ -99,7 +99,8 @@ public class AiController {
             if (scan == null) {
                 return ApiResponse.error(400, "请先触发一次扫描");
             }
-            InsightEntity insight = aiAnalysisService.analyzeArchitecture(projectId, scan.getId(), taskId);
+            InsightEntity insight = aiAnalysisService.analyzeArchitecture(projectId, scan.getId(), taskId,
+                    principal.getUserId());
             if (insight == null) {
                 return ApiResponse.error(500, "AI 分析失败：模型未返回有效内容或服务暂不可用，请稍后重试");
             }

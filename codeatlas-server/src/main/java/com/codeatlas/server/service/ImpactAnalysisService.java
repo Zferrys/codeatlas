@@ -258,6 +258,7 @@ public class ImpactAnalysisService {
             }
 
             String answer = response.getContent();
+            String lastModelUsed = resolveModel(response);
             long totalPromptTokens = response.getPromptTokens();
             long totalCompletionTokens = response.getCompletionTokens();
             long totalTokens = response.getTokensUsed();
@@ -276,6 +277,7 @@ public class ImpactAnalysisService {
                         AiResponse correctionResponse = runContextCorrection(prompt, answer, report);
                         if (correctionResponse != null) {
                             // 修正轮消耗无论结果是否采纳都必须记账（累计进入提交点审计行）
+                            lastModelUsed = resolveModel(correctionResponse);
                             totalPromptTokens += correctionResponse.getPromptTokens();
                             totalCompletionTokens += correctionResponse.getCompletionTokens();
                             totalTokens += correctionResponse.getTokensUsed();
@@ -303,14 +305,16 @@ public class ImpactAnalysisService {
             }
             if (progressRegistry.isCancelled(taskId)) {
                 // 用户已终止（含证据校验/修正期间）：主调用与修正轮 token 一并记账；审计口径统一为失败
-                saveAudit("CONTEXT_QA", projectId, userId, totalPromptTokens, totalCompletionTokens,
+                saveAudit("CONTEXT_QA", projectId, userId, lastModelUsed,
+                        totalPromptTokens, totalCompletionTokens,
                         totalTokens, totalLatency, "Cancelled by user", false);
                 result.put("answer", "本次回答已被用户终止");
                 result.put("cancelled", true);
                 return result;
             }
             // 提交点：审计行与返回紧邻执行，此后的终止不再影响交付
-            saveAudit("CONTEXT_QA", projectId, userId, totalPromptTokens, totalCompletionTokens,
+            saveAudit("CONTEXT_QA", projectId, userId, lastModelUsed,
+                    totalPromptTokens, totalCompletionTokens,
                     totalTokens, totalLatency, null, true);
             result.put("answer", answer);
             recordChatHistory(projectId, userId, ChatHistoryService.SCOPE_CLASS, sanitizedClassFqn,
@@ -456,7 +460,7 @@ public class ImpactAnalysisService {
 
     private void saveAudit(String stage, Long projectId, Long userId,
                            AiResponse response, String errorMessage, boolean success) {
-        saveAudit(stage, projectId, userId,
+        saveAudit(stage, projectId, userId, resolveModel(response),
                 response != null ? response.getPromptTokens() : 0,
                 response != null ? response.getCompletionTokens() : 0,
                 response != null ? response.getTokensUsed() : 0,
@@ -464,11 +468,20 @@ public class ImpactAnalysisService {
                 errorMessage, success);
     }
 
-    private void saveAudit(String stage, Long projectId, Long userId,
+    /** 提交点审计：token 为多次调用累计值，model 取最后一次实际应答模型 */
+    private void saveAudit(String stage, Long projectId, Long userId, String model,
                            long promptTokens, long completionTokens, long totalTokens, long latencyMs,
                            String errorMessage, boolean success) {
-        aiAnalysisService.saveAiAuditLog(aiClient.getModelName(), stage, projectId, userId,
+        aiAnalysisService.saveAiAuditLog(model, stage, projectId, userId,
                 promptTokens, completionTokens, totalTokens, latencyMs, errorMessage, success);
+    }
+
+    /** 审计模型归属：优先实际应答模型，响应缺失/未标注时回退配置模型 */
+    private String resolveModel(AiResponse response) {
+        if (response != null && response.getModelUsed() != null && !response.getModelUsed().trim().isEmpty()) {
+            return response.getModelUsed();
+        }
+        return aiClient.getModelName();
     }
 
     private void recordChatHistory(Long projectId, Long userId, String scope, String contextFqn,
